@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
+ * Copyright 2011-2019 Dominik Charousset                                     *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
  * (at your option) under the terms and conditions of the Boost Software      *
@@ -18,39 +18,36 @@
 
 #pragma once
 
+#include <cstdint>
 #include <type_traits>
+#include <typeinfo>
+#include <utility>
 
-#include "caf/fwd.hpp"
-#include "caf/logger.hpp"
-#include "caf/ref_counted.hpp"
-#include "caf/infer_handle.hpp"
-#include "caf/intrusive_ptr.hpp"
-#include "caf/actor_storage.hpp"
-#include "caf/actor_control_block.hpp"
+#include "caf/type_nr.hpp"
 
 namespace caf {
 
-template <class T, class R = infer_handle_from_class_t<T>, class... Ts>
-R make_actor(actor_id aid, node_id nid, actor_system* sys, Ts&&... xs) {
-#if CAF_LOG_LEVEL >= CAF_LOG_LEVEL_DEBUG
-  actor_storage<T>* ptr = nullptr;
-  if (logger::current_logger()->accepts(CAF_LOG_LEVEL_DEBUG,
-                                        caf::atom(CAF_LOG_FLOW_COMPONENT))) {
-    std::string args;
-    args = deep_to_string(std::forward_as_tuple(xs...));
-    ptr = new actor_storage<T>(aid, std::move(nid), sys,
-                               std::forward<Ts>(xs)...);
-    CAF_LOG_SPAWN_EVENT(ptr->data, args);
-  } else {
-    ptr = new actor_storage<T>(aid, std::move(nid), sys,
-                               std::forward<Ts>(xs)...);
-  }
-#else
-  auto ptr = new actor_storage<T>(aid, std::move(nid), sys,
-                                  std::forward<Ts>(xs)...);
-#endif
-  return {&(ptr->ctrl), false};
+/// Bundles the type number with its C++ `type_info` object. The type number is
+/// non-zero for builtin types and the pointer to the `type_info` object is
+/// non-null for custom types.
+using rtti_pair = std::pair<uint16_t, const std::type_info*>;
+
+/// @relates rtti_pair
+template <class T>
+typename std::enable_if<type_nr<T>::value == 0, rtti_pair>::type
+make_rtti_pair() {
+  return {0, &typeid(T)};
 }
 
-} // namespace caf
+/// @relates rtti_pair
+template <class T>
+typename std::enable_if<type_nr<T>::value != 0, rtti_pair>::type
+make_rtti_pair() {
+  auto n = type_nr<T>::value;
+  return {n, nullptr};
+}
 
+/// @relates rtti_pair
+std::string to_string(rtti_pair x);
+
+} // namespace caf

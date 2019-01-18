@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
+ * Copyright 2011-2019 Dominik Charousset                                     *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
  * (at your option) under the terms and conditions of the Boost Software      *
@@ -16,60 +16,17 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#include "caf/pec.hpp"
-
-#include "caf/config_value.hpp"
-#include "caf/error.hpp"
-#include "caf/make_message.hpp"
-
-namespace {
-
-constexpr const char* tbl[] = {
-  "success",
-  "trailing_character",
-  "unexpected_eof",
-  "unexpected_character",
-  "negative_duration",
-  "duration_overflow",
-  "too_many_characters",
-  "illegal_escape_sequence",
-  "unexpected_newline",
-  "integer_overflow",
-  "integer_underflow",
-  "exponent_underflow",
-  "exponent_overflow",
-  "type_mismatch",
-  "not_an_option",
-  "illegal_argument",
-  "missing_argument",
-  "illegal_category",
-};
-
-} // namespace <anonymous>
+#include "caf/rtti_pair.hpp"
 
 namespace caf {
 
-error make_error(pec code) {
-  return {static_cast<uint8_t>(code), atom("parser")};
-}
-
-error make_error(pec code, size_t line, size_t column) {
-  config_value::dictionary context;
-  context["line"] = line;
-  context["column"] = column;
-  return {static_cast<uint8_t>(code), atom("parser"),
-          make_message(std::move(context))};
-}
-
-error make_error(pec code, std::string argument) {
-  config_value::dictionary context;
-  context["argument"] = std::move(argument);
-  return {static_cast<uint8_t>(code), atom("parser"),
-          make_message(std::move(context))};
-}
-
-const char* to_string(pec x) {
-  return tbl[static_cast<uint8_t>(x)];
+std::string to_string(rtti_pair x) {
+  std::string result = "(";
+  result += std::to_string(x.first);
+  result += ", ";
+  result += x.second != nullptr ? x.second->name() : "<null>";
+  result += ")";
+  return result;
 }
 
 } // namespace caf

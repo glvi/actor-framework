@@ -26,6 +26,7 @@
 #include "caf/test/dsl.hpp"
 
 #include "caf/config_option_set.hpp"
+#include "caf/settings.hpp"
 
 using std::string;
 using std::vector;
@@ -75,7 +76,7 @@ CAF_TEST(parse with ref syncing) {
     .add<string>(bar_s, "bar", "s,s", "")
     .add<vector<string>>(bar_l, "bar", "l,l", "")
     .add<dictionary<string>>(bar_d, "bar", "d,d", "");
-  dictionary<config_value::dictionary> cfg;
+  settings cfg;
   vector<string> args{"-i42",
                       "-f",
                       "1e12",
@@ -100,29 +101,29 @@ CAF_TEST(parse with ref syncing) {
   CAF_CHECK_EQUAL(get<int>(cfg, "foo.i"), 42);
 }
 
-CAF_TEST(implicit global) {
+CAF_TEST(drop global) {
   opts.add<int>("value", "some value").add<bool>("help", "print help text");
   CAF_MESSAGE("test long option with argument");
-  dictionary<config_value::dictionary> cfg;
+  settings cfg;
   auto res = opts.parse(cfg, {"--value=42"});
   CAF_CHECK_EQUAL(res.first, pec::success);
-  CAF_CHECK_EQUAL(get_if<int>(&cfg, "global.value"), 42);
+  CAF_CHECK_EQUAL(get_if<int>(&cfg, "value"), 42);
   CAF_MESSAGE("test long option flag");
   cfg.clear();
   res = opts.parse(cfg, {"--help"});
   CAF_CHECK_EQUAL(res.first, pec::success);
-  CAF_CHECK_EQUAL(get_or(cfg, "global.help", false), true);
+  CAF_CHECK_EQUAL(get_or(cfg, "help", false), true);
 }
 
 CAF_TEST(atom parameters) {
   opts.add<atom_value>("value,v", "some value");
   CAF_MESSAGE("test atom option without quotes");
   auto parse_args = [&](std::vector<std::string> args) -> expected<atom_value> {
-    dictionary<config_value::dictionary> cfg;
+    settings cfg;
     auto res = opts.parse(cfg, std::move(args));
     if (res.first != pec::success)
       return res.first;
-    auto atm = get_if<atom_value>(&cfg, "global.value");
+    auto atm = get_if<atom_value>(&cfg, "value");
     if (atm == none)
       return sec::invalid_argument;
     return *atm;
