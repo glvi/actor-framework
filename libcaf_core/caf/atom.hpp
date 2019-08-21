@@ -40,7 +40,11 @@ std::string to_string(const atom_value& what);
 /// @relates atom_value
 atom_value to_lowercase(atom_value x);
 
+/// @relates atom_value
 atom_value atom_from_string(string_view x);
+
+/// @relates atom_value
+int compare(atom_value x, atom_value y);
 
 /// Creates an atom from given string literal.
 template <size_t Size>
@@ -116,6 +120,9 @@ using get_atom = atom_constant<atom("get")>;
 /// Used for request operations.
 using put_atom = atom_constant<atom("put")>;
 
+/// Used for signalizing resolved paths.
+using resolve_atom = atom_constant<atom("resolve")>;
+
 /// Used for signalizing updates, e.g., in a key-value store.
 using update_atom = atom_constant<atom("update")>;
 
@@ -148,6 +155,12 @@ using link_atom = atom_constant<atom("link")>;
 
 /// Used for removing networked links.
 using unlink_atom = atom_constant<atom("unlink")>;
+
+/// Used for monitor requests over network.
+using monitor_atom = atom_constant<atom("monitor")>;
+
+/// Used for removing networked monitors.
+using demonitor_atom = atom_constant<atom("demonitor")>;
 
 /// Used for publishing actors at a given port.
 using publish_atom = atom_constant<atom("publish")>;
@@ -210,4 +223,3 @@ struct hash<caf::atom_value> {
 };
 
 } // namespace std
-

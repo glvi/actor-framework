@@ -24,6 +24,7 @@
 #include <sstream>
 
 #include "caf/config.hpp"
+#include "caf/config_option.hpp"
 #include "caf/config_option_adder.hpp"
 #include "caf/defaults.hpp"
 #include "caf/detail/gcd.hpp"
@@ -33,6 +34,12 @@
 #include "caf/message_builder.hpp"
 
 namespace caf {
+
+namespace {
+
+constexpr const char* default_config_file = "caf-application.ini";
+
+} // namespace anonymous
 
 actor_system_config::~actor_system_config() {
   // nop
@@ -44,7 +51,7 @@ actor_system_config::~actor_system_config() {
 actor_system_config::actor_system_config()
     : cli_helptext_printed(false),
       slave_mode(false),
-      config_file_path("caf-application.ini"),
+      config_file_path(default_config_file),
       slave_mode_fun(nullptr) {
   // add `vector<T>` and `stream<T>` for each statically known type
   add_message_type_impl<stream<actor>>("stream<@actor>");
@@ -67,7 +74,8 @@ actor_system_config::actor_system_config()
   opt_group{custom_options_, "global"}
     .add<bool>("help,h?", "print help text to STDERR and exit")
     .add<bool>("long-help", "print long help text to STDERR and exit")
-    .add<bool>("dump-config", "print configuration to STDERR and exit");
+    .add<bool>("dump-config", "print configuration to STDERR and exit")
+    .add<string>(config_file_path, "config-file", "set config file (default: caf-application.ini)");
   opt_group{custom_options_, "stream"}
     .add<timespan>(stream_desired_batch_complexity, "desired-batch-complexity",
                    "processing time per batch")
@@ -109,7 +117,9 @@ actor_system_config::actor_system_config()
   opt_group{custom_options_, "middleman"}
     .add<atom_value>("network-backend",
                      "either 'default' or 'asio' (if available)")
-    .add<string>("app-identifier", "application identifier of this node")
+    .add<std::vector<string>>("app-identifiers",
+                              "valid application identifiers of this node")
+    .add<string>("app-identifier", "DEPRECATED: use app-identifiers instead")
     .add<bool>("enable-automatic-connections",
                "enables automatic connection management")
     .add<size_t>("max-consecutive-reads",
@@ -119,25 +129,90 @@ actor_system_config::actor_system_config()
                "schedule utility actors instead of dedicating threads")
     .add<bool>("manual-multiplexing",
                "disables background activity of the multiplexer")
-    .add<size_t>("cached-udp-buffers",
-                 "maximum for cached UDP send buffers (default: 10)")
-    .add<size_t>("max-pending-messages",
-                 "maximum for reordering of UDP receive buffers (default: 10)")
-    .add<bool>("disable-tcp", "disables communication via TCP")
-    .add<bool>("enable-udp", "enable communication via UDP");
+    .add<size_t>("workers", "number of deserialization workers");
   opt_group(custom_options_, "opencl")
     .add<std::vector<size_t>>("device-ids", "whitelist for OpenCL devices");
   opt_group(custom_options_, "openssl")
-    .add<string>("certificate", "path to the PEM-formatted certificate file")
-    .add<string>("key", "path to the private key file for this node")
-    .add<string>("passphrase", "passphrase to decrypt the private key")
-    .add<string>("capath",
+    .add<string>(openssl_certificate, "certificate",
+                 "path to the PEM-formatted certificate file")
+    .add<string>(openssl_key, "key",
+                 "path to the private key file for this node")
+    .add<string>(openssl_passphrase, "passphrase",
+                 "passphrase to decrypt the private key")
+    .add<string>(openssl_capath, "capath",
                  "path to an OpenSSL-style directory of trusted certificates")
-    .add<string>("cafile",
+    .add<string>(openssl_cafile, "cafile",
                  "path to a file of concatenated PEM-formatted certificates");
   // add renderers for default error categories
   error_renderers.emplace(atom("system"), render_sec);
   error_renderers.emplace(atom("exit"), render_exit_reason);
+}
+
+settings actor_system_config::dump_content() const {
+  settings result = content;
+  // -- streaming parameters
+  auto& stream_group = result["stream"].as_dictionary();
+  put_missing(stream_group, "desired-batch-complexity",
+              defaults::stream::desired_batch_complexity);
+  put_missing(stream_group, "max-batch-delay",
+              defaults::stream::max_batch_delay);
+  put_missing(stream_group, "credit-round-interval",
+              defaults::stream::credit_round_interval);
+  // -- scheduler parameters
+  auto& scheduler_group = result["scheduler"].as_dictionary();
+  put_missing(scheduler_group, "policy", defaults::scheduler::policy);
+  put_missing(scheduler_group, "max-threads", defaults::scheduler::max_threads);
+  put_missing(scheduler_group, "max-throughput",
+              defaults::scheduler::max_throughput);
+  put_missing(scheduler_group, "enable-profiling", false);
+  put_missing(scheduler_group, "profiling-resolution",
+              defaults::scheduler::profiling_resolution);
+  put_missing(scheduler_group, "profiling-output-file", std::string{});
+  // -- work-stealing parameters
+  auto& work_stealing_group = result["work-stealing"].as_dictionary();
+  put_missing(work_stealing_group, "aggressive-poll-attempts",
+              defaults::work_stealing::aggressive_poll_attempts);
+  put_missing(work_stealing_group, "aggressive-steal-interval",
+              defaults::work_stealing::aggressive_steal_interval);
+  put_missing(work_stealing_group, "moderate-poll-attempts",
+              defaults::work_stealing::moderate_poll_attempts);
+  put_missing(work_stealing_group, "moderate-steal-interval",
+              defaults::work_stealing::moderate_steal_interval);
+  put_missing(work_stealing_group, "moderate-sleep-duration",
+              defaults::work_stealing::moderate_sleep_duration);
+  put_missing(work_stealing_group, "relaxed-steal-interval",
+              defaults::work_stealing::relaxed_steal_interval);
+  put_missing(work_stealing_group, "relaxed-sleep-duration",
+              defaults::work_stealing::relaxed_sleep_duration);
+  // -- logger parameters
+  auto& logger_group = result["logger"].as_dictionary();
+  put_missing(logger_group, "file-name", defaults::logger::file_name);
+  put_missing(logger_group, "file-format", defaults::logger::file_format);
+  put_missing(logger_group, "file-verbosity", defaults::logger::file_verbosity);
+  put_missing(logger_group, "console", defaults::logger::console);
+  put_missing(logger_group, "console-format", defaults::logger::console_format);
+  put_missing(logger_group, "console-verbosity",
+              defaults::logger::console_verbosity);
+  put_missing(logger_group, "component-blacklist", std::vector<atom_value>{});
+  put_missing(logger_group, "inline-output", false);
+  // -- middleman parameters
+  auto& middleman_group = result["middleman"].as_dictionary();
+  put_missing(middleman_group, "app-identifiers",
+              defaults::middleman::app_identifiers);
+  put_missing(middleman_group, "enable-automatic-connections", false);
+  put_missing(middleman_group, "max-consecutive-reads",
+              defaults::middleman::max_consecutive_reads);
+  put_missing(middleman_group, "heartbeat-interval",
+              defaults::middleman::heartbeat_interval);
+  put_missing(middleman_group, "workers", defaults::middleman::workers);
+  // -- opencl parameters
+  auto& openssl_group = result["openssl"].as_dictionary();
+  put_missing(openssl_group, "certificate", std::string{});
+  put_missing(openssl_group, "key", std::string{});
+  put_missing(openssl_group, "passphrase", std::string{});
+  put_missing(openssl_group, "capath", std::string{});
+  put_missing(openssl_group, "cafile", std::string{});
+  return result;
 }
 
 std::string
@@ -224,6 +299,45 @@ bool operator!=(ini_iter iter, ini_sentinel) {
   return !iter.ini->fail();
 }
 
+struct indentation {
+  size_t size;
+};
+
+indentation operator+(indentation x, size_t y) noexcept {
+  return {x.size + y};
+}
+
+std::ostream& operator<<(std::ostream& out, indentation indent) {
+  for (size_t i = 0; i < indent.size; ++i)
+    out.put(' ');
+  return out;
+}
+
+void print(const config_value::dictionary& xs, indentation indent) {
+  using std::cout;
+  for (const auto& kvp : xs) {
+    if (kvp.first == "dump-config")
+      continue;
+    if (auto submap = get_if<config_value::dictionary>(&kvp.second)) {
+      cout << indent << kvp.first << " {\n";
+      print(*submap, indent + 2);
+      cout << indent << "}\n";
+    } else if (auto lst = get_if<config_value::list>(&kvp.second)) {
+      if (lst->empty()) {
+        cout << indent << kvp.first << " = []\n";
+      } else {
+        cout << indent << kvp.first << " = [\n";
+        auto list_indent = indent + 2;
+        for (auto& x : *lst)
+          cout << list_indent << to_string(x) << ",\n";
+        cout << indent << "]\n";
+      }
+    } else {
+      cout << indent << kvp.first << " = " << to_string(kvp.second) << '\n';
+    }
+  }
+};
+
 } // namespace <anonymous>
 
 error actor_system_config::parse(string_list args, std::istream& ini) {
@@ -240,39 +354,28 @@ error actor_system_config::parse(string_list args, std::istream& ini) {
   using std::make_move_iterator;
   auto res = custom_options_.parse(content, args);
   if (res.second != args.end()) {
-    if (res.first != pec::success) {
+    if (res.first != pec::success && starts_with(*res.second, "-"))
       return make_error(res.first, *res.second);
-      std::cerr << "error: at argument \"" << *res.second
-                << "\": " << to_string(res.first) << std::endl;
-      cli_helptext_printed = true;
-    }
     auto first = args.begin();
     first += std::distance(args.cbegin(), res.second);
     remainder.insert(remainder.end(), make_move_iterator(first),
                      make_move_iterator(args.end()));
   } else {
-    cli_helptext_printed = get_or(content, "global.help", false)
-                           || get_or(content, "global.long-help", false);
+    cli_helptext_printed = get_or(content, "help", false)
+                           || get_or(content, "long-help", false);
   }
   // Generate help text if needed.
   if (cli_helptext_printed) {
-    bool long_help = get_or(content, "global.long-help", false);
+    bool long_help = get_or(content, "long-help", false);
     std::cout << custom_options_.help_text(!long_help) << std::endl;
   }
-  // Generate INI dump if needed.
-  if (!cli_helptext_printed && get_or(content, "global.dump-config", false)) {
-    for (auto& category : content) {
-      if (auto dict = get_if<config_value::dictionary>(&category.second)) {
-        std::cout << '[' << category.first << "]\n";
-        for (auto& kvp : *dict)
-          if (kvp.first != "dump-config")
-            std::cout << kvp.first << '=' << to_string(kvp.second) << '\n';
-      }
-    }
+  // Generate config dump if needed.
+  if (!cli_helptext_printed && get_or(content, "dump-config", false)) {
+    print(dump_content(), indentation{0});
     std::cout << std::flush;
     cli_helptext_printed = true;
   }
-  return none;
+  return adjust_content();
 }
 
 error actor_system_config::parse(string_list args, const char* ini_file_cstr) {
@@ -280,7 +383,8 @@ error actor_system_config::parse(string_list args, const char* ini_file_cstr) {
   if (ini_file_cstr != nullptr)
     config_file_path = ini_file_cstr;
   // CLI arguments always win.
-  extract_config_file_path(args);
+  if (auto err = extract_config_file_path(args))
+    return err;
   std::ifstream ini{config_file_path};
   return parse(std::move(args), ini);
 }
@@ -299,8 +403,19 @@ actor_system_config::add_error_category(atom_value x, error_renderer y) {
 
 actor_system_config& actor_system_config::set_impl(string_view name,
                                                    config_value value) {
+  if (name == "middleman.app-identifier") {
+    // TODO: Print a warning with 0.18 and remove this code with 0.19.
+    value.convert_to_list();
+    return set_impl("middleman.app-identifiers", std::move(value));
+  }
   auto opt = custom_options_.qualified_name_lookup(name);
-  if (opt != nullptr && opt->check(value) == none) {
+  if (opt == nullptr) {
+    std::cerr << "*** failed to set config parameter " << name
+              << ": invalid name" << std::endl;
+  } else if (auto err = opt->check(value)) {
+    std::cerr << "*** failed to set config parameter " << name << ": "
+              << to_string(err) << std::endl;
+  } else {
     opt->store(value);
     auto category = opt->category();
     auto& dict = category == "global" ? content
@@ -314,6 +429,18 @@ timespan actor_system_config::stream_tick_duration() const noexcept {
   auto ns_count = caf::detail::gcd(stream_credit_round_interval.count(),
                                    stream_max_batch_delay.count());
   return timespan{ns_count};
+}
+std::string actor_system_config::render(const error& err) {
+  std::string msg;
+  switch (static_cast<uint64_t>(err.category())) {
+    case atom_uint("system"):
+      return render_sec(err.code(), err.category(), err.context());
+    case atom_uint("exit"):
+      return render_exit_reason(err.code(), err.category(), err.context());
+    case atom_uint("parser"):
+      return render_pec(err.code(), err.category(), err.context());
+  }
+  return "unknown-error";
 }
 
 std::string actor_system_config::render_sec(uint8_t x, atom_value,
@@ -332,46 +459,47 @@ std::string actor_system_config::render_exit_reason(uint8_t x, atom_value,
 
 std::string actor_system_config::render_pec(uint8_t x, atom_value,
                                             const message& xs) {
-  auto tmp = static_cast<exit_reason>(x);
+  auto tmp = static_cast<pec>(x);
   return deep_to_string(meta::type_name("parser_error"), tmp,
                         meta::omittable_if_empty(), xs);
 }
 
-void actor_system_config::extract_config_file_path(string_list& args) {
-  static constexpr const char needle[] = "--caf#config-file=";
-  auto last = args.end();
-  auto i = std::find_if(args.begin(), last, [](const std::string& arg) {
-    return arg.compare(0, sizeof(needle) - 1, needle) == 0;
-  });
-  if (i == last)
-    return;
-  auto arg_begin = i->begin() + sizeof(needle);
-  auto arg_end = i->end();
-  if (arg_begin == arg_end) {
-    // Missing value.
-    // TODO: print warning?
-    return;
+error actor_system_config::extract_config_file_path(string_list& args) {
+  auto ptr = custom_options_.qualified_name_lookup("global.config-file");
+  CAF_ASSERT(ptr != nullptr);
+  string_list::iterator i;
+  string_view path;
+  std::tie(i, path) = find_by_long_name(*ptr, args.begin(), args.end());
+  if (i == args.end())
+    return none;
+  if (path.empty()) {
+    args.erase(i);
+    return make_error(pec::missing_argument, std::string{*i});
   }
-  if (*arg_begin == '"') {
-    detail::parser::state<std::string::const_iterator> res;
-    res.i = arg_begin;
-    res.e = arg_end;
-    struct consumer {
-      std::string result;
-      void value(std::string&& x) {
-        result = std::move(x);
+  auto evalue = ptr->parse(path);
+  if (!evalue)
+    return std::move(evalue.error());
+  ptr->store(*evalue);
+  return none;
+}
+
+error actor_system_config::adjust_content() {
+  // TODO: Print a warning to STDERR if 'app-identifier' is present with 0.18
+  //       and remove this code with 0.19.
+  auto i = content.find("middleman");
+  if (i != content.end()) {
+    if (auto mm = get_if<settings>(&i->second)) {
+      auto j = mm->find("app-identifier");
+      if (j != mm->end()) {
+        if (!mm->contains("app-identifiers")) {
+          j->second.convert_to_list();
+          mm->emplace("app-identifiers", std::move(j->second));
+        }
+        mm->container().erase(j);
       }
-    };
-    consumer f;
-    detail::parser::read_string(res, f);
-    if (res.code == pec::success)
-      config_file_path = std::move(f.result);
-    // TODO: else print warning?
-  } else {
-    // We support unescaped strings for convenience on the CLI.
-    config_file_path = std::string{arg_begin, arg_end};
+    }
   }
-  args.erase(i);
+  return none;
 }
 
 const settings& content(const actor_system_config& cfg) {

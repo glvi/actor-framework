@@ -86,7 +86,7 @@ public:
   /// Stores asynchronous messages with default priority.
   using normal_queue = intrusive::drr_cached_queue<policy::normal_messages>;
 
-  /// Stores asynchronous messages with hifh priority.
+  /// Stores asynchronous messages with high priority.
   using urgent_queue = intrusive::drr_cached_queue<policy::urgent_messages>;
 
   /// Configures the FIFO inbox with two nested queues:
@@ -243,6 +243,8 @@ public:
   // -- overridden functions of abstract_actor ---------------------------------
 
   void enqueue(mailbox_element_ptr, execution_unit*) override;
+
+  mailbox_element* peek_at_next_mailbox_element() override;
 
   // -- overridden functions of local_actor ------------------------------------
 

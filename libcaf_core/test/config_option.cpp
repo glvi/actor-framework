@@ -47,7 +47,7 @@ constexpr int64_t underflow() {
 template <class T>
 optional<T> read(string_view arg) {
   auto co = make_config_option<T>(category, name, explanation);
-  auto res = config_value::parse(arg);
+  auto res = co.parse(arg);
   if (res && holds_alternative<T>(*res)) {
     CAF_CHECK_EQUAL(co.check(*res), none);
     return get<T>(*res);
@@ -167,16 +167,63 @@ CAF_TEST(type double) {
 }
 
 CAF_TEST(type string) {
-  CAF_CHECK_EQUAL(unbox(read<string>("\"foo\"")), "foo");
   CAF_CHECK_EQUAL(unbox(read<string>("foo")), "foo");
+  CAF_CHECK_EQUAL(unbox(read<string>("\"foo\"")), "\"foo\"");
 }
 
 CAF_TEST(type atom) {
-  CAF_CHECK_EQUAL(unbox(read<atom_value>("'foo'")), atom("foo"));
-  CAF_CHECK_EQUAL(read<atom_value>("bar"), none);
+  CAF_CHECK_EQUAL(unbox(read<atom_value>("foo")), atom("foo"));
+  CAF_CHECK_EQUAL(read<atom_value>("toomanycharacters"), none);
+  CAF_CHECK_EQUAL(read<atom_value>("illegal!"), none);
 }
 
 CAF_TEST(type timespan) {
   timespan dur{500};
   CAF_CHECK_EQUAL(unbox(read<timespan>("500ns")), dur);
+}
+
+CAF_TEST(flat CLI parsing) {
+  auto x = make_config_option<std::string>("?foo", "bar,b", "test option");
+  CAF_CHECK_EQUAL(x.category(), "foo");
+  CAF_CHECK_EQUAL(x.long_name(), "bar");
+  CAF_CHECK_EQUAL(x.short_names(), "b");
+  CAF_CHECK_EQUAL(x.full_name(), "foo.bar");
+  CAF_CHECK_EQUAL(x.has_flat_cli_name(), true);
+}
+
+CAF_TEST(flat CLI parsing with nested categories) {
+  auto x = make_config_option<std::string>("?foo.goo", "bar,b", "test option");
+  CAF_CHECK_EQUAL(x.category(), "foo.goo");
+  CAF_CHECK_EQUAL(x.long_name(), "bar");
+  CAF_CHECK_EQUAL(x.short_names(), "b");
+  CAF_CHECK_EQUAL(x.full_name(), "foo.goo.bar");
+  CAF_CHECK_EQUAL(x.has_flat_cli_name(), true);
+}
+
+CAF_TEST(find by long opt) {
+  auto needle = make_config_option<std::string>("?foo", "bar,b", "test option");
+  auto check = [&](std::vector<string> args, bool found_opt, bool has_opt) {
+    auto res = find_by_long_name(needle, std::begin(args), std::end(args));
+    CAF_CHECK_EQUAL(res.first != std::end(args), found_opt);
+    if (has_opt)
+      CAF_CHECK_EQUAL(res.second, "val2");
+    else
+      CAF_CHECK(res.second.empty());
+  };
+  // Well formed, find val2.
+  check({"--foo=val1", "--bar=val2", "--baz=val3"}, true, true);
+  // Dashes missing, no match.
+  check({"--foo=val1", "bar=val2", "--baz=val3"}, false, false);
+  // Equal missing.
+  check({"--fooval1", "--barval2", "--bazval3"}, false, false);
+  // Option value missing.
+  check({"--foo=val1", "--bar=", "--baz=val3"}, true, false);
+  // With prefix 'caf#'.
+  check({"--caf#foo=val1", "--caf#bar=val2", "--caf#baz=val3"}, true, true);
+  // Option not included.
+  check({"--foo=val1", "--b4r=val2", "--baz=val3"}, false, false);
+  // Option not included, with prefix.
+  check({"--caf#foo=val1", "--caf#b4r=val2", "--caf#baz=val3"}, false, false);
+  // No options to look through.
+  check({}, false, false);
 }

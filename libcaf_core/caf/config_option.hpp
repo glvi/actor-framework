@@ -23,6 +23,7 @@
 
 #include "caf/fwd.hpp"
 #include "caf/string_view.hpp"
+#include "caf/string_algorithms.hpp"
 
 namespace caf {
 
@@ -40,9 +41,13 @@ public:
     /// Stores a value in the given location.
     void (*store)(void*, const config_value&);
 
-    /// Tries to extrac a value from the given location. Exists for backward
+    /// Tries to extract a value from the given location. Exists for backward
     /// compatibility only and will get removed with CAF 0.17.
     config_value (*get)(const void*);
+
+    /// Tries to parse an input string. Stores and returns the parsed value on
+    /// success, returns an error otherwise.
+    expected<config_value> (*parse)(void*, string_view);
 
     /// Human-readable name of the option's type.
     std::string type_name;
@@ -96,6 +101,13 @@ public:
   /// Returns whether this config option stores a boolean flag.
   bool is_flag() const noexcept;
 
+  /// Returns whether the category is optional for CLI options.
+  bool has_flat_cli_name() const noexcept;
+
+  /// Tries to parse an input string. Stores and returns the parsed value on
+  /// success, returns an error otherwise.
+  expected<config_value> parse(string_view input) const;
+
   /// @private
   // TODO: remove with CAF 0.17
   optional<config_value> get() const;
@@ -112,5 +124,35 @@ private:
   mutable void* value_;
 };
 
-} // namespace caf
+/// Finds `config_option` string with a matching long name in (`first`, `last`],
+/// where each entry is a pointer to a string. Returns a `ForwardIterator` to
+/// the match and a `caf::string_view` of the option value if the entry is found
+/// and a `ForwardIterator` to `last` with an empty `string_view` otherwise.
+template <class ForwardIterator, class Sentinel>
+std::pair<ForwardIterator, string_view>
+find_by_long_name(const config_option& x, ForwardIterator first, Sentinel last) {
+  auto long_name = x.long_name();
+  for (; first != last; ++first) {
+    string_view str{*first};
+    // Make sure this is a long option starting with "--".
+    if (!starts_with(str, "--"))
+      continue;
+    str.remove_prefix(2);
+    // Skip optional "caf#" prefix.
+    if (starts_with(str, "caf#"))
+      str.remove_prefix(4);
+    // Make sure we are dealing with the right key.
+    if (!starts_with(str, long_name))
+      continue;
+    // Make sure the key is followed by an assignment.
+    str.remove_prefix(long_name.size());
+    if (!starts_with(str, "="))
+      continue;
+    // Remove leading '=' and return the value.
+    str.remove_prefix(1);
+    return {first, str};
+  }
+  return {first, string_view{}};
+}
 
+} // namespace caf

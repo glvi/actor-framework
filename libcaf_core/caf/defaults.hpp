@@ -20,6 +20,8 @@
 
 #include <chrono>
 #include <cstddef>
+#include <string>
+#include <vector>
 
 #include "caf/atom.hpp"
 #include "caf/string_view.hpp"
@@ -74,12 +76,13 @@ extern const atom_value file_verbosity;
 
 namespace middleman {
 
-extern string_view app_identifier;
+extern std::vector<std::string> app_identifiers;
 extern const atom_value network_backend;
 extern const size_t max_consecutive_reads;
 extern const size_t heartbeat_interval;
 extern const size_t cached_udp_buffers;
 extern const size_t max_pending_msgs;
+extern const size_t workers;
 
 } // namespace middleman
 

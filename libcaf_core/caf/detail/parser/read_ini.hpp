@@ -131,10 +131,19 @@ void read_ini_map(state<Iterator, Sentinel>& ps, Consumer&& consumer) {
   }
   // Waits for end-of-line after reading a value
   state(after_value) {
-    transition(after_value, " \t\n")
+    transition(after_value, " \t")
+    transition(had_newline, "\n")
     transition(await_key_name, ',')
     transition(done, '}', consumer.end_map())
-    fsm_epsilon(read_ini_comment(ps, consumer), after_value, ';')
+    fsm_epsilon(read_ini_comment(ps, consumer), had_newline, ';')
+  }
+  // Allows users to skip the ',' for separating key/value pairs
+  state(had_newline) {
+    transition(had_newline, " \t\n")
+    transition(await_key_name, ',')
+    transition(done, '}', consumer.end_map())
+    fsm_epsilon(read_ini_comment(ps, consumer), had_newline, ';')
+    epsilon(read_key_name, alnum_or_dash)
   }
   term_state(done) {
     //nop
@@ -192,8 +201,9 @@ template <class Iterator, class Sentinel, class Consumer>
 void read_ini_section(state<Iterator, Sentinel>& ps, Consumer&& consumer) {
   using std::swap;
   std::string tmp;
+  auto alnum = [](char x) { return isalnum(x) || x == '_'; };
   auto alnum_or_dash = [](char x) {
-    return isalnum(x) || x == '-' || x == '_';
+    return isalnum(x) || x == '_' || x == '-';
   };
   auto emit_key = [&] {
     std::string key;
@@ -202,14 +212,15 @@ void read_ini_section(state<Iterator, Sentinel>& ps, Consumer&& consumer) {
   };
   auto g = make_scope_guard([&] {
     if (ps.code <= pec::trailing_character)
-    consumer.end_map();
+      consumer.end_map();
   });
+  // clang-format off
   start();
   // Dispatches to read sections, comments, or key/value pairs.
   term_state(init) {
     transition(init, " \t\n")
     fsm_epsilon(read_ini_comment(ps, consumer), init, ';')
-    transition(read_key_name, alphanumeric_chars, tmp = ch)
+    transition(read_key_name, alnum, tmp = ch)
   }
   // Reads a key of a "key=value" line.
   state(read_key_name) {
@@ -220,6 +231,8 @@ void read_ini_section(state<Iterator, Sentinel>& ps, Consumer&& consumer) {
   state(await_assignment) {
     transition(await_assignment, " \t")
     transition(await_value, '=', emit_key())
+    // The '=' is optional for maps, i.e., `key = {}` == `key {}`.
+    epsilon(await_value, '{', emit_key())
   }
   // Reads the value in a "key=value" line.
   state(await_value) {
@@ -233,6 +246,44 @@ void read_ini_section(state<Iterator, Sentinel>& ps, Consumer&& consumer) {
     transition(init, '\n')
   }
   fin();
+  // clang-format on
+}
+
+/// Reads a nested group, e.g., "[foo.bar]" would consume "[foo.]" in read_ini
+/// and then delegate to this function for parsing "bar]".
+template <class Iterator, class Sentinel, class Consumer>
+void read_nested_group(state<Iterator, Sentinel>& ps, Consumer&& consumer) {
+  using std::swap;
+  std::string key;
+  auto alnum = [](char x) { return isalnum(x) || x == '_'; };
+  auto alnum_or_dash = [](char x) {
+    return isalnum(x) || x == '_' || x == '-';
+  };
+  auto begin_section = [&]() -> decltype(consumer.begin_map()) {
+    consumer.key(std::move(key));
+    return consumer.begin_map();
+  };
+  auto g = make_scope_guard([&] {
+    if (ps.code <= pec::trailing_character)
+      consumer.end_map();
+  });
+  // clang-format off
+  start();
+  // Scanning for first section.
+  state(init) {
+    epsilon(read_sub_section, alnum)
+  }
+  // Read the sub section key after reading an '[xxx.'.
+  state(read_sub_section) {
+    transition(read_sub_section, alnum_or_dash, key += ch)
+    fsm_transition(read_nested_group(ps, begin_section()), done, '.')
+    fsm_transition(read_ini_section(ps, begin_section()), done, ']')
+  }
+  term_state(done) {
+    // nop
+  }
+  fin();
+  // clang-format on
 }
 
 /// Reads an INI formatted input.
@@ -240,8 +291,9 @@ template <class Iterator, class Sentinel, class Consumer>
 void read_ini(state<Iterator, Sentinel>& ps, Consumer&& consumer) {
   using std::swap;
   std::string tmp{"global"};
+  auto alnum = [](char x) { return isalnum(x) || x == '_'; };
   auto alnum_or_dash = [](char x) {
-    return isalnum(x) || x == '-' || x == '_';
+    return isalnum(x) || x == '_' || x == '-';
   };
   auto begin_section = [&]() -> decltype(consumer.begin_map()) {
     std::string key;
@@ -249,30 +301,36 @@ void read_ini(state<Iterator, Sentinel>& ps, Consumer&& consumer) {
     consumer.key(std::move(key));
     return consumer.begin_map();
   };
+  // clang-format off
   start();
   // Scanning for first section.
   term_state(init) {
     transition(init, " \t\n")
     fsm_epsilon(read_ini_comment(ps, consumer), init, ';')
     transition(start_section, '[')
-    fsm_epsilon_if(tmp == "global", read_ini_section(ps, begin_section()), init)
+    fsm_epsilon_if(tmp == "global", read_ini_section(ps, begin_section()), return_to_global)
   }
   // Read the section key after reading an '['.
   state(start_section) {
     transition(start_section, " \t")
-    transition(read_section_name, alphabetic_chars, tmp = ch)
+    transition(read_section_name, alnum, tmp = ch)
   }
   // Reads a section name such as "[foo]".
   state(read_section_name) {
     transition(read_section_name, alnum_or_dash, tmp += ch)
+    fsm_transition(read_nested_group(ps, begin_section()), return_to_global, '.')
     epsilon(close_section)
   }
   // Wait for the closing ']', preceded by any number of whitespaces.
   state(close_section) {
     transition(close_section, " \t")
-    fsm_transition(read_ini_section(ps, begin_section()), init, ']')
+    fsm_transition(read_ini_section(ps, begin_section()), return_to_global, ']')
+  }
+  unstable_state(return_to_global) {
+    epsilon(init, any_char, tmp = "global")
   }
   fin();
+  // clang-format on
 }
 
 } // namespace parser

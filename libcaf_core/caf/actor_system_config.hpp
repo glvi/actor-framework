@@ -106,6 +106,10 @@ public:
   /// @private
   settings content;
 
+  /// Extracts all parameters from the config, including entries with default
+  /// values.
+  virtual settings dump_content() const;
+
   /// Sets a config by using its INI name `config_name` to `config_value`.
   template <class T>
   actor_system_config& set(string_view name, T&& value) {
@@ -231,7 +235,8 @@ public:
   /// Adds a hook type to the scheduler.
   template <class Hook, class... Ts>
   actor_system_config& add_thread_hook(Ts&&... ts) {
-    thread_hooks_.emplace_back(new Hook(std::forward<Ts>(ts)...));
+    std::unique_ptr<thread_hook> hook{new Hook(std::forward<Ts>(ts)...)};
+    thread_hooks_.emplace_back(std::move(hook));
     return *this;
   }
 
@@ -316,6 +321,16 @@ public:
 
   int (*slave_mode_fun)(actor_system&, const actor_system_config&);
 
+  // -- default error rendering functions --------------------------------------
+
+  static std::string render(const error& err);
+
+  static std::string render_sec(uint8_t, atom_value, const message&);
+
+  static std::string render_exit_reason(uint8_t, atom_value, const message&);
+
+  static std::string render_pec(uint8_t, atom_value, const message&);
+
 protected:
   virtual std::string make_help_text(const std::vector<message::cli_arg>&);
 
@@ -332,16 +347,14 @@ private:
 
   actor_system_config& set_impl(string_view name, config_value value);
 
-  static std::string render_sec(uint8_t, atom_value, const message&);
+  error extract_config_file_path(string_list& args);
 
-  static std::string render_exit_reason(uint8_t, atom_value, const message&);
-
-  static std::string render_pec(uint8_t, atom_value, const message&);
-
-  void extract_config_file_path(string_list& args);
+  /// Adjusts the content of the configuration, e.g., for ensuring backwards
+  /// compatibility with older options.
+  error adjust_content();
 };
 
-/// @private
+/// Returns all user-provided configuration parameters.
 const settings& content(const actor_system_config& cfg);
 
 /// Tries to retrieve the value associated to `name` from `cfg`.

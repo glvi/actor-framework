@@ -18,14 +18,12 @@
 
 #pragma once
 
-#include "caf/stream_serializer.hpp"
-#include "caf/streambuf.hpp"
+#include <vector>
+
+#include "caf/serializer_impl.hpp"
 
 namespace caf {
 
-/// A stream serializer that writes into an unbounded contiguous character
-/// sequence.
-using binary_serializer = stream_serializer<vectorbuf>;
+using binary_serializer = serializer_impl<std::vector<char>>;
 
 } // namespace caf
-

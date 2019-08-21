@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2016                                                  *
+ * Copyright 2011-2019 Dominik Charousset                                     *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
  * (at your option) under the terms and conditions of the Boost Software      *
@@ -16,44 +16,47 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#pragma once
-
-#include "caf/io/abstract_broker.hpp"
+#include "caf/detail/fnv_hash.hpp"
 
 namespace caf {
-namespace io {
+namespace detail {
 
-struct addr_visitor {
-  using result_type = std::string;
-  addr_visitor(abstract_broker* ptr) : ptr_(ptr) { }
-  template <class Handle>
-  result_type operator()(const Handle& hdl) { return ptr_->remote_addr(hdl); }
-  abstract_broker* ptr_;
+namespace {
+
+template <size_t IntegerSize>
+struct hash_conf_helper;
+
+template <>
+struct hash_conf_helper<4> {
+  static constexpr size_t basis = 2166136261u;
+
+  static constexpr size_t prime = 16777619u;
 };
 
-struct port_visitor {
-  using result_type = uint16_t;
-  port_visitor(abstract_broker* ptr) : ptr_(ptr) { }
-  template <class Handle>
-  result_type operator()(const Handle& hdl) { return ptr_->remote_port(hdl); }
-  abstract_broker* ptr_;
+template <>
+struct hash_conf_helper<8> {
+  static constexpr size_t basis = 14695981039346656037u;
+
+  static constexpr size_t prime = 1099511628211u;
 };
 
-struct id_visitor {
-  using result_type = int64_t;
-  template <class Handle>
-  result_type operator()(const Handle& hdl) { return hdl.id(); }
-};
+struct hash_conf : hash_conf_helper<sizeof(size_t)> {};
 
-struct hash_visitor {
-  using result_type = size_t;
-  template <class Handle>
-  result_type operator()(const Handle& hdl) const {
-    std::hash<Handle> f;
-    return f(hdl);
+} // namespace
+
+size_t fnv_hash(const unsigned char* first, const unsigned char* last) {
+  return fnv_hash_append(hash_conf::basis, first, last);
+}
+
+size_t fnv_hash_append(size_t intermediate, const unsigned char* first,
+                       const unsigned char* last) {
+  auto result = intermediate;
+  for (; first != last; ++first) {
+    result *= hash_conf::prime;
+    result ^= *first;
   }
-};
+  return result;
+}
 
-} // namespace io
+} // namespace detail
 } // namespace caf
-
