@@ -113,8 +113,10 @@ class group;
 class group_module;
 class inbound_path;
 class ipv4_address;
+class ipv4_endpoint;
 class ipv4_subnet;
 class ipv6_address;
+class ipv6_endpoint;
 class ipv6_subnet;
 class local_actor;
 class mailbox_element;
@@ -142,7 +144,8 @@ class uri_builder;
 
 // -- templates with default parameters ----------------------------------------
 
-template <class, class = event_based_actor> class stateful_actor;
+template <class, class = event_based_actor>
+class stateful_actor;
 
 // -- structs ------------------------------------------------------------------
 
@@ -182,6 +185,7 @@ enum class stream_priority;
 using actor_id = uint64_t;
 using binary_serializer = serializer_impl<std::vector<char>>;
 using ip_address = ipv6_address;
+using ip_endpoint = ipv6_endpoint;
 using ip_subnet = ipv6_subnet;
 using settings = dictionary<config_value>;
 using stream_slot = uint16_t;
@@ -241,7 +245,6 @@ class abstract_coordinator;
 
 } // namespace scheduler
 
-
 // -- OpenSSL classes ----------------------------------------------------------
 
 namespace openssl {
@@ -254,8 +257,10 @@ class manager;
 
 namespace detail {
 
-template <class> class type_erased_value_impl;
-template <class> class stream_distribution_tree;
+template <class>
+class type_erased_value_impl;
+template <class>
+class stream_distribution_tree;
 
 class abstract_worker;
 class abstract_worker_hub;
@@ -292,4 +297,3 @@ using type_erased_value_ptr = std::unique_ptr<type_erased_value>;
 using mailbox_element_ptr = std::unique_ptr<mailbox_element, detail::disposer>;
 
 } // namespace caf
-

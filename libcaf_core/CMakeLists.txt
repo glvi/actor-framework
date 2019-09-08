@@ -26,6 +26,7 @@ set(LIBCAF_CORE_SRCS
   src/actor_system.cpp
   src/actor_system_config.cpp
   src/append_hex.cpp
+  src/append_percent_encoded.cpp
   src/atom.cpp
   src/attachable.cpp
   src/behavior.cpp
@@ -65,8 +66,10 @@ set(LIBCAF_CORE_SRCS
   src/ini_consumer.cpp
   src/invoke_result_visitor.cpp
   src/ipv4_address.cpp
+  src/ipv4_endpoint.cpp
   src/ipv4_subnet.cpp
   src/ipv6_address.cpp
+  src/ipv6_endpoint.cpp
   src/ipv6_subnet.cpp
   src/local_actor.cpp
   src/logger.cpp
@@ -83,6 +86,7 @@ set(LIBCAF_CORE_SRCS
   src/monitorable_actor.cpp
   src/node_id.cpp
   src/outbound_path.cpp
+  src/parse.cpp
   src/pec.cpp
   src/pretty_type_name.cpp
   src/private_thread.cpp

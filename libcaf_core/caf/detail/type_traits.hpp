@@ -53,11 +53,12 @@
   class has_##name##_alias {                                                   \
   private:                                                                     \
     template <class C>                                                         \
-    static std::true_type sfinae(C* ptr, typename C::name* arg = nullptr);     \
+    static std::true_type sfinae(typename C::name*);                           \
                                                                                \
-    static std::false_type sfinae(void* ptr);                                  \
+    template <class>                                                           \
+    static std::false_type sfinae(...);                                        \
                                                                                \
-    using sfinae_type = decltype(sfinae(static_cast<T*>(nullptr)));            \
+    using sfinae_type = decltype(sfinae<T>(nullptr));                          \
                                                                                \
   public:                                                                      \
     static constexpr bool value = sfinae_type::value;                          \
@@ -736,6 +737,28 @@ struct is_same_ish
 template <class>
 struct always_false : std::false_type {};
 
+/// Utility trait for removing const inside a `map<K, V>::value_type`.
+template <class T>
+struct deconst_kvp {
+  using type = T;
+};
+
+template <class K, class V>
+struct deconst_kvp<std::pair<const K, V>> {
+  using type = std::pair<K, V>;
+};
+
+template <class T>
+using deconst_kvp_t = typename deconst_kvp<T>::type;
+
+/// Utility trait for checking whether T is a `std::pair`.
+template <class T>
+struct is_pair : std::false_type {};
+
+/// Utility trait for checking whether T is a `std::pair`.
+template <class First, class Second>
+struct is_pair<std::pair<First, Second>> : std::true_type {};
+
 // -- traits to check for STL-style type aliases -------------------------------
 
 CAF_HAS_ALIAS_TRAIT(value_type);
@@ -746,7 +769,7 @@ CAF_HAS_ALIAS_TRAIT(mapped_type);
 
 // -- constexpr functions for use in enable_if & friends -----------------------
 
-/// Checks whether T behaves like a `std::map` or a `std::unordered_map`.
+/// Checks whether T behaves like `std::map`.
 template <class T>
 struct is_map_like {
   static constexpr bool value = is_iterable<T>::value
@@ -754,12 +777,11 @@ struct is_map_like {
                                 && has_mapped_type_alias<T>::value;
 };
 
-/// Checks whether T behaves like a `std::vector` or a `std::list`.
+/// Checks whether T behaves like `std::vector`, `std::list`, or `std::set`.
 template <class T>
 struct is_list_like {
   static constexpr bool value = is_iterable<T>::value
                                 && has_value_type_alias<T>::value
-                                && !has_key_type_alias<T>::value
                                 && !has_mapped_type_alias<T>::value;
 };
 
