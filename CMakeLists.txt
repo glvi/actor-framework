@@ -4,6 +4,10 @@ project(caf C CXX)
 include(CheckCSourceCompiles)
 include(CheckCSourceRuns)
 
+# Set default install paths.
+# See https://cmake.org/cmake/help/latest/module/GNUInstallDirs.html
+include(GNUInstallDirs)
+
 get_directory_property(_parent PARENT_DIRECTORY)
 if(_parent)
   set(caf_is_subproject ON)
@@ -337,7 +341,7 @@ if(MINGW)
   build_string("EXTRA_FLAGS" "-static")
 elseif(CYGWIN)
   build_string("EXTRA_FLAGS" "-U__STRICT_ANSI__")
-elseif(NOT CAF_BUILD_STATIC_ONLY)
+else()
   build_string("EXTRA_FLAGS" "-fPIC")
 endif()
 if (WIN32)
@@ -407,7 +411,7 @@ endif()
 ################################################################################
 
 # install includes from test
-install(DIRECTORY libcaf_test/caf/ DESTINATION include/caf
+install(DIRECTORY libcaf_test/caf/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/caf
         FILES_MATCHING PATTERN "*.hpp")
 
 # process cmake_uninstall.cmake.in

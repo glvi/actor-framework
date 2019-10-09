@@ -31,6 +31,7 @@
 #include "caf/is_actor_handle.hpp"
 #include "caf/make_source_result.hpp"
 #include "caf/policy/arg.hpp"
+#include "caf/response_type.hpp"
 #include "caf/stream_source.hpp"
 
 namespace caf {
@@ -44,14 +45,13 @@ namespace caf {
 /// @param done Predicate returning `true` when generator is done.
 /// @param fin Optional cleanup handler.
 /// @returns The allocated `stream_manager` and the output slot.
-template <class Driver, class... Ts, class Init, class Pull, class Done,
-          class Finalize = unit_t>
+template <class Driver, class... Ts, class... CtorArgs>
 make_source_result_t<typename Driver::downstream_manager_type, Ts...>
-attach_stream_source(scheduled_actor* self, std::tuple<Ts...> xs, Init init,
-                     Pull pull, Done done, Finalize fin = {}) {
+attach_stream_source(scheduled_actor* self, std::tuple<Ts...> xs,
+                     CtorArgs&&... ctor_args) {
   using namespace detail;
-  auto mgr = make_stream_source<Driver>(self, std::move(init), std::move(pull),
-                                        std::move(done), std::move(fin));
+  auto mgr = make_stream_source<Driver>(self,
+                                        std::forward<CtorArgs>(ctor_args)...);
   auto slot = mgr->add_outbound_path(std::move(xs));
   return {slot, std::move(mgr)};
 }
@@ -66,13 +66,23 @@ attach_stream_source(scheduled_actor* self, std::tuple<Ts...> xs, Init init,
 /// @param fin Cleanup handler.
 /// @returns The allocated `stream_manager` and the output slot.
 template <class... Ts, class Init, class Pull, class Done,
-          class Finalize = unit_t,
+          class Finalize = unit_t, class Trait = stream_source_trait_t<Pull>,
           class DownstreamManager = broadcast_downstream_manager<
-            typename stream_source_trait_t<Pull>::output>>
+            typename Trait::output>>
 make_source_result_t<DownstreamManager, Ts...>
 attach_stream_source(scheduled_actor* self, std::tuple<Ts...> xs, Init init,
                      Pull pull, Done done, Finalize fin = {},
                      policy::arg<DownstreamManager> = {}) {
+  using state_type = typename Trait::state;
+  static_assert(std::is_same<
+                  void(state_type&),
+                  typename detail::get_callable_trait<Init>::fun_sig>::value,
+                "Expected signature `void (State&)` for init function");
+  static_assert(std::is_same<
+                  bool(const state_type&),
+                  typename detail::get_callable_trait<Done>::fun_sig>::value,
+                "Expected signature `bool (const State&)` "
+                "for done predicate function");
   using driver = detail::stream_source_driver_impl<DownstreamManager, Pull,
                                                    Done, Finalize>;
   return attach_stream_source<driver>(self, std::move(xs), std::move(init),
@@ -119,7 +129,11 @@ detail::enable_if_t<is_actor_handle<ActorHandle>::value,
 attach_stream_source(scheduled_actor* self, const ActorHandle& dest,
                      std::tuple<Ts...> xs, Init init, Pull pull, Done done,
                      Finalize fin = {}, policy::arg<DownstreamManager> = {}) {
-  // TODO: type checking of dest
+  using namespace detail;
+  using token = type_list<stream<typename DownstreamManager::output_type>,
+                          strip_and_convert_t<Ts>...>;
+  static_assert(response_type_unbox<signatures_of_t<ActorHandle>, token>::valid,
+                "receiver does not accept the stream handshake");
   using driver = detail::stream_source_driver_impl<DownstreamManager, Pull,
                                                    Done, Finalize>;
   auto mgr = detail::make_stream_source<driver>(self, std::move(init),
