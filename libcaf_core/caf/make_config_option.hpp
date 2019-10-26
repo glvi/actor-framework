@@ -48,20 +48,22 @@ void store_impl(void* ptr, const config_value& x) {
 
 template <class T>
 config_value get_impl(const void* ptr) {
-  return config_value{*reinterpret_cast<const T*>(ptr)};
+  using trait = select_config_value_access_t<T>;
+  return config_value{trait::convert(*reinterpret_cast<const T*>(ptr))};
 }
 
 template <class T>
 expected<config_value> parse_impl(T* ptr, string_view str) {
-  T tmp;
-  if (auto err = parse(str, tmp))
-    return err;
-  config_value result{std::move(tmp)};
-  if (!holds_alternative<T>(result))
-    return pec::type_mismatch;
-  if (ptr != nullptr)
-    *ptr = get<T>(result);
-  return std::move(result);
+  if (!ptr) {
+    T tmp;
+    return parse_impl(&tmp, str);
+  }
+  using trait = select_config_value_access_t<T>;
+  string_parser_state ps{str.begin(), str.end()};
+  trait::parse_cli(ps, *ptr);
+  if (ps.code != pec::success)
+    return make_error(ps);
+  return config_value{trait::convert(*ptr)};
 }
 
 expected<config_value> parse_impl(std::string* ptr, string_view str);

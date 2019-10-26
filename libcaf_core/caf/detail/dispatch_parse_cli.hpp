@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
+ * Copyright 2011-2019 Dominik Charousset                                     *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
  * (at your option) under the terms and conditions of the Boost Software      *
@@ -20,17 +20,43 @@
 
 #include <type_traits>
 
+#include "caf/config_value.hpp"
+#include "caf/detail/type_traits.hpp"
+
 namespace caf {
 namespace detail {
 
-/// Converts x to its underlying type and fetches the name from the
-/// lookup table. Assumes consecutive enum values.
-template <class E, size_t N>
-const char* enum_to_string(E x, const char* (&lookup_table)[N]) {
-  auto index = static_cast<typename std::underlying_type<E>::type>(x);
-  return index < N ? lookup_table[index] : "<unknown>";
+template <class Trait>
+struct dispatch_parse_cli_helper {
+  template <class... Ts>
+  auto operator()(Ts&&... xs)
+    -> decltype(Trait::parse_cli(std::forward<Ts>(xs)...)) {
+    return Trait::parse_cli(std::forward<Ts>(xs)...);
+  }
+};
+
+template <class Access, class T>
+void dispatch_parse_cli(std::true_type, string_parser_state& ps, T& x,
+                        const char* char_blacklist) {
+  Access::parse_cli(ps, x, char_blacklist);
+}
+
+template <class Access, class T>
+void dispatch_parse_cli(std::false_type, string_parser_state& ps, T& x,
+                        const char*) {
+  Access::parse_cli(ps, x);
+}
+
+template <class T>
+void dispatch_parse_cli(string_parser_state& ps, T& x,
+                        const char* char_blacklist) {
+  using access = caf::select_config_value_access_t<T>;
+  using helper_fun = dispatch_parse_cli_helper<access>;
+  using token_type = bool_token<detail::is_callable_with<
+    helper_fun, string_parser_state&, T&, const char*>::value>;
+  token_type token;
+  dispatch_parse_cli<access>(token, ps, x, char_blacklist);
 }
 
 } // namespace detail
 } // namespace caf
-
