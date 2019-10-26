@@ -561,7 +561,6 @@ public:
       return err;
     return dref()(std::forward<Ts>(xs)...);
   }
-#endif // __cpp_fold_expressions
 
 #endif // defined(__cpp_fold_expressions) && defined(__cpp_if_constexpr)
 
