@@ -32,9 +32,9 @@
 #include "caf/actor_cast.hpp"
 #include "caf/actor_clock.hpp"
 #include "caf/actor_config.hpp"
-#include "caf/actor_marker.hpp"
 #include "caf/actor_profiler.hpp"
 #include "caf/actor_registry.hpp"
+#include "caf/actor_traits.hpp"
 #include "caf/composable_behavior_based_actor.hpp"
 #include "caf/detail/init_fun_factory.hpp"
 #include "caf/detail/spawn_fwd.hpp"
@@ -412,13 +412,13 @@ public:
                       F& fun, Ts&&... xs) {
     using impl = infer_impl_from_fun_t<F>;
     check_invariants<impl>();
-    static constexpr bool dynamically_typed = is_dynamically_typed<impl>::value;
-    static_assert(dynamically_typed,
+    using traits = actor_traits<impl>;
+    static_assert(traits::is_dynamically_typed,
                   "only dynamically-typed actors can join groups");
     static constexpr bool spawnable = detail::spawnable<F, impl, Ts...>();
     static_assert(spawnable,
                   "cannot spawn function-based actor with given arguments");
-    static constexpr bool enabled = dynamically_typed && spawnable;
+    static constexpr bool enabled = traits::is_dynamically_typed && spawnable;
     auto irange = make_input_range(first, second);
     cfg.groups = &irange;
     return spawn_functor<Os>(detail::bool_token<enabled>{}, cfg, fun,
@@ -573,6 +573,19 @@ public:
                                  invoke_message_result result) {
     if (profiler_)
       profiler_->after_processing(self, result);
+  }
+
+  void profiler_before_sending(const local_actor& self,
+                               mailbox_element& element) {
+    if (profiler_)
+      profiler_->before_sending(self, element);
+  }
+
+  void profiler_before_sending_scheduled(const local_actor& self,
+                                         caf::actor_clock::time_point timeout,
+                                         mailbox_element& element) {
+    if (profiler_)
+      profiler_->before_sending_scheduled(self, timeout, element);
   }
 
   /// @endcond

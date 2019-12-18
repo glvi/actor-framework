@@ -168,7 +168,12 @@ math(EXPR CAF_VERSION_PATCH "${VERSION_INT} % 100")
 # create full version string
 set(CAF_VERSION
     "${CAF_VERSION_MAJOR}.${CAF_VERSION_MINOR}.${CAF_VERSION_PATCH}")
-
+# set the library version for our shared library targets
+if(CMAKE_HOST_SYSTEM_NAME MATCHES "OpenBSD")
+  set(CAF_LIB_VERSION "${CAF_VERSION_MAJOR}.${CAF_VERSION_MINOR}")
+else()
+  set(CAF_LIB_VERSION "${CAF_VERSION}")
+endif()
 
 ################################################################################
 #   set output paths for binaries and libraries if not provided by the user    #
@@ -653,11 +658,6 @@ endif()
 message(STATUS "Set release version for all documentation to ${CAF_RELEASE}.")
 
 # -- Setup for building manual and API documentation ---------------------------
-
-# we need the examples and some headers relative to the build/doc/tex directory
-file(COPY examples/ DESTINATION examples)
-file(COPY libcaf_core/caf/exit_reason.hpp DESTINATION libcaf_core/caf/)
-file(COPY libcaf_core/caf/sec.hpp DESTINATION libcaf_core/caf/)
 
 add_subdirectory(doc)
 
