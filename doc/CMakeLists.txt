@@ -64,8 +64,7 @@ configure_file("cmake/index_header.rst.in"
 add_executable(caf-generate-rst cmake/caf-generate-rst.cpp)
 target_link_libraries(caf-generate-rst
                       ${CAF_EXTRA_LDFLAGS}
-                      ${CAF_LIBRARIES}
-                      ${PTHREAD_LIBRARIES})
+                      ${CAF_LIBRARIES})
 
 add_custom_target(rst)
 

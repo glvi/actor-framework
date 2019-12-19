@@ -172,6 +172,10 @@ add_custom_target(libcaf_core)
 # build shared library if not compiling static only
 if (NOT CAF_BUILD_STATIC_ONLY)
   add_library(libcaf_core_shared SHARED ${LIBCAF_CORE_SRCS} ${LIBCAF_CORE_HDRS})
+  if (NOT (APPLE OR WIN32))
+    target_compile_options(libcaf_core_shared PUBLIC -pthread)
+    target_link_libraries(libcaf_core_shared PUBLIC -pthread)
+  endif()
   target_link_libraries(libcaf_core_shared ${CAF_EXTRA_LDFLAGS})
   target_include_directories(libcaf_core_shared PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
@@ -194,6 +198,10 @@ endif ()
 # build static library only if --build-static or --build-static-only was set
 if (CAF_BUILD_STATIC_ONLY OR CAF_BUILD_STATIC)
   add_library(libcaf_core_static STATIC ${LIBCAF_CORE_HDRS} ${LIBCAF_CORE_SRCS})
+  if (NOT (APPLE OR WIN32))
+    target_compile_options(libcaf_core_static PUBLIC -pthread)
+    target_link_libraries(libcaf_core_static PUBLIC -pthread)
+  endif()
   target_link_libraries(libcaf_core_static ${CAF_EXTRA_LDFLAGS})
   target_include_directories(libcaf_core_static PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>

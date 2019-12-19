@@ -342,10 +342,6 @@ if(CAF_ENABLE_ADDRESS_SANITIZER AND NOT WIN32)
   # restore CXX flags
   set(CMAKE_CXX_FLAGS "${CXXFLAGS_BACKUP}")
 endif()
-# -pthread is ignored on MacOSX but required on other platforms
-if(NOT APPLE AND NOT WIN32)
-    build_string("EXTRA_FLAGS" "-pthread")
-endif()
 # -fPIC generates warnings on MinGW and Cygwin plus extra setup steps needed on MinGW
 if(MINGW)
   add_definitions(-D_WIN32_WINNT=0x0600)
@@ -617,8 +613,7 @@ if(NOT CAF_NO_UNIT_TESTS)
                  ${CAF_ALL_UNIT_TESTS})
   target_link_libraries(caf-test
                         ${CAF_EXTRA_LDFLAGS}
-                        ${CAF_LIBRARIES}
-                        ${PTHREAD_LIBRARIES})
+                        ${CAF_LIBRARIES})
   add_custom_target(all_unit_tests)
   add_dependencies(caf-test all_unit_tests)
   # enumerate all test suites.

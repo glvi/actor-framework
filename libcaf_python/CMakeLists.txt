@@ -50,7 +50,6 @@ if(NOT CAF_NO_PYTHON)
                         ${CAF_LIBRARY_CORE}
                         ${CAF_LIBRARY_IO}
                         ${CAF_LIBRARY_RIAC}
-                        ${PTHREAD_LIBRARIES}
                         ${LIBEDIT_LIBRARIES}
                         ${PYTHON_LIBRARIES})
   install(TARGETS caf-python DESTINATION ${CMAKE_INSTALL_BINDIR})

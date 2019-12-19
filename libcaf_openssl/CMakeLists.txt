@@ -25,10 +25,6 @@ if (NOT CAF_BUILD_STATIC_ONLY)
   target_link_libraries(libcaf_openssl_shared ${CAF_EXTRA_LDFLAGS}
                         ${CAF_LIBRARY_CORE} ${CAF_LIBRARY_IO} ${OPENSSL_LIBRARIES})
 
-  if(NOT APPLE AND NOT WIN32)
-    target_link_libraries(libcaf_openssl_shared "-pthread")
-  endif()
-
   set_target_properties(libcaf_openssl_shared
                         PROPERTIES
                         SOVERSION ${CAF_VERSION}

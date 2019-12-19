@@ -14,7 +14,6 @@ if(OpenCL_LIBRARIES AND NOT CAF_NO_EXAMPLES)
     target_link_libraries(${name}
                           ${CAF_EXTRA_LDFLAGS}
                           ${CAF_LIBRARIES}
-                          ${PTHREAD_LIBRARIES}
                           ${WSLIB}
                           ${OpenCL_LIBRARIES})
     add_dependencies(${name} all_examples)
