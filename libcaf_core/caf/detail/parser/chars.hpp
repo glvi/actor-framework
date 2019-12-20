@@ -20,9 +20,7 @@
 
 #include <cstring>
 
-namespace caf {
-namespace detail {
-namespace parser {
+namespace caf::detail::parser {
 
 struct any_char_t {};
 
@@ -37,7 +35,11 @@ constexpr bool in_whitelist(char whitelist, char ch) {
 }
 
 inline bool in_whitelist(const char* whitelist, char ch) {
-  return strchr(whitelist, ch) != nullptr;
+  // Note: using strchr breaks if `ch == '\0'`.
+  for (char c = *whitelist++; c != '\0'; c = *whitelist++)
+    if (c == ch)
+      return true;
+  return false;
 }
 
 inline bool in_whitelist(bool (*filter)(char), char ch) {
@@ -54,7 +56,5 @@ extern const char decimal_chars[11];
 
 extern const char octal_chars[9];
 
-} // namespace parser
-} // namespace detail
 } // namespace caf
 
