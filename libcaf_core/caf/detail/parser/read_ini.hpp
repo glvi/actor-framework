@@ -37,9 +37,7 @@ CAF_PUSH_UNUSED_LABEL_WARNING
 
 #include "caf/detail/parser/fsm.hpp"
 
-namespace caf {
-namespace detail {
-namespace parser {
+namespace caf::detail::parser {
 
 // Example input:
 //
@@ -60,6 +58,7 @@ namespace parser {
 
 template <class State, class Consumer>
 void read_ini_comment(State& ps, Consumer&&) {
+  // clang-format off
   start();
   term_state(init) {
     transition(done, '\n')
@@ -69,6 +68,7 @@ void read_ini_comment(State& ps, Consumer&&) {
     // nop
   }
   fin();
+  // clang-format on
 }
 
 template <class State, class Consumer>
@@ -76,6 +76,7 @@ void read_ini_value(State& ps, Consumer&& consumer);
 
 template <class State, class Consumer>
 void read_ini_list(State& ps, Consumer&& consumer) {
+  // clang-format off
   start();
   state(init) {
     epsilon(before_value)
@@ -96,14 +97,14 @@ void read_ini_list(State& ps, Consumer&& consumer) {
     // nop
   }
   fin();
+  // clang-format on
 }
 
 template <class State, class Consumer>
 void read_ini_map(State& ps, Consumer&& consumer) {
   std::string key;
-  auto alnum_or_dash = [](char x) {
-    return isalnum(x) || x == '-' || x == '_';
-  };
+  auto alnum_or_dash
+    = [](char x) { return isalnum(x) || x == '-' || x == '_'; };
   // clang-format off
   start();
   state(init) {
@@ -161,6 +162,7 @@ void read_ini_uri(State& ps, Consumer&& consumer) {
     if (ps.code <= pec::trailing_character)
       consumer.value(builder.make());
   });
+  // clang-format off
   start();
   state(init) {
     transition(init, " \t\n")
@@ -178,10 +180,12 @@ void read_ini_uri(State& ps, Consumer&& consumer) {
     // nop
   }
   fin();
+  // clang-format on
 }
 
 template <class State, class Consumer>
 void read_ini_value(State& ps, Consumer&& consumer) {
+  // clang-format off
   start();
   state(init) {
     fsm_epsilon(read_string(ps, consumer), done, '"')
@@ -197,6 +201,7 @@ void read_ini_value(State& ps, Consumer&& consumer) {
     // nop
   }
   fin();
+  // clang-format on
 }
 
 /// Reads an INI formatted input.
@@ -205,9 +210,8 @@ void read_ini_section(State& ps, Consumer&& consumer) {
   using std::swap;
   std::string tmp;
   auto alnum = [](char x) { return isalnum(x) || x == '_'; };
-  auto alnum_or_dash = [](char x) {
-    return isalnum(x) || x == '_' || x == '-';
-  };
+  auto alnum_or_dash
+    = [](char x) { return isalnum(x) || x == '_' || x == '-'; };
   auto emit_key = [&] {
     std::string key;
     swap(tmp, key);
@@ -259,9 +263,8 @@ void read_nested_group(State& ps, Consumer&& consumer) {
   using std::swap;
   std::string key;
   auto alnum = [](char x) { return isalnum(x) || x == '_'; };
-  auto alnum_or_dash = [](char x) {
-    return isalnum(x) || x == '_' || x == '-';
-  };
+  auto alnum_or_dash
+    = [](char x) { return isalnum(x) || x == '_' || x == '-'; };
   auto begin_section = [&]() -> decltype(consumer.begin_map()) {
     consumer.key(std::move(key));
     return consumer.begin_map();
@@ -295,9 +298,8 @@ void read_ini(State& ps, Consumer&& consumer) {
   using std::swap;
   std::string tmp{"global"};
   auto alnum = [](char x) { return isalnum(x) || x == '_'; };
-  auto alnum_or_dash = [](char x) {
-    return isalnum(x) || x == '_' || x == '-';
-  };
+  auto alnum_or_dash
+    = [](char x) { return isalnum(x) || x == '_' || x == '-'; };
   auto begin_section = [&]() -> decltype(consumer.begin_map()) {
     std::string key;
     swap(tmp, key);
@@ -337,9 +339,7 @@ void read_ini(State& ps, Consumer&& consumer) {
   // clang-format on
 }
 
-} // namespace parser
-} // namespace detail
-} // namespace caf
+} // namespace caf::detail::parser
 
 #include "caf/detail/parser/fsm_undef.hpp"
 

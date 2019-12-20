@@ -42,14 +42,21 @@ constexpr caf::timespan ms(ms_t::rep x) {
 
 } // namespace
 
-namespace caf {
-namespace defaults {
+namespace caf::defaults {
 
 namespace stream {
 
 const timespan desired_batch_complexity = us(50);
 const timespan max_batch_delay = ms(5);
 const timespan credit_round_interval = ms(10);
+const atom_value credit_policy = atom("complexity");
+
+namespace size_policy {
+
+const int32_t bytes_per_batch = 2048;      // 2 KB
+const int32_t buffer_capacity = 64 * 1024; // 64 KB
+
+} // namespace size_policy
 
 } // namespace stream
 
@@ -99,5 +106,4 @@ const size_t workers = min(3u, std::thread::hardware_concurrency() / 4u) + 1;
 
 } // namespace middleman
 
-} // namespace defaults
-} // namespace caf
+} // namespace caf::defaults

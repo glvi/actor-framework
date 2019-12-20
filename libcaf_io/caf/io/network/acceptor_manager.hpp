@@ -18,15 +18,14 @@
 
 #pragma once
 
+#include "caf/detail/io_export.hpp"
 #include "caf/io/network/manager.hpp"
 
-namespace caf {
-namespace io {
-namespace network {
+namespace caf::io::network {
 
 /// An acceptor manager configures an acceptor and provides
 /// callbacks for incoming connections as well as for error handling.
-class acceptor_manager : public manager {
+class CAF_IO_EXPORT acceptor_manager : public manager {
 public:
   ~acceptor_manager() override;
 
@@ -38,9 +37,9 @@ public:
 
   /// Get the port of the underlying I/O device.
   virtual uint16_t port() const = 0;
+
+  /// Get the port of the underlying I/O device.
+  virtual std::string addr() const = 0;
 };
 
-} // namespace network
-} // namespace io
-} // namespace caf
-
+} // namespace caf::io::network

@@ -21,14 +21,15 @@
 #include <iomanip>
 #include <sstream>
 
-namespace caf {
-namespace detail {
+#include "caf/error.hpp"
+#include "caf/string_view.hpp"
 
-error serialized_size_inspector::begin_object(uint16_t& nr, std::string& name) {
+namespace caf::detail {
+
+error serialized_size_inspector::begin_object(uint16_t nr, string_view name) {
   if (nr != 0)
     return apply(nr);
-  if (auto err = apply(nr))
-    return err;
+  apply(nr);
   return apply(name);
 }
 
@@ -36,7 +37,7 @@ error serialized_size_inspector::end_object() {
   return none;
 }
 
-error serialized_size_inspector::begin_sequence(size_t& list_size) {
+error serialized_size_inspector::begin_sequence(size_t list_size) {
   // Use varbyte encoding to compress sequence size on the wire.
   // For 64-bit values, the encoded representation cannot get larger than 10
   // bytes. A scratch space of 16 bytes suffices as upper bound.
@@ -48,7 +49,7 @@ error serialized_size_inspector::begin_sequence(size_t& list_size) {
     x >>= 7;
   }
   *i++ = static_cast<uint8_t>(x) & 0x7f;
-  apply_raw(static_cast<size_t>(i - buf), buf);
+  result_ += static_cast<size_t>(i - buf);
   return none;
 }
 
@@ -56,93 +57,97 @@ error serialized_size_inspector::end_sequence() {
   return none;
 }
 
-error serialized_size_inspector::apply_raw(size_t num_bytes, void*) {
-  result_ += num_bytes;
+error serialized_size_inspector::apply(bool) {
+  result_ += sizeof(uint8_t);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(int8_t& x) {
+error serialized_size_inspector::apply(int8_t x) {
   result_ += sizeof(x);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(uint8_t& x) {
+error serialized_size_inspector::apply(uint8_t x) {
   result_ += sizeof(x);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(int16_t& x) {
+error serialized_size_inspector::apply(int16_t x) {
   result_ += sizeof(x);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(uint16_t& x) {
+error serialized_size_inspector::apply(uint16_t x) {
   result_ += sizeof(x);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(int32_t& x) {
+error serialized_size_inspector::apply(int32_t x) {
   result_ += sizeof(x);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(uint32_t& x) {
+error serialized_size_inspector::apply(uint32_t x) {
   result_ += sizeof(x);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(int64_t& x) {
+error serialized_size_inspector::apply(int64_t x) {
   result_ += sizeof(x);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(uint64_t& x) {
+error serialized_size_inspector::apply(uint64_t x) {
   result_ += sizeof(x);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(float& x) {
+error serialized_size_inspector::apply(float x) {
   result_ += sizeof(x);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(double& x) {
+error serialized_size_inspector::apply(double x) {
   result_ += sizeof(x);
   return none;
 }
 
-error serialized_size_inspector::apply_impl(long double& x) {
+error serialized_size_inspector::apply(long double x) {
   // The IEEE-754 conversion does not work for long double
   // => fall back to string serialization (event though it sucks).
   std::ostringstream oss;
   oss << std::setprecision(std::numeric_limits<long double>::digits) << x;
   auto tmp = oss.str();
-  return apply_impl(tmp);
+  return apply(tmp);
 }
 
-error serialized_size_inspector::apply_impl(std::string& x) {
-  size_t str_size = x.size();
-  begin_sequence(str_size);
+error serialized_size_inspector::apply(string_view x) {
+  begin_sequence(x.size());
   result_ += x.size();
-  end_sequence();
-  return none;
+  return end_sequence();
 }
 
-error serialized_size_inspector::apply_impl(std::u16string& x) {
-  size_t str_size = x.size();
-  begin_sequence(str_size);
+error serialized_size_inspector::apply(const std::u16string& x) {
+  begin_sequence(x.size());
   result_ += x.size() * sizeof(uint16_t);
-  end_sequence();
-  return none;
+  return end_sequence();
 }
 
-error serialized_size_inspector::apply_impl(std::u32string& x) {
-  size_t str_size = x.size();
-  begin_sequence(str_size);
+error serialized_size_inspector::apply(const std::u32string& x) {
+  begin_sequence(x.size());
   result_ += x.size() * sizeof(uint32_t);
-  end_sequence();
+  return end_sequence();
+}
+
+error serialized_size_inspector::apply(span<const byte> x) {
+  result_ += x.size();
   return none;
 }
 
-} // namespace detail
-} // namespace caf
+error serialized_size_inspector::apply(const std::vector<bool>& xs) {
+  begin_sequence(xs.size());
+  result_ += (xs.size() + static_cast<size_t>(xs.size() % 8 != 0)) / 8;
+  return end_sequence();
+}
+
+} // namespace caf::detail

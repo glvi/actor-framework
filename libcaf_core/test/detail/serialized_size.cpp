@@ -24,8 +24,9 @@
 
 #include <vector>
 
+#include "caf/binary_serializer.hpp"
 #include "caf/byte.hpp"
-#include "caf/serializer_impl.hpp"
+#include "caf/byte_buffer.hpp"
 
 using namespace caf;
 
@@ -34,12 +35,10 @@ using caf::detail::serialized_size;
 namespace {
 
 struct fixture : test_coordinator_fixture<> {
-  using buffer_type = std::vector<byte>;
-
   template <class... Ts>
   size_t actual_size(const Ts&... xs) {
-    buffer_type buf;
-    serializer_impl<buffer_type> sink{sys, buf};
+    byte_buffer buf;
+    binary_serializer sink{sys, buf};
     if (auto err = sink(xs...))
       CAF_FAIL("failed to serialize data: " << sys.render(err));
     return buf.size();

@@ -18,19 +18,21 @@
 
 #pragma once
 
-#include <string>
 #include <memory>
+#include <string>
 
-#include "caf/fwd.hpp"
+#include "caf/abstract_channel.hpp"
 #include "caf/actor_addr.hpp"
 #include "caf/attachable.hpp"
+#include "caf/detail/core_export.hpp"
+#include "caf/fwd.hpp"
 #include "caf/ref_counted.hpp"
-#include "caf/abstract_channel.hpp"
 
 namespace caf {
 
 /// A multicast group.
-class abstract_group : public ref_counted, public abstract_channel {
+class CAF_CORE_EXPORT abstract_group : public ref_counted,
+                                       public abstract_channel {
 public:
   // -- member types -----------------------------------------------------------
 
@@ -46,6 +48,9 @@ public:
 
   /// Serialize this group to `sink`.
   virtual error save(serializer& sink) const = 0;
+
+  /// Serialize this group to `sink`.
+  virtual error_code<sec> save(binary_serializer& sink) const = 0;
 
   /// Subscribes `who` to this group and returns `true` on success
   /// or `false` if `who` is already subscribed.
@@ -89,4 +94,3 @@ protected:
 using abstract_group_ptr = intrusive_ptr<abstract_group>;
 
 } // namespace caf
-

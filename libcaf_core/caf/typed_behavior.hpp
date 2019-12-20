@@ -23,6 +23,7 @@
 #include "caf/interface_mismatch.hpp"
 #include "caf/message_handler.hpp"
 #include "caf/system_messages.hpp"
+#include "caf/timespan.hpp"
 
 #include "caf/detail/typed_actor_util.hpp"
 
@@ -114,7 +115,7 @@ struct valid_input {
 
 // this function is called from typed_behavior<...>::set and its whole
 // purpose is to give users a nicer error message on a type mismatch
-// (this function only has the type informations needed to understand the error)
+// (this function only has the type information needed to understand the error)
 template <class SignatureList, class InputList>
 void static_check_typed_behavior_input() {
   constexpr bool is_valid = valid_input<SignatureList, InputList>::value;
@@ -210,7 +211,7 @@ public:
 
   /// Returns the duration after which receives using
   /// this behavior should time out.
-  const duration& timeout() const {
+  timespan timeout() const noexcept {
     return bhvr_.timeout();
   }
 

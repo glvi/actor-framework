@@ -18,32 +18,32 @@
 
 #pragma once
 
+#include <future>
 #include <map>
 #include <set>
 #include <stack>
 #include <string>
-#include <future>
-#include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
-#include "caf/stateful_actor.hpp"
-#include "caf/proxy_registry.hpp"
-#include "caf/binary_serializer.hpp"
 #include "caf/binary_deserializer.hpp"
+#include "caf/binary_serializer.hpp"
+#include "caf/byte_buffer.hpp"
+#include "caf/detail/io_export.hpp"
 #include "caf/forwarding_actor_proxy.hpp"
-
 #include "caf/io/basp/all.hpp"
 #include "caf/io/broker.hpp"
 #include "caf/io/typed_broker.hpp"
+#include "caf/proxy_registry.hpp"
+#include "caf/stateful_actor.hpp"
 
-namespace caf {
-namespace io {
+namespace caf::io {
 
 /// A broker implementation for the Binary Actor System Protocol (BASP).
-class basp_broker : public broker,
-                    public proxy_registry::backend,
-                    public basp::instance::callee {
+class CAF_IO_EXPORT basp_broker : public broker,
+                                  public proxy_registry::backend,
+                                  public basp::instance::callee {
 public:
   // -- member types -----------------------------------------------------------
 
@@ -51,8 +51,8 @@ public:
 
   using ctx_map = std::unordered_map<connection_handle, basp::endpoint_context>;
 
-  using monitored_actor_map = std::unordered_map<actor_addr,
-                                                 std::unordered_set<node_id>>;
+  using monitored_actor_map
+    = std::unordered_map<actor_addr, std::unordered_set<node_id>>;
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -92,7 +92,7 @@ public:
 
   void learned_new_node_indirectly(const node_id& nid) override;
 
-  buffer_type& get_buffer(connection_handle hdl) override;
+  byte_buffer& get_buffer(connection_handle hdl) override;
 
   void flush(connection_handle hdl) override;
 
@@ -160,5 +160,4 @@ public:
   monitored_actor_map monitored_actors;
 };
 
-} // namespace io
-} // namespace caf
+} // namespace caf::io

@@ -34,8 +34,7 @@ Usage: $0 [OPTION]... [VAR=VALUE]...
     --with-qt-prefix=PATH       prefix path for Qt5 cmake modules
     --with-openssl=PATH         path to OpenSSL library and headers
     --dual-build                build using both gcc and clang
-    --build-static              build as static and shared library
-    --build-static-only         build as static library only
+    --build-static              build as static library
     --static-runtime            build with static C++ runtime
     --more-warnings             enables most warnings
     --no-compiler-check         disable compiler version check
@@ -58,7 +57,6 @@ Usage: $0 [OPTION]... [VAR=VALUE]...
     --no-examples               build without examples
     --no-curl-examples          build without libcurl examples
     --no-unit-tests             build without unit tests
-    --no-opencl                 build without OpenCL module
     --no-openssl                build without OpenSSL module
     --no-tools                  build without CAF tools such as caf-run
     --no-io                     build without I/O module
@@ -66,7 +64,7 @@ Usage: $0 [OPTION]... [VAR=VALUE]...
     --no-summary                do not print configuration before building
     --libs-only                 sets no-examples, no-tools, no-python,
                                 and no-unit-tests
-    --core-only                 same as libs-only but also adds sets no-opencl,
+    --core-only                 same as libs-only but also adds sets
                                 no-openssl, and no-io
 
   Debugging:
@@ -77,16 +75,14 @@ Usage: $0 [OPTION]... [VAR=VALUE]...
                                   - INFO
                                   - DEBUG
                                   - TRACE
-    --with-address-sanitizer    build with address sanitizer if available
-    --with-asan                 alias for --with-address-sanitier
-    --enable-asan               alias for --with-address-sanitier
-    --with-gcov                 build with gcov coverage enabled
+    --with-sanitizers=LIST      build with this list of sanitizers enabled
     --with-actor-profiler       enables the (experimental) actor_profiler API
 
   Convenience options:
     --dev-mode                  sets --build-type=debug, --no-examples,
                                 --no-tools, --with-runtime-checks,
-                                --log-level=trace, and --enable-asan
+                                --log-level=trace, and
+                                --with-sanitizers=address,undefined
 
   Influential Environment Variables (only on first invocation):
     CXX                         C++ compiler command
@@ -239,17 +235,8 @@ while [ $# -ne 0 ]; do
         --with-runtime-checks)
             append_cache_entry CAF_ENABLE_RUNTIME_CHECKS BOOL yes
             ;;
-        --with-address-sanitizer)
-            append_cache_entry CAF_ENABLE_ADDRESS_SANITIZER BOOL yes
-            ;;
-        --with-asan)
-            append_cache_entry CAF_ENABLE_ADDRESS_SANITIZER BOOL yes
-            ;;
-        --enable-asan)
-            append_cache_entry CAF_ENABLE_ADDRESS_SANITIZER BOOL yes
-            ;;
-        --with-gcov)
-            append_cache_entry CAF_ENABLE_GCOV BOOL yes
+        --with-sanitizers=*)
+            append_cache_entry CAF_SANITIZERS STRING "$optarg"
             ;;
         --with-actor-profiler)
             append_cache_entry CAF_ENABLE_ACTOR_PROFILER BOOL yes
@@ -337,17 +324,11 @@ while [ $# -ne 0 ]; do
         --no-unit-tests)
             append_cache_entry CAF_NO_UNIT_TESTS BOOL yes
             ;;
-        --no-opencl)
-            append_cache_entry CAF_NO_OPENCL BOOL yes
-            ;;
         --no-openssl)
             append_cache_entry CAF_NO_OPENSSL BOOL yes
             ;;
         --build-static)
-            append_cache_entry CAF_BUILD_STATIC BOOL yes
-            ;;
-        --build-static-only)
-            append_cache_entry CAF_BUILD_STATIC_ONLY BOOL yes
+            append_cache_entry BUILD_SHARED_LIBS BOOL no
             ;;
         --static-runtime)
             append_cache_entry CAF_BUILD_STATIC_RUNTIME BOOL yes
@@ -373,17 +354,17 @@ while [ $# -ne 0 ]; do
             done
             ;;
         --core-only)
-            for var in CAF_NO_TOOLS CAF_NO_PYTHON CAF_NO_EXAMPLES  CAF_NO_UNIT_TESTS CAF_NO_IO CAF_NO_OPENCL CAF_NO_OPENSSL ; do
+            for var in CAF_NO_TOOLS CAF_NO_PYTHON CAF_NO_EXAMPLES  CAF_NO_UNIT_TESTS CAF_NO_IO CAF_NO_OPENSSL ; do
               append_cache_entry $var BOOL yes
             done
             ;;
         --dev-mode)
-            append_cache_entry CMAKE_BUILD_TYPE STRING Debug
-            append_cache_entry CAF_NO_EXAMPLES BOOL yes
-            append_cache_entry CAF_NO_TOOLS BOOL yes
+            for var in CAF_NO_TOOLS CAF_NO_EXAMPLES CAF_ENABLE_RUNTIME_CHECKS ; do
+              append_cache_entry $var BOOL yes
+            done
+            append_cache_entry CMAKE_BUILD_TYPE STRING debug
             append_cache_entry CAF_LOG_LEVEL STRING TRACE
-            append_cache_entry CAF_ENABLE_RUNTIME_CHECKS BOOL yes
-            append_cache_entry CAF_ENABLE_ADDRESS_SANITIZER BOOL yes
+            append_cache_entry CAF_SANITIZERS STRING address,undefined
             ;;
         *)
             echo "Invalid option '$1'.  Try $0 --help to see available options."

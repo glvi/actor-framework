@@ -19,12 +19,13 @@
 #pragma once
 
 #include <array>
-#include <string>
 #include <cstdint>
 #include <functional>
+#include <string>
 
 #include "caf/atom.hpp"
 #include "caf/detail/comparable.hpp"
+#include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
 #include "caf/intrusive_ptr.hpp"
 #include "caf/none.hpp"
@@ -34,12 +35,12 @@
 namespace caf {
 
 /// A node ID is an opaque value for representing CAF instances in the network.
-class node_id {
+class CAF_CORE_EXPORT node_id {
 public:
   // -- member types -----------------------------------------------------------
 
   // A reference counted, implementation-specific implementation of a node ID.
-  class data : public ref_counted {
+  class CAF_CORE_EXPORT data : public ref_counted {
   public:
     ~data() override;
 
@@ -56,10 +57,14 @@ public:
     virtual error serialize(serializer& sink) const = 0;
 
     virtual error deserialize(deserializer& source) = 0;
+
+    virtual error_code<sec> serialize(binary_serializer& sink) const = 0;
+
+    virtual error_code<sec> deserialize(binary_deserializer& source) = 0;
   };
 
   // A technology-agnostic node identifier with process ID and hash value.
-  class default_data final : public data {
+  class CAF_CORE_EXPORT default_data final : public data {
   public:
     // -- constants ------------------------------------------------------------
 
@@ -115,6 +120,10 @@ public:
 
     error deserialize(deserializer& source) override;
 
+    error_code<sec> serialize(binary_serializer& sink) const override;
+
+    error_code<sec> deserialize(binary_deserializer& source) override;
+
   private:
     // -- member variables -----------------------------------------------------
 
@@ -124,7 +133,7 @@ public:
   };
 
   // A technology-agnostic node identifier using an URI.
-  class uri_data final : public data {
+  class CAF_CORE_EXPORT uri_data final : public data {
   public:
     // -- constants ------------------------------------------------------------
 
@@ -158,6 +167,10 @@ public:
     error serialize(serializer& sink) const override;
 
     error deserialize(deserializer& source) override;
+
+    error_code<sec> serialize(binary_serializer& sink) const override;
+
+    error_code<sec> deserialize(binary_deserializer& source) override;
 
   private:
     // -- member variables -----------------------------------------------------
@@ -199,9 +212,6 @@ public:
 
   /// @cond PRIVATE
 
-  error serialize(serializer& sink) const;
-
-  error deserialize(deserializer& source);
 
   data* operator->() noexcept {
     return data_.get();
@@ -220,6 +230,20 @@ public:
   }
 
   /// @endcond
+
+  /// @relates node_id
+  friend CAF_CORE_EXPORT error inspect(serializer& sink, node_id& x);
+
+  /// @relates node_id
+  friend CAF_CORE_EXPORT error_code<sec>
+  inspect(binary_serializer& sink, node_id& x);
+
+  /// @relates node_id
+  friend CAF_CORE_EXPORT error inspect(deserializer& source, node_id& x);
+
+  /// @relates node_id
+  friend CAF_CORE_EXPORT error_code<sec>
+  inspect(binary_deserializer& source, node_id& x);
 
 private:
   intrusive_ptr<data> data_;
@@ -281,43 +305,37 @@ inline bool operator!=(const none_t&, const node_id& x) noexcept {
   return static_cast<bool>(x);
 }
 
-/// @relates node_id
-error inspect(serializer& sink, const node_id& x);
-
-/// @relates node_id
-error inspect(deserializer& source, node_id& x);
-
 /// Appends `x` in human-readable string representation to `str`.
 /// @relates node_id
-void append_to_string(std::string& str, const node_id& x);
+CAF_CORE_EXPORT void append_to_string(std::string& str, const node_id& x);
 
 /// Converts `x` into a human-readable string representation.
 /// @relates node_id
-std::string to_string(const node_id& x);
+CAF_CORE_EXPORT std::string to_string(const node_id& x);
 
 /// Creates a node ID from the URI `from`.
 /// @relates node_id
-node_id make_node_id(uri from);
+CAF_CORE_EXPORT node_id make_node_id(uri from);
 
 /// Creates a node ID from `process_id` and `host_id`.
 /// @param process_id System-wide unique process identifier.
 /// @param host_id Unique hash value representing a single CAF node.
 /// @relates node_id
-node_id make_node_id(uint32_t process_id,
-                     const node_id::default_data::host_id_type& host_id);
+CAF_CORE_EXPORT node_id make_node_id(
+  uint32_t process_id, const node_id::default_data::host_id_type& host_id);
 
 /// Creates a node ID from `process_id` and `host_hash`.
 /// @param process_id System-wide unique process identifier.
 /// @param host_hash Unique node ID as hexadecimal string representation.
 /// @relates node_id
-optional<node_id> make_node_id(uint32_t process_id,
-                               const std::string& host_hash);
+CAF_CORE_EXPORT optional<node_id>
+make_node_id(uint32_t process_id, const std::string& host_hash);
 
 } // namespace caf
 
 namespace std {
 
-template<>
+template <>
 struct hash<caf::node_id> {
   size_t operator()(const caf::node_id& x) const noexcept {
     return x ? x->hash_code() : 0;

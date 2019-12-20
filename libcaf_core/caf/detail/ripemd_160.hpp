@@ -57,12 +57,12 @@
 #include <array>
 #include <string>
 
-namespace caf {
-namespace detail {
+#include "caf/detail/core_export.hpp"
+
+namespace caf::detail {
 
 /// Creates a hash from `data` using the RIPEMD-160 algorithm.
-void ripemd_160(std::array<uint8_t, 20>& storage, const std::string& data);
+CAF_CORE_EXPORT void
+ripemd_160(std::array<uint8_t, 20>& storage, const std::string& data);
 
-} // namespace detail
-} // namespace caf
-
+} // namespace caf::detail

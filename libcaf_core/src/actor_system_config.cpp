@@ -18,10 +18,10 @@
 
 #include "caf/actor_system_config.hpp"
 
-#include <limits>
-#include <thread>
 #include <fstream>
+#include <limits>
 #include <sstream>
+#include <thread>
 
 #include "caf/config.hpp"
 #include "caf/config_option.hpp"
@@ -39,7 +39,7 @@ namespace {
 
 constexpr const char* default_config_file = "caf-application.ini";
 
-} // namespace anonymous
+} // namespace
 
 actor_system_config::~actor_system_config() {
   // nop
@@ -49,10 +49,10 @@ actor_system_config::~actor_system_config() {
 // by (2) INI-file contents that are in turn overridden by (3) CLI arguments
 
 actor_system_config::actor_system_config()
-    : cli_helptext_printed(false),
-      slave_mode(false),
-      config_file_path(default_config_file),
-      slave_mode_fun(nullptr) {
+  : cli_helptext_printed(false),
+    slave_mode(false),
+    config_file_path(default_config_file),
+    slave_mode_fun(nullptr) {
   // add `vector<T>` and `stream<T>` for each statically known type
   add_message_type_impl<stream<actor>>("stream<@actor>");
   add_message_type_impl<stream<actor_addr>>("stream<@addr>");
@@ -75,14 +75,17 @@ actor_system_config::actor_system_config()
     .add<bool>("help,h?", "print help text to STDERR and exit")
     .add<bool>("long-help", "print long help text to STDERR and exit")
     .add<bool>("dump-config", "print configuration to STDERR and exit")
-    .add<string>(config_file_path, "config-file", "set config file (default: caf-application.ini)");
+    .add<string>(config_file_path, "config-file",
+                 "set config file (default: caf-application.ini)");
   opt_group{custom_options_, "stream"}
     .add<timespan>(stream_desired_batch_complexity, "desired-batch-complexity",
                    "processing time per batch")
     .add<timespan>(stream_max_batch_delay, "max-batch-delay",
                    "maximum delay for partial batches")
     .add<timespan>(stream_credit_round_interval, "credit-round-interval",
-                   "time between emitting credit");
+                   "time between emitting credit")
+    .add<atom_value>("credit-policy",
+                     "selects an algorithm for credit computation");
   opt_group{custom_options_, "scheduler"}
     .add<atom_value>("policy", "'stealing' (default) or 'sharing'")
     .add<size_t>("max-threads", "maximum number of worker threads")
@@ -106,10 +109,10 @@ actor_system_config::actor_system_config()
   opt_group{custom_options_, "logger"}
     .add<atom_value>("verbosity", "default verbosity for file and console")
     .add<string>("file-name", "filesystem path of the log file")
-    .add<string>("file-format", "line format for individual log file entires")
+    .add<string>("file-format", "line format for individual log file entries")
     .add<atom_value>("file-verbosity", "file output verbosity")
     .add<atom_value>("console", "std::clog output: none, colored, or uncolored")
-    .add<string>("console-format", "line format for printed log entires")
+    .add<string>("console-format", "line format for printed log entries")
     .add<atom_value>("console-verbosity", "console output verbosity")
     .add<std::vector<atom_value>>("component-blacklist",
                                   "excluded components for logging")
@@ -130,8 +133,6 @@ actor_system_config::actor_system_config()
     .add<bool>("manual-multiplexing",
                "disables background activity of the multiplexer")
     .add<size_t>("workers", "number of deserialization workers");
-  opt_group(custom_options_, "opencl")
-    .add<std::vector<size_t>>("device-ids", "whitelist for OpenCL devices");
   opt_group(custom_options_, "openssl")
     .add<string>(openssl_certificate, "certificate",
                  "path to the PEM-formatted certificate file")
@@ -158,6 +159,11 @@ settings actor_system_config::dump_content() const {
               defaults::stream::max_batch_delay);
   put_missing(stream_group, "credit-round-interval",
               defaults::stream::credit_round_interval);
+  put_missing(stream_group, "credit-policy", defaults::stream::credit_policy);
+  put_missing(stream_group, "size-policy.buffer-capacity",
+              defaults::stream::size_policy::buffer_capacity);
+  put_missing(stream_group, "size-policy.bytes-per-batch",
+              defaults::stream::size_policy::bytes_per_batch);
   // -- scheduler parameters
   auto& scheduler_group = result["scheduler"].as_dictionary();
   put_missing(scheduler_group, "policy", defaults::scheduler::policy);
@@ -205,7 +211,7 @@ settings actor_system_config::dump_content() const {
   put_missing(middleman_group, "heartbeat-interval",
               defaults::middleman::heartbeat_interval);
   put_missing(middleman_group, "workers", defaults::middleman::workers);
-  // -- opencl parameters
+  // -- openssl parameters
   auto& openssl_group = result["openssl"].as_dictionary();
   put_missing(openssl_group, "certificate", std::string{});
   put_missing(openssl_group, "key", std::string{});
@@ -213,41 +219,6 @@ settings actor_system_config::dump_content() const {
   put_missing(openssl_group, "capath", std::string{});
   put_missing(openssl_group, "cafile", std::string{});
   return result;
-}
-
-std::string
-actor_system_config::make_help_text(const std::vector<message::cli_arg>& xs) {
-  auto is_no_caf_option = [](const message::cli_arg& arg) {
-    return arg.name.compare(0, 4, "caf#") != 0;
-  };
-  auto op = [](size_t tmp, const message::cli_arg& arg) {
-    return std::max(tmp, arg.helptext.size());
-  };
-  // maximum string lenght of all options
-  auto name_width = std::accumulate(xs.begin(), xs.end(), size_t{0}, op);
-  // iterators to the vector with respect to partition point
-  auto first = xs.begin();
-  auto last = xs.end();
-  auto sep = std::find_if(first, last, is_no_caf_option);
-  // output stream
-  std::ostringstream oss;
-  oss << std::left;
-  oss << "CAF Options:" << std::endl;
-  for (auto i = first; i != sep; ++i) {
-    oss << "  ";
-    oss.width(static_cast<std::streamsize>(name_width));
-    oss << i->helptext << "  : " << i->text << std::endl;
-  }
-  if (sep != last) {
-    oss << std::endl;
-    oss << "Application Options:" << std::endl;
-    for (auto i = sep; i != last; ++i) {
-      oss << "  ";
-      oss.width(static_cast<std::streamsize>(name_width));
-      oss << i->helptext << "  : " << i->text << std::endl;
-    }
-  }
-  return oss.str();
 }
 
 error actor_system_config::parse(int argc, char** argv,
@@ -293,7 +264,7 @@ struct ini_iter {
   }
 };
 
-struct ini_sentinel { };
+struct ini_sentinel {};
 
 bool operator!=(ini_iter iter, ini_sentinel) {
   return !iter.ini->fail();
@@ -401,8 +372,8 @@ actor_system_config::add_error_category(atom_value x, error_renderer y) {
   return *this;
 }
 
-actor_system_config& actor_system_config::set_impl(string_view name,
-                                                   config_value value) {
+actor_system_config&
+actor_system_config::set_impl(string_view name, config_value value) {
   if (name == "middleman.app-identifier") {
     // TODO: Print a warning with 0.18 and remove this code with 0.19.
     value.convert_to_list();
@@ -443,8 +414,8 @@ std::string actor_system_config::render(const error& err) {
   return "unknown-error";
 }
 
-std::string actor_system_config::render_sec(uint8_t x, atom_value,
-                                            const message& xs) {
+std::string
+actor_system_config::render_sec(uint8_t x, atom_value, const message& xs) {
   auto tmp = static_cast<sec>(x);
   return deep_to_string(meta::type_name("system_error"), tmp,
                         meta::omittable_if_empty(), xs);
@@ -457,8 +428,8 @@ std::string actor_system_config::render_exit_reason(uint8_t x, atom_value,
                         meta::omittable_if_empty(), xs);
 }
 
-std::string actor_system_config::render_pec(uint8_t x, atom_value,
-                                            const message& xs) {
+std::string
+actor_system_config::render_pec(uint8_t x, atom_value, const message& xs) {
   auto tmp = static_cast<pec>(x);
   return deep_to_string(meta::type_name("parser_error"), tmp,
                         meta::omittable_if_empty(), xs);

@@ -32,7 +32,6 @@
 #include "caf/actor_system_config.hpp"
 #include "caf/after.hpp"
 #include "caf/defaults.hpp"
-#include "caf/duration.hpp"
 #include "caf/logger.hpp"
 #include "caf/others.hpp"
 #include "caf/policy/work_stealing.hpp"
@@ -42,8 +41,7 @@
 #include "caf/send.hpp"
 #include "caf/system_messages.hpp"
 
-namespace caf {
-namespace scheduler {
+namespace caf::scheduler {
 
 /******************************************************************************
  *                     utility and implementation details                     *
@@ -312,5 +310,4 @@ void abstract_coordinator::cleanup_and_release(resumable* ptr) {
   intrusive_ptr_release(ptr);
 }
 
-} // namespace scheduler
-} // namespace caf
+} // namespace caf::scheduler

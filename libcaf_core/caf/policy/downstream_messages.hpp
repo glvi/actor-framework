@@ -19,23 +19,22 @@
 
 #pragma once
 
+#include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
+#include "caf/intrusive/drr_queue.hpp"
 #include "caf/mailbox_element.hpp"
 #include "caf/stream_slot.hpp"
 #include "caf/unit.hpp"
 
-#include "caf/intrusive/drr_queue.hpp"
-
-namespace caf {
-namespace policy {
+namespace caf::policy {
 
 /// Configures a dynamic WDRR queue for holding downstream messages.
-class downstream_messages {
+class CAF_CORE_EXPORT downstream_messages {
 public:
   // -- nested types -----------------------------------------------------------
 
   /// Configures a nested DRR queue.
-  class nested {
+  class CAF_CORE_EXPORT nested {
   public:
     // -- member types ---------------------------------------------------------
 
@@ -95,8 +94,8 @@ public:
 
   static bool enabled(const nested_queue_type& q) noexcept;
 
-  static deficit_type quantum(const nested_queue_type& q,
-                              deficit_type x) noexcept;
+  static deficit_type
+  quantum(const nested_queue_type& q, deficit_type x) noexcept;
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -117,6 +116,4 @@ public:
   }
 };
 
-} // namespace policy
-} // namespace caf
-
+} // namespace caf::policy

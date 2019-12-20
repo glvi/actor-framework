@@ -18,19 +18,17 @@
 
 #pragma once
 
-#include "caf/ref_counted.hpp"
 #include "caf/intrusive_ptr.hpp"
+#include "caf/ref_counted.hpp"
 
-namespace caf {
-namespace detail {
+namespace caf::detail {
 
 template <class Base>
 class embedded final : public Base {
 public:
   template <class... Ts>
   embedded(intrusive_ptr<ref_counted> storage, Ts&&... xs)
-      : Base(std::forward<Ts>(xs)...),
-        storage_(std::move(storage)) {
+    : Base(std::forward<Ts>(xs)...), storage_(std::move(storage)) {
     // nop
   }
 
@@ -50,7 +48,4 @@ protected:
   intrusive_ptr<ref_counted> storage_;
 };
 
-} // namespace detail
-} // namespace caf
-
-
+} // namespace caf::detail

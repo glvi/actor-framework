@@ -164,6 +164,7 @@ namespace caf {
 template <>
 struct config_value_access<foobar> : config_value_object_access<foobar_trait> {
 };
+
 template <>
 struct config_value_access<foobar_foobar>
   : config_value_object_access<foobar_foobar_trait> {};
@@ -203,7 +204,7 @@ CAF_TEST(getter and setter access) {
   test_foo_field(foo_field);
 }
 
-CAF_TEST(oject access from dictionary - foobar) {
+CAF_TEST(object access from dictionary - foobar) {
   settings x;
   put(x, "my-value.bar", "hello");
   CAF_MESSAGE("without foo member");
@@ -225,7 +226,7 @@ CAF_TEST(oject access from dictionary - foobar) {
   }
 }
 
-CAF_TEST(oject access from dictionary - foobar_foobar) {
+CAF_TEST(object access from dictionary - foobar_foobar) {
   settings x;
   put(x, "my-value.x.foo", 1);
   put(x, "my-value.x.bar", "hello");

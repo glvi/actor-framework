@@ -22,8 +22,10 @@
 
 #pragma once
 
-#include "caf/error.hpp"
-#include "caf/make_message.hpp"
+#include <string>
+
+#include "caf/detail/core_export.hpp"
+#include "caf/fwd.hpp"
 
 namespace caf {
 
@@ -126,20 +128,24 @@ enum class sec : uint8_t {
   unavailable_or_would_block,
   /// Resolving a path on a remote node failed.
   remote_lookup_failed,
+  /// Serialization failed because actor_system::tracing_context is null.
+  no_tracing_context,
 };
 
 /// @relates sec
-std::string to_string(sec);
+CAF_CORE_EXPORT std::string to_string(sec);
 
 /// @relates sec
-error make_error(sec);
+CAF_CORE_EXPORT error make_error(sec);
+
+/// @relates sec
+CAF_CORE_EXPORT error make_error(sec, message);
 
 /// @relates sec
 template <class T, class... Ts>
-error make_error(sec code, T&& x, Ts&&... xs) {
-  return {static_cast<uint8_t>(code), atom("system"),
-          make_message(std::forward<T>(x), std::forward<Ts>(xs)...)};
+auto make_error(sec code, T&& x, Ts&&... xs) {
+  return make_error(code,
+                    make_message(std::forward<T>(x), std::forward<Ts>(xs)...));
 }
 
 } // namespace caf
-

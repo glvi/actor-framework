@@ -30,9 +30,7 @@ CAF_PUSH_UNUSED_LABEL_WARNING
 
 #include "caf/detail/parser/fsm.hpp"
 
-namespace caf {
-namespace detail {
-namespace parser {
+namespace caf::detail::parser {
 
 /// Reads a quoted or unquoted string. Quoted strings allow escaping, while
 /// unquoted strings may only include alphanumeric characters.
@@ -43,6 +41,7 @@ void read_string(State& ps, Consumer&& consumer) {
     if (ps.code <= pec::trailing_character)
       consumer.value(std::move(res));
   });
+  // clang-format off
   start();
   state(init) {
     transition(init, " \t")
@@ -71,11 +70,10 @@ void read_string(State& ps, Consumer&& consumer) {
     transition(done, " \t")
   }
   fin();
+  // clang-format on
 }
 
-} // namespace parser
-} // namespace detail
-} // namespace caf
+} // namespace caf::detail::parser
 
 #include "caf/detail/parser/fsm_undef.hpp"
 

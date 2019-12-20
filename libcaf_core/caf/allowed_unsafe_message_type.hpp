@@ -41,7 +41,11 @@ struct is_allowed_unsafe_message_type<T&&> : allowed_unsafe_message_type<T> {};
 
 template <class T>
 struct is_allowed_unsafe_message_type<const T&>
-    : allowed_unsafe_message_type<T> {};
+  : allowed_unsafe_message_type<T> {};
+
+template <class T>
+constexpr bool is_allowed_unsafe_message_type_v
+  = allowed_unsafe_message_type<T>::value;
 
 } // namespace caf
 
@@ -50,4 +54,3 @@ struct is_allowed_unsafe_message_type<const T&>
   template <>                                                                  \
   struct allowed_unsafe_message_type<type_name> : std::true_type {};           \
   }
-

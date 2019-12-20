@@ -22,8 +22,10 @@
 #include <cstdint>
 #include <vector>
 
+#include "caf/byte_buffer.hpp"
 #include "caf/config.hpp"
 #include "caf/detail/abstract_worker.hpp"
+#include "caf/detail/io_export.hpp"
 #include "caf/detail/worker_hub.hpp"
 #include "caf/fwd.hpp"
 #include "caf/io/basp/fwd.hpp"
@@ -32,13 +34,11 @@
 #include "caf/node_id.hpp"
 #include "caf/resumable.hpp"
 
-namespace caf {
-namespace io {
-namespace basp {
+namespace caf::io::basp {
 
 /// Deserializes payloads for BASP messages asynchronously.
-class worker : public detail::abstract_worker,
-               public remote_message_handler<worker> {
+class CAF_IO_EXPORT worker : public detail::abstract_worker,
+                             public remote_message_handler<worker> {
 public:
   // -- friends ----------------------------------------------------------------
 
@@ -50,13 +50,11 @@ public:
 
   using scheduler_type = scheduler::abstract_coordinator;
 
-  using buffer_type = std::vector<char>;
-
   using hub_type = detail::worker_hub<worker>;
 
   // -- constructors, destructors, and assignment operators --------------------
 
-  /// Only the ::worker_hub has access to the construtor.
+  /// Only the ::worker_hub has access to the constructor.
   worker(hub_type& hub, message_queue& queue, proxy_registry& proxies);
 
   ~worker() override;
@@ -64,7 +62,7 @@ public:
   // -- management -------------------------------------------------------------
 
   void launch(const node_id& last_hop, const basp::header& hdr,
-              const buffer_type& payload);
+              const byte_buffer& payload);
 
   // -- implementation of resumable --------------------------------------------
 
@@ -74,10 +72,9 @@ private:
   // -- constants and assertions -----------------------------------------------
 
   /// Stores how many bytes the "first half" of this object requires.
-  static constexpr size_t pointer_members_size = sizeof(hub_type*)
-                                                 + sizeof(message_queue*)
-                                                 + sizeof(proxy_registry*)
-                                                 + sizeof(actor_system*);
+  static constexpr size_t pointer_members_size
+    = sizeof(hub_type*) + sizeof(message_queue*) + sizeof(proxy_registry*)
+      + sizeof(actor_system*);
 
   static_assert(CAF_CACHE_LINE_SIZE > pointer_members_size,
                 "invalid cache line size");
@@ -110,9 +107,7 @@ private:
   header hdr_;
 
   /// Contains whatever this worker deserializes next.
-  buffer_type payload_;
+  byte_buffer payload_;
 };
 
-} // namespace basp
-} // namespace io
-} // namespace caf
+} // namespace caf::io::basp

@@ -23,8 +23,7 @@
 #include "caf/fwd.hpp"
 #include "caf/group.hpp"
 
-namespace caf {
-namespace mixin {
+namespace caf::mixin {
 
 /// Marker for `subscriber`.
 struct subscriber_base {};
@@ -46,7 +45,7 @@ public:
 
   template <class... Ts>
   subscriber(actor_config& cfg, Ts&&... xs)
-      : Base(cfg, std::forward<Ts>(xs)...) {
+    : Base(cfg, std::forward<Ts>(xs)...) {
     if (cfg.groups != nullptr)
       for (auto& grp : *cfg.groups)
         join(grp);
@@ -55,7 +54,7 @@ public:
   // -- overridden functions of monitorable_actor ------------------------------
 
   bool cleanup(error&& fail_state, execution_unit* ptr) override {
-    auto me = dptr()->ctrl();
+    auto me = this->ctrl();
     for (auto& subscription : subscriptions_)
       subscription->unsubscribe(me);
     subscriptions_.clear();
@@ -70,7 +69,7 @@ public:
     CAF_LOG_TRACE(CAF_ARG(what));
     if (what == invalid_group)
       return;
-    if (what->subscribe(dptr()->ctrl()))
+    if (what->subscribe(this->ctrl()))
       subscriptions_.emplace(what);
   }
 
@@ -78,7 +77,7 @@ public:
   void leave(const group& what) {
     CAF_LOG_TRACE(CAF_ARG(what));
     if (subscriptions_.erase(what) > 0)
-      what->unsubscribe(dptr()->ctrl());
+      what->unsubscribe(this->ctrl());
   }
 
   /// Returns all subscribed groups.
@@ -87,16 +86,10 @@ public:
   }
 
 private:
-  Subtype* dptr() {
-    return static_cast<Subtype*>(this);
-  }
-
   // -- data members -----------------------------------------------------------
 
   /// Stores all subscribed groups.
   subscriptions subscriptions_;
 };
 
-} // namespace mixin
-} // namespace caf
-
+} // namespace caf::mixin

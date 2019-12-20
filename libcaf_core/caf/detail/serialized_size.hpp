@@ -18,10 +18,10 @@
 
 #pragma once
 
+#include "caf/error.hpp"
 #include "caf/serializer.hpp"
 
-namespace caf {
-namespace detail {
+namespace caf::detail {
 
 class serialized_size_inspector final : public serializer {
 public:
@@ -33,44 +33,47 @@ public:
     return result_;
   }
 
-  error begin_object(uint16_t& nr, std::string& name) override;
+  result_type begin_object(uint16_t typenr, string_view type_name) override;
 
-  error end_object() override;
+  result_type end_object() override;
 
-  error begin_sequence(size_t& list_size) override;
+  result_type begin_sequence(size_t num) override;
 
-  error end_sequence() override;
+  result_type end_sequence() override;
 
-  error apply_raw(size_t num_bytes, void* data) override;
+  result_type apply(bool x) override;
 
-protected:
-  error apply_impl(int8_t& x) override;
+  result_type apply(int8_t x) override;
 
-  error apply_impl(uint8_t& x) override;
+  result_type apply(uint8_t x) override;
 
-  error apply_impl(int16_t& x) override;
+  result_type apply(int16_t x) override;
 
-  error apply_impl(uint16_t& x) override;
+  result_type apply(uint16_t x) override;
 
-  error apply_impl(int32_t& x) override;
+  result_type apply(int32_t x) override;
 
-  error apply_impl(uint32_t& x) override;
+  result_type apply(uint32_t x) override;
 
-  error apply_impl(int64_t& x) override;
+  result_type apply(int64_t x) override;
 
-  error apply_impl(uint64_t& x) override;
+  result_type apply(uint64_t x) override;
 
-  error apply_impl(float& x) override;
+  result_type apply(float x) override;
 
-  error apply_impl(double& x) override;
+  result_type apply(double x) override;
 
-  error apply_impl(long double& x) override;
+  result_type apply(long double x) override;
 
-  error apply_impl(std::string& x) override;
+  result_type apply(string_view x) override;
 
-  error apply_impl(std::u16string& x) override;
+  result_type apply(const std::u16string& x) override;
 
-  error apply_impl(std::u32string& x) override;
+  result_type apply(const std::u32string& x) override;
+
+  result_type apply(span<const byte> x) override;
+
+  result_type apply(const std::vector<bool>& xs) override;
 
 private:
   size_t result_ = 0;
@@ -79,9 +82,9 @@ private:
 template <class T>
 size_t serialized_size(actor_system& sys, const T& x) {
   serialized_size_inspector f{sys};
-  f(const_cast<T&>(x));
+  auto err = f(x);
+  static_cast<void>(err);
   return f.result();
 }
 
-} // namespace detail
-} // namespace caf
+} // namespace caf::detail

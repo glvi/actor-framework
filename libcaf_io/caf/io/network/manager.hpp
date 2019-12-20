@@ -18,20 +18,20 @@
 
 #pragma once
 
-#include "caf/message.hpp"
-#include "caf/ref_counted.hpp"
+#include "caf/actor_control_block.hpp"
+#include "caf/byte_buffer.hpp"
+#include "caf/detail/io_export.hpp"
 #include "caf/intrusive_ptr.hpp"
-
 #include "caf/io/fwd.hpp"
 #include "caf/io/network/operation.hpp"
+#include "caf/message.hpp"
+#include "caf/ref_counted.hpp"
 
-namespace caf {
-namespace io {
-namespace network {
+namespace caf::io::network {
 
 /// A manager configures an I/O device and provides callbacks
 /// for various I/O operations.
-class manager : public ref_counted {
+class CAF_IO_EXPORT manager : public ref_counted {
 public:
   manager();
 
@@ -65,9 +65,6 @@ public:
   /// Detaches this manager from its parent in case of an error.
   void io_failure(execution_unit* ctx, operation op);
 
-  /// Get the address of the underlying I/O device.
-  virtual std::string addr() const = 0;
-
 protected:
   /// Creates a message signalizing a disconnect to the parent.
   virtual message detach_message() = 0;
@@ -78,7 +75,4 @@ protected:
   strong_actor_ptr parent_;
 };
 
-} // namespace network
-} // namespace io
-} // namespace caf
-
+} // namespace caf::io::network

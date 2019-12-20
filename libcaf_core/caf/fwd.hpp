@@ -24,6 +24,7 @@
 #include <tuple>
 #include <vector>
 
+#include "caf/detail/core_export.hpp"
 #include "caf/detail/is_one_of.hpp"
 #include "caf/detail/is_primitive_config_value.hpp"
 #include "caf/timespan.hpp"
@@ -37,12 +38,12 @@ namespace caf {
 template <class> class behavior_type_of;
 template <class> class dictionary;
 template <class> class downstream;
+template <class> class error_code;
 template <class> class expected;
 template <class> class intrusive_cow_ptr;
 template <class> class intrusive_ptr;
 template <class> class optional;
 template <class> class param;
-template <class> class serializer_impl;
 template <class> class span;
 template <class> class stream;
 template <class> class stream_sink;
@@ -95,6 +96,7 @@ class actor_system;
 class actor_system_config;
 class behavior;
 class binary_deserializer;
+class binary_serializer;
 class blocking_actor;
 class config_option;
 class config_option_adder;
@@ -103,7 +105,6 @@ class config_value;
 class deserializer;
 class downstream_manager;
 class downstream_manager_base;
-class duration;
 class error;
 class event_based_actor;
 class execution_unit;
@@ -135,6 +136,8 @@ class scoped_actor;
 class serializer;
 class stream_manager;
 class string_view;
+class tracing_data;
+class tracing_data_factory;
 class type_erased_tuple;
 class type_erased_value;
 class uniform_type_info_map;
@@ -183,7 +186,7 @@ enum class invoke_message_result;
 // -- aliases ------------------------------------------------------------------
 
 using actor_id = uint64_t;
-using binary_serializer = serializer_impl<std::vector<char>>;
+using byte_buffer = std::vector<byte>;
 using ip_address = ipv6_address;
 using ip_endpoint = ipv6_endpoint;
 using ip_subnet = ipv6_subnet;
@@ -193,7 +196,10 @@ using stream_slot = uint16_t;
 // -- functions ----------------------------------------------------------------
 
 /// @relates actor_system_config
-const settings& content(const actor_system_config&);
+CAF_CORE_EXPORT const settings& content(const actor_system_config&);
+
+template <class T, class... Ts>
+message make_message(T&& x, Ts&&... xs);
 
 // -- intrusive containers -----------------------------------------------------
 
@@ -235,14 +241,6 @@ class middleman;
 
 } // namespace net
 
-// -- OpenCL classes -----------------------------------------------------------
-
-namespace opencl {
-
-class manager;
-
-} // namespace opencl
-
 // -- scheduler classes --------------------------------------------------------
 
 namespace scheduler {
@@ -280,13 +278,14 @@ class private_thread;
 class uri_impl;
 
 // enable intrusive_ptr<uri_impl> with forward declaration only
-void intrusive_ptr_add_ref(const uri_impl*);
-void intrusive_ptr_release(const uri_impl*);
+CAF_CORE_EXPORT void intrusive_ptr_add_ref(const uri_impl*);
+CAF_CORE_EXPORT void intrusive_ptr_release(const uri_impl*);
 
 // enable intrusive_cow_ptr<dynamic_message_data> with forward declaration only
-void intrusive_ptr_add_ref(const dynamic_message_data*);
-void intrusive_ptr_release(const dynamic_message_data*);
-dynamic_message_data* intrusive_cow_ptr_unshare(dynamic_message_data*&);
+CAF_CORE_EXPORT void intrusive_ptr_add_ref(const dynamic_message_data*);
+CAF_CORE_EXPORT void intrusive_ptr_release(const dynamic_message_data*);
+CAF_CORE_EXPORT dynamic_message_data*
+intrusive_cow_ptr_unshare(dynamic_message_data*&);
 
 } // namespace detail
 
@@ -301,7 +300,8 @@ using stream_manager_ptr = intrusive_ptr<stream_manager>;
 
 // -- unique pointer aliases ---------------------------------------------------
 
-using type_erased_value_ptr = std::unique_ptr<type_erased_value>;
 using mailbox_element_ptr = std::unique_ptr<mailbox_element, detail::disposer>;
+using tracing_data_ptr = std::unique_ptr<tracing_data>;
+using type_erased_value_ptr = std::unique_ptr<type_erased_value>;
 
 } // namespace caf

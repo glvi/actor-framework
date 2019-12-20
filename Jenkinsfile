@@ -5,13 +5,11 @@
 // Default CMake flags for release builds.
 defaultReleaseBuildFlags = [
     'CAF_ENABLE_RUNTIME_CHECKS:BOOL=yes',
-    'CAF_NO_OPENCL:BOOL=yes',
-    'CAF_INSTALL_UNIT_TESTS:BOOL=yes',
 ]
 
 // Default CMake flags for debug builds.
 defaultDebugBuildFlags = defaultReleaseBuildFlags + [
-    'CAF_ENABLE_ADDRESS_SANITIZER:BOOL=yes',
+    'CAF_SANITIZERS:STRING=address,undefined',
     'CAF_LOG_LEVEL:STRING=TRACE',
     'CAF_ENABLE_ACTOR_PROFILER:BOOL=yes',
 ]
@@ -29,19 +27,39 @@ config = [
     ],
     // Our build matrix. Keys are the operating system labels and values are build configurations.
     buildMatrix: [
-        ['Linux', [
-            builds: ['debug'],
-            tools: ['gcc4.8', 'gcc4.9', 'gcc5', 'gcc6', 'gcc7'],
+        // Various Linux builds for debug and release.
+        ['debian-8', [
+            builds: ['debug', 'release'],
+            tools: ['clang-4'],
         ]],
-        ['Linux', [
+        ['centos-6', [
+            builds: ['debug', 'release'],
+            tools: ['gcc-7'],
+        ]],
+        ['centos-7', [
+            builds: ['debug', 'release'],
+            tools: ['gcc-7'],
+        ]],
+        ['ubuntu-16.04', [
+            builds: ['debug', 'release'],
+            tools: ['clang-4'],
+        ]],
+        ['ubuntu-18.04', [
+            builds: ['debug', 'release'],
+            tools: ['gcc-7'],
+        ]],
+        // On Fedora 28, our debug build also produces the coverage report.
+        ['fedora-28', [
             builds: ['debug'],
-            tools: ['gcc8'],
+            tools: ['gcc-8'],
             extraSteps: ['coverageReport'],
+            extraFlags: ['BUILD_SHARED_LIBS:BOOL=OFF'],
         ]],
-        ['Linux', [
+        ['fedora-28', [
             builds: ['release'],
-            tools: ['gcc8', 'clang'],
+            tools: ['gcc-8'],
         ]],
+        // Other UNIX systems.
         ['macOS', [
             builds: ['debug', 'release'],
             tools: ['clang'],
@@ -50,6 +68,7 @@ config = [
             builds: ['debug', 'release'],
             tools: ['clang'],
         ]],
+        // Non-UNIX systems.
         ['Windows', [
             // TODO: debug build currently broken
             //builds: ['debug', 'release'],
@@ -78,18 +97,13 @@ config = [
                 'OPENSSL_INCLUDE_DIR=/usr/local/opt/openssl/include',
             ],
         ],
-        Windows: [
-            debug: defaultDebugBuildFlags + [
-                'CAF_BUILD_STATIC_ONLY:BOOL=yes',
-            ],
-            release: defaultReleaseBuildFlags + [
-                'CAF_BUILD_STATIC_ONLY:BOOL=yes',
-            ],
-        ],
     ],
     // Configures what binary the coverage report uses and what paths to exclude.
     coverage: [
-        binary: 'build/bin/caf-test',
+        binaries: [
+          'build/bin/caf-core-test',
+          'build/bin/caf-io-test',
+        ],
         relativeExcludePaths: [
             'examples',
             'tools',
@@ -97,8 +111,6 @@ config = [
             'libcaf_core/test',
             'libcaf_io/test',
             'libcaf_openssl/test',
-            'libcaf_opencl',
-            'libcaf_core/caf/scheduler/profiled_coordinator.hpp',
         ],
     ],
 ]

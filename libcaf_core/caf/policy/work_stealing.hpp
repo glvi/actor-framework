@@ -28,17 +28,17 @@
 #include <thread>
 
 #include "caf/actor_system_config.hpp"
+#include "caf/detail/core_export.hpp"
 #include "caf/detail/double_ended_queue.hpp"
 #include "caf/policy/unprofiled.hpp"
 #include "caf/resumable.hpp"
 #include "caf/timespan.hpp"
 
-namespace caf {
-namespace policy {
+namespace caf::policy {
 
 /// Implements scheduling of actors via work stealing.
 /// @extends scheduler_policy
-class work_stealing : public unprofiled {
+class CAF_CORE_EXPORT work_stealing : public unprofiled {
 public:
   ~work_stealing() override;
 
@@ -63,7 +63,7 @@ public:
   // The coordinator has only a counter for round-robin enqueue to its workers.
   struct coordinator_data {
     inline explicit coordinator_data(scheduler::abstract_coordinator*)
-        : next_worker(0) {
+      : next_worker(0) {
       // nop
     }
 
@@ -115,7 +115,7 @@ public:
     { // guard scope
       std::unique_lock<std::mutex> guard(lock);
       // check if the worker is sleeping
-      if (d(self).waitdata.sleeping && !d(self).queue.empty() )
+      if (d(self).waitdata.sleeping && !d(self).queue.empty())
         cv.notify_one();
     }
   }
@@ -135,12 +135,12 @@ public:
   template <class Worker>
   resumable* dequeue(Worker* self) {
     // we wait for new jobs by polling our external queue: first, we
-    // assume an active work load on the machine and perform aggresive
+    // assume an active work load on the machine and perform aggressive
     // polling, then we relax our polling a bit and wait 50 us between
     // dequeue attempts
     auto& strategies = d(self).strategies;
     resumable* job = nullptr;
-    for (size_t k = 0; k < 2; ++k) {  // iterate over the first two strategies
+    for (size_t k = 0; k < 2; ++k) { // iterate over the first two strategies
       for (size_t i = 0; i < strategies[k].attempts;
            i += strategies[k].step_size) {
         job = d(self).queue.take_head();
@@ -154,8 +154,8 @@ public:
         }
         if (strategies[k].sleep_duration.count() > 0) {
 #ifdef CAF_MSVC
-          // Windows cannot sleep less than 1000 us, so timeout is conveted to 0
-          // inside sleep_for(), but Sleep(0) is dangerous so replace it with
+          // Windows cannot sleep less than 1000 us, so timeout is converted to
+          // 0 inside sleep_for(), but Sleep(0) is dangerous so replace it with
           // yield()
           if (strategies[k].sleep_duration.count() < 1000)
             std::this_thread::yield();
@@ -175,7 +175,7 @@ public:
     auto& lock = d(self).waitdata.lock;
     auto& cv = d(self).waitdata.cv;
     bool notimeout = true;
-    size_t i=1;
+    size_t i = 1;
     do {
       { // guard scope
         std::unique_lock<std::mutex> guard(lock);
@@ -193,7 +193,7 @@ public:
           job = try_steal(self);
       }
       ++i;
-    } while(job == nullptr);
+    } while (job == nullptr);
     return job;
   }
 
@@ -211,5 +211,4 @@ public:
   }
 };
 
-} // namespace policy
-} // namespace caf
+} // namespace caf::policy

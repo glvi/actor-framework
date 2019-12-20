@@ -59,6 +59,7 @@
 
 // sets CAF_DEPRECATED, CAF_ANNOTATE_FALLTHROUGH,
 // CAF_PUSH_WARNINGS and CAF_POP_WARNINGS
+// clang-format off
 #if defined(__clang__)
 #  define CAF_CLANG
 #  define CAF_LIKELY(x) __builtin_expect((x), 1)
@@ -107,9 +108,6 @@
 #  define CAF_ANNOTATE_FALLTHROUGH [[clang::fallthrough]]
 #  define CAF_COMPILER_VERSION                                                 \
     (__clang_major__ * 10000 + __clang_minor__ * 100 + __clang_patchlevel__)
-#  if !__has_feature(cxx_thread_local)
-#    define CAF_NO_THREAD_LOCAL
-#  endif
 #elif defined(__GNUC__)
 #  define CAF_GCC
 #  define CAF_LIKELY(x) __builtin_expect((x), 1)
@@ -145,9 +143,6 @@
      (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
     // disable thread_local on GCC/macOS due to heap-use-after-free bug:
     // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=67135
-#  ifdef __APPLE__
-#    define CAF_NO_THREAD_LOCAL
-#  endif
 #elif defined(_MSC_VER)
 #  define CAF_MSVC
 #  define CAF_LIKELY(x) x
@@ -182,6 +177,7 @@
 #  define CAF_POP_WARNINGS
 #  define CAF_ANNOTATE_FALLTHROUGH static_cast<void>(0)
 #endif
+// clang-format on
 
 // This OS-specific block defines one of the following:
 // - CAF_MACOS
@@ -204,7 +200,7 @@
 #elif defined(__linux__)
 #  define CAF_LINUX
 #  include <linux/version.h>
-#  if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,16)
+#  if LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 16)
 #    define CAF_POLL_IMPL
 #  endif
 #elif defined(__FreeBSD__)
@@ -218,7 +214,8 @@
 #else
 #  error Platform and/or compiler not supported
 #endif
-#if defined(CAF_MACOS) || defined(CAF_LINUX) || defined(CAF_BSD) || defined(CAF_CYGWIN)
+#if defined(CAF_MACOS) || defined(CAF_LINUX) || defined(CAF_BSD)               \
+  || defined(CAF_CYGWIN)
 #  define CAF_POSIX
 #endif
 
@@ -233,23 +230,25 @@ struct IUnknown;
 
 // Optionally enable CAF_ASSERT
 #ifndef CAF_ENABLE_RUNTIME_CHECKS
-# define CAF_ASSERT(unused) static_cast<void>(0)
+#  define CAF_ASSERT(unused) static_cast<void>(0)
 #elif defined(CAF_WINDOWS) || defined(CAF_BSD)
-# define CAF_ASSERT(stmt)                                                      \
-  if (static_cast<bool>(stmt) == false) {                                      \
-    printf("%s:%u: requirement failed '%s'\n", __FILE__, __LINE__, #stmt);     \
-    ::abort();                                                                 \
-  } static_cast<void>(0)
+#  define CAF_ASSERT(stmt)                                                     \
+    if (static_cast<bool>(stmt) == false) {                                    \
+      printf("%s:%u: requirement failed '%s'\n", __FILE__, __LINE__, #stmt);   \
+      ::abort();                                                               \
+    }                                                                          \
+    static_cast<void>(0)
 #else // defined(CAF_LINUX) || defined(CAF_MACOS)
-# include <execinfo.h>
-# define CAF_ASSERT(stmt)                                                      \
-  if (static_cast<bool>(stmt) == false) {                                      \
-    printf("%s:%u: requirement failed '%s'\n", __FILE__, __LINE__, #stmt);     \
-    void* array[20];                                                           \
-    auto caf_bt_size = ::backtrace(array, 20);                                 \
-    ::backtrace_symbols_fd(array, caf_bt_size, 2);                             \
-    ::abort();                                                                 \
-  } static_cast<void>(0)
+#  include <execinfo.h>
+#  define CAF_ASSERT(stmt)                                                     \
+    if (static_cast<bool>(stmt) == false) {                                    \
+      printf("%s:%u: requirement failed '%s'\n", __FILE__, __LINE__, #stmt);   \
+      void* array[20];                                                         \
+      auto caf_bt_size = ::backtrace(array, 20);                               \
+      ::backtrace_symbols_fd(array, caf_bt_size, 2);                           \
+      ::abort();                                                               \
+    }                                                                          \
+    static_cast<void>(0)
 #endif
 
 // Convenience macros.
@@ -257,7 +256,7 @@ struct IUnknown;
 
 #define CAF_CRITICAL(error)                                                    \
   do {                                                                         \
-    fprintf(stderr, "[FATAL] %s:%u: critical error: '%s'\n",                   \
-            __FILE__, __LINE__, error);                                        \
+    fprintf(stderr, "[FATAL] %s:%u: critical error: '%s'\n", __FILE__,         \
+            __LINE__, error);                                                  \
     ::abort();                                                                 \
   } while (false)

@@ -18,11 +18,8 @@
 
 #pragma once
 
-namespace caf {
-namespace detail {
+namespace caf::detail {
 
 struct arg_match_t {};
 
-} // namespace detail
-} // namespace caf
-
+} // namespace caf::detail

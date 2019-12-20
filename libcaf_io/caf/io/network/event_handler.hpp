@@ -18,17 +18,16 @@
 
 #pragma once
 
+#include "caf/detail/io_export.hpp"
 #include "caf/io/fwd.hpp"
 #include "caf/io/network/native_socket.hpp"
 #include "caf/io/network/operation.hpp"
 #include "caf/io/receive_policy.hpp"
 
-namespace caf {
-namespace io {
-namespace network {
+namespace caf::io::network {
 
 /// A socket I/O event handler.
-class event_handler {
+class CAF_IO_EXPORT event_handler {
 public:
   /// Stores various status flags and user-defined config parameters.
   struct state {
@@ -118,6 +117,4 @@ protected:
   default_multiplexer& backend_;
 };
 
-} // namespace network
-} // namespace io
-} // namespace caf
+} // namespace caf::io::network

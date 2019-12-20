@@ -23,12 +23,11 @@
 #include <typeinfo>
 
 #include "caf/atom.hpp"
+#include "caf/detail/core_export.hpp"
+#include "caf/detail/type_list.hpp"
 #include "caf/type_nr.hpp"
 
-#include "caf/detail/type_list.hpp"
-
-namespace caf {
-namespace detail {
+namespace caf::detail {
 
 struct meta_element {
   atom_value v;
@@ -37,9 +36,11 @@ struct meta_element {
   bool (*fun)(const meta_element&, const type_erased_tuple&, size_t);
 };
 
-bool match_element(const meta_element&, const type_erased_tuple&, size_t);
+CAF_CORE_EXPORT bool
+match_element(const meta_element&, const type_erased_tuple&, size_t);
 
-bool match_atom_constant(const meta_element&, const type_erased_tuple&, size_t);
+CAF_CORE_EXPORT bool
+match_atom_constant(const meta_element&, const type_erased_tuple&, size_t);
 
 template <class T, uint16_t TN = type_nr<T>::value>
 struct meta_element_factory {
@@ -73,9 +74,7 @@ struct meta_elements<type_list<Ts...>> {
   }
 };
 
-bool try_match(const type_erased_tuple& xs, const meta_element* iter,
-               size_t ps);
+CAF_CORE_EXPORT bool
+try_match(const type_erased_tuple& xs, const meta_element* iter, size_t ps);
 
-} // namespace detail
-} // namespace caf
-
+} // namespace caf::detail

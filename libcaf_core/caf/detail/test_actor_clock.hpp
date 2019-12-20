@@ -18,12 +18,12 @@
 
 #pragma once
 
+#include "caf/detail/core_export.hpp"
 #include "caf/detail/simple_actor_clock.hpp"
 
-namespace caf {
-namespace detail {
+namespace caf::detail {
 
-class test_actor_clock : public simple_actor_clock {
+class CAF_CORE_EXPORT test_actor_clock : public simple_actor_clock {
 public:
   time_point current_time;
 
@@ -62,6 +62,4 @@ public:
   std::map<atom_value, duration_type> time_per_unit;
 };
 
-} // namespace detail
-} // namespace caf
-
+} // namespace caf::detail

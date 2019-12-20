@@ -21,7 +21,8 @@
 #include <functional>
 #include <type_traits>
 
-#include "caf/duration.hpp"
+#include "caf/detail/core_export.hpp"
+#include "caf/timespan.hpp"
 
 namespace caf {
 
@@ -29,7 +30,8 @@ namespace detail {
 
 class behavior_impl;
 
-behavior_impl* new_default_behavior(duration d, std::function<void()> fun);
+CAF_CORE_EXPORT behavior_impl*
+new_default_behavior(timespan d, std::function<void()> fun);
 
 } // namespace detail
 
@@ -37,7 +39,7 @@ template <class F>
 struct timeout_definition {
   static constexpr bool may_have_timeout = true;
 
-  duration timeout;
+  timespan timeout;
 
   F handler;
 
@@ -49,14 +51,14 @@ struct timeout_definition {
   timeout_definition(timeout_definition&&) = default;
   timeout_definition(const timeout_definition&) = default;
 
-  timeout_definition(duration d, F&& f) : timeout(d), handler(std::move(f)) {
+  timeout_definition(timespan timeout, F&& f)
+    : timeout(timeout), handler(std::move(f)) {
     // nop
   }
 
   template <class U>
   timeout_definition(const timeout_definition<U>& other)
-      : timeout(other.timeout),
-        handler(other.handler) {
+    : timeout(other.timeout), handler(other.handler) {
     // nop
   }
 };
@@ -70,4 +72,3 @@ struct is_timeout_definition<timeout_definition<T>> : std::true_type {};
 using generic_timeout_definition = timeout_definition<std::function<void()>>;
 
 } // namespace caf
-

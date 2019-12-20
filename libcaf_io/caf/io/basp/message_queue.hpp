@@ -23,16 +23,15 @@
 #include <vector>
 
 #include "caf/actor_control_block.hpp"
+#include "caf/detail/io_export.hpp"
 #include "caf/fwd.hpp"
 #include "caf/mailbox_element.hpp"
 
-namespace caf {
-namespace io {
-namespace basp {
+namespace caf::io::basp {
 
 /// Enforces strict order of message delivery, i.e., deliver messages in the
 /// same order as if they were deserialized by a single thread.
-class message_queue {
+class CAF_IO_EXPORT message_queue {
 public:
   // -- member types -----------------------------------------------------------
 
@@ -76,6 +75,4 @@ public:
   std::vector<actor_msg> pending;
 };
 
-} // namespace basp
-} // namespace io
-} // namespace caf
+} // namespace caf::io::basp

@@ -23,21 +23,18 @@
 #include <unordered_set>
 #include <vector>
 
+#include "caf/detail/io_export.hpp"
 #include "caf/io/abstract_broker.hpp"
-#include "caf/io/basp/buffer_type.hpp"
 #include "caf/node_id.hpp"
 
-namespace caf {
-namespace io {
-namespace basp {
+namespace caf::io::basp {
 
 /// @addtogroup BASP
 
 /// Stores routing information for a single broker participating as
 /// BASP peer and provides both direct and indirect paths.
-class routing_table {
+class CAF_IO_EXPORT routing_table {
 public:
-
   explicit routing_table(abstract_broker* parent);
 
   virtual ~routing_table();
@@ -95,6 +92,4 @@ public:
 
 /// @}
 
-} // namespace basp
-} // namespace io
-} // namespace caf
+} // namespace caf::io::basp

@@ -23,14 +23,14 @@
 #include <initializer_list>
 
 #include "caf/config.hpp"
+#include "caf/detail/core_export.hpp"
 
-namespace caf {
-namespace detail {
+namespace caf::detail {
 
 /// Converts realtime into a series of ticks, whereas each tick represents a
 /// preconfigured timespan. For example, a tick emitter configured with a
 /// timespan of 25ms generates a tick every 25ms after starting it.
-class tick_emitter {
+class CAF_CORE_EXPORT tick_emitter {
 public:
   // -- member types -----------------------------------------------------------
 
@@ -90,7 +90,4 @@ private:
   size_t last_tick_id_;
 };
 
-} // namespace detail
-} // namespace caf
-
-
+} // namespace caf::detail

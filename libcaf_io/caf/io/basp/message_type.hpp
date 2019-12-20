@@ -18,12 +18,12 @@
 
 #pragma once
 
-#include <string>
 #include <cstdint>
+#include <string>
 
-namespace caf {
-namespace io {
-namespace basp {
+#include "caf/detail/io_export.hpp"
+
+namespace caf::io::basp {
 
 /// @addtogroup BASP
 
@@ -74,10 +74,8 @@ enum class message_type : uint8_t {
 };
 
 /// @relates message_type
-std::string to_string(message_type);
+CAF_IO_EXPORT std::string to_string(message_type);
 
 /// @}
 
-} // namespace basp
-} // namespace io
-} // namespace caf
+} // namespace caf::io::basp

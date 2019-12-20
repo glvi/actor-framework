@@ -37,9 +37,7 @@ CAF_PUSH_UNUSED_LABEL_WARNING
 
 #include "caf/detail/parser/fsm.hpp"
 
-namespace caf {
-namespace detail {
-namespace parser {
+namespace caf::detail::parser {
 
 //  IPv6address =                            6( h16 ":" ) ls32
 //              /                       "::" 5( h16 ":" ) ls32
@@ -70,6 +68,7 @@ void read_ipv6_h16(State& ps, Consumer& consumer) {
     if (ps.code <= pec::trailing_character)
       consumer.value(res);
   });
+  // clang-format off
   start();
   state(init) {
     transition(read, hexadecimal_chars, rd_hex(ch), pec::integer_overflow)
@@ -79,6 +78,7 @@ void read_ipv6_h16(State& ps, Consumer& consumer) {
                   read, hexadecimal_chars, rd_hex(ch), pec::integer_overflow)
   }
   fin();
+  // clang-format on
 }
 
 /// Reads 16 (hex) or 32 (IPv4 notation) bits of an IPv6 address.
@@ -124,6 +124,7 @@ void read_ipv6_h16_or_l32(State& ps, Consumer& consumer) {
         fin_octet();
     }
   });
+  // clang-format off
   start();
   state(init) {
     transition(read, hexadecimal_chars, rd_both(ch), pec::integer_overflow)
@@ -145,6 +146,7 @@ void read_ipv6_h16_or_l32(State& ps, Consumer& consumer) {
                rd_dec(ch), pec::integer_overflow)
   }
   fin();
+  // clang-format on
 }
 
 template <class F>
@@ -183,9 +185,7 @@ void read_ipv6_address(State& ps, Consumer&& consumer) {
   suffix.fill(0);
   // Keeps track of all bytes consumed so far, suffix and prefix combined.
   size_t filled_bytes = 0;
-  auto remaining_bytes = [&] {
-    return ipv6_address::num_bytes - filled_bytes;
-  };
+  auto remaining_bytes = [&] { return ipv6_address::num_bytes - filled_bytes; };
   // Computes the result on success.
   auto g = caf::detail::make_scope_guard([&] {
     if (ps.code <= pec::trailing_character) {
@@ -222,6 +222,7 @@ void read_ipv6_address(State& ps, Consumer&& consumer) {
     }
     return false;
   };
+  // clang-format off
   start();
   // Either transitions to reading leading "::" or reads the first h16. When
   // reading an l32 immediately promotes to IPv4 address and stops.
@@ -290,11 +291,10 @@ void read_ipv6_address(State& ps, Consumer&& consumer) {
     // nop
   }
   fin();
+  // clang-format on
 }
 
-} // namespace parser
-} // namespace detail
-} // namespace caf
+} // namespace caf::detail::parser
 
 #include "caf/detail/parser/fsm_undef.hpp"
 

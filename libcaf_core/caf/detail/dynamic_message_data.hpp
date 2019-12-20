@@ -20,14 +20,13 @@
 
 #include <vector>
 
+#include "caf/detail/core_export.hpp"
+#include "caf/detail/message_data.hpp"
 #include "caf/type_erased_value.hpp"
 
-#include "caf/detail/message_data.hpp"
+namespace caf::detail {
 
-namespace caf {
-namespace detail {
-
-class dynamic_message_data : public message_data {
+class CAF_CORE_EXPORT dynamic_message_data : public message_data {
 public:
   // -- member types -----------------------------------------------------------
 
@@ -39,7 +38,13 @@ public:
 
   dynamic_message_data(elements&& data);
 
+  dynamic_message_data(dynamic_message_data&&) = default;
+
   dynamic_message_data(const dynamic_message_data& other);
+
+  dynamic_message_data& operator=(dynamic_message_data&&) = delete;
+
+  dynamic_message_data& operator=(const dynamic_message_data&) = delete;
 
   ~dynamic_message_data() override;
 
@@ -52,6 +57,8 @@ public:
   void* get_mutable(size_t pos) override;
 
   error load(size_t pos, deserializer& source) override;
+
+  error_code<sec> load(size_t pos, binary_deserializer& source) override;
 
   // -- overridden observers of type_erased_tuple ------------------------------
 
@@ -69,6 +76,8 @@ public:
 
   error save(size_t pos, serializer& sink) const override;
 
+  error_code<sec> save(size_t pos, binary_serializer& sink) const override;
+
   // -- modifiers --------------------------------------------------------------
 
   void clear();
@@ -84,12 +93,11 @@ private:
   uint32_t type_token_;
 };
 
-void intrusive_ptr_add_ref(const dynamic_message_data*);
+CAF_CORE_EXPORT void intrusive_ptr_add_ref(const dynamic_message_data*);
 
-void intrusive_ptr_release(const dynamic_message_data*);
+CAF_CORE_EXPORT void intrusive_ptr_release(const dynamic_message_data*);
 
-dynamic_message_data* intrusive_cow_ptr_unshare(dynamic_message_data*&);
+CAF_CORE_EXPORT dynamic_message_data*
+intrusive_cow_ptr_unshare(dynamic_message_data*&);
 
-} // namespace detail
-} // namespace caf
-
+} // namespace caf::detail

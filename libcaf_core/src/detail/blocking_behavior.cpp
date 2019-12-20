@@ -18,8 +18,7 @@
 
 #include "caf/detail/blocking_behavior.hpp"
 
-namespace caf {
-namespace detail {
+namespace caf::detail {
 
 blocking_behavior::~blocking_behavior() {
   // nop
@@ -33,13 +32,12 @@ result<message> blocking_behavior::fallback(message_view&) {
   return skip;
 }
 
-duration blocking_behavior::timeout() {
-  return {};
+timespan blocking_behavior::timeout() {
+  return infinite;
 }
 
 void blocking_behavior::handle_timeout() {
   // nop
 }
 
-} // namespace detail
-} // namespace caf
+} // namespace caf::detail

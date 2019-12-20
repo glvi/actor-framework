@@ -1,5 +1,3 @@
-project(caf_examples CXX)
-
 add_custom_target(all_examples)
 
 include_directories(${LIBCAF_INCLUDE_DIRS})
@@ -24,6 +22,7 @@ add(message_passing cell)
 add(message_passing dancing_kirby)
 add(message_passing delegating)
 add(message_passing divider)
+add(message_passing fan_out_request)
 add(message_passing fixed_stack)
 add(message_passing promises)
 add(message_passing request)

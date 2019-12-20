@@ -18,24 +18,23 @@
 
 #pragma once
 
-#include <vector>
+#include <algorithm>
 #include <memory>
 #include <utility>
-#include <algorithm>
+#include <vector>
 
+#include "caf/behavior.hpp"
+#include "caf/config.hpp"
+#include "caf/detail/core_export.hpp"
+#include "caf/mailbox_element.hpp"
+#include "caf/message_id.hpp"
 #include "caf/optional.hpp"
 
-#include "caf/config.hpp"
-#include "caf/behavior.hpp"
-#include "caf/message_id.hpp"
-#include "caf/mailbox_element.hpp"
-
-namespace caf {
-namespace detail {
+namespace caf::detail {
 
 struct behavior_stack_mover;
 
-class behavior_stack {
+class CAF_CORE_EXPORT behavior_stack {
 public:
   friend struct behavior_stack_mover;
 
@@ -63,9 +62,9 @@ public:
   }
 
   template <class... Ts>
-    inline void emplace_back(Ts&&... xs) {
-      elements_.emplace_back(std::forward<Ts>(xs)...);
-    }
+  inline void emplace_back(Ts&&... xs) {
+    elements_.emplace_back(std::forward<Ts>(xs)...);
+  }
 
   inline void cleanup() {
     erased_elements_.clear();
@@ -76,6 +75,4 @@ private:
   std::vector<behavior> erased_elements_;
 };
 
-} // namespace detail
-} // namespace caf
-
+} // namespace caf::detail

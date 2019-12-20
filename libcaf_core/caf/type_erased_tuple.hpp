@@ -18,12 +18,13 @@
 
 #pragma once
 
-#include <tuple>
 #include <cstddef>
 #include <cstdint>
+#include <tuple>
 #include <typeinfo>
 
 #include "caf/detail/apply_args.hpp"
+#include "caf/detail/core_export.hpp"
 #include "caf/detail/pseudo_tuple.hpp"
 #include "caf/detail/try_match.hpp"
 #include "caf/fwd.hpp"
@@ -35,7 +36,7 @@
 namespace caf {
 
 /// Represents a tuple of type-erased values.
-class type_erased_tuple {
+class CAF_CORE_EXPORT type_erased_tuple {
 public:
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -53,10 +54,16 @@ public:
   /// Load the content for the element at position `pos` from `source`.
   virtual error load(size_t pos, deserializer& source) = 0;
 
+  /// Load the content for the element at position `pos` from `source`.
+  virtual error_code<sec> load(size_t pos, binary_deserializer& source) = 0;
+
   // -- modifiers --------------------------------------------------------------
 
   /// Load the content for the tuple from `source`.
   virtual error load(deserializer& source);
+
+  /// Load the content for the tuple from `source`.
+  virtual error_code<sec> load(binary_deserializer& source);
 
   // -- pure virtual observers -------------------------------------------------
 
@@ -82,6 +89,9 @@ public:
   /// Saves the element at position `pos` to `sink`.
   virtual error save(size_t pos, serializer& sink) const = 0;
 
+  /// Saves the element at position `pos` to `sink`.
+  virtual error_code<sec> save(size_t pos, binary_serializer& sink) const = 0;
+
   // -- observers --------------------------------------------------------------
 
   /// Returns whether multiple references to this tuple exist.
@@ -97,10 +107,13 @@ public:
   /// Saves the content of the tuple to `sink`.
   virtual error save(serializer& sink) const;
 
+  /// Saves the content of the tuple to `sink`.
+  virtual error_code<sec> save(binary_serializer& sink) const;
+
   /// Checks whether the type of the stored value at position `pos`
   /// matches type number `n` and run-time type information `p`.
-  bool matches(size_t pos, uint16_t nr,
-               const std::type_info* ptr) const  noexcept;
+  bool matches(size_t pos, uint16_t nr, const std::type_info* ptr) const
+    noexcept;
 
   // -- convenience functions --------------------------------------------------
 
@@ -134,10 +147,10 @@ public:
   }
 
   template <class... Ts, long... Is>
-  std::tuple<const Ts&...> get_as_tuple(detail::type_list<Ts...>,
-                                        detail::int_list<Is...>) const {
+  std::tuple<const Ts&...>
+  get_as_tuple(detail::type_list<Ts...>, detail::int_list<Is...>) const {
     return std::tuple<const Ts&...>{get_as<Ts>(Is)...};
-    //return get_as<Ts>(Is)...;//(make_typed_index<Ts, Is>())...;
+    // return get_as<Ts>(Is)...;//(make_typed_index<Ts, Is>())...;
   }
 
   template <class... Ts>
@@ -178,7 +191,7 @@ public:
 
   template <class F>
   auto apply(F fun)
-  -> optional<typename detail::get_callable_trait<F>::result_type> {
+    -> optional<typename detail::get_callable_trait<F>::result_type> {
     using trait = typename detail::get_callable_trait<F>::type;
     detail::type_list<typename trait::result_type> result_token;
     typename trait::arg_types args_token;
@@ -199,8 +212,7 @@ public:
 
 private:
   template <class F, class R, class... Ts>
-  optional<R> apply(F& fun, detail::type_list<R>,
-                    detail::type_list<Ts...> tk) {
+  optional<R> apply(F& fun, detail::type_list<R>, detail::type_list<Ts...> tk) {
     if (!match_elements<Ts...>())
       return none;
     detail::pseudo_tuple<typename std::decay<Ts>::type...> xs{*this};
@@ -208,8 +220,8 @@ private:
   }
 
   template <class F, class... Ts>
-  optional<void> apply(F& fun, detail::type_list<void>,
-                       detail::type_list<Ts...> tk) {
+  optional<void>
+  apply(F& fun, detail::type_list<void>, detail::type_list<Ts...> tk) {
     if (!match_elements<Ts...>())
       return none;
     detail::pseudo_tuple<typename std::decay<Ts>::type...> xs{*this};
@@ -219,17 +231,23 @@ private:
 };
 
 /// @relates type_erased_tuple
-template <class Processor>
-typename std::enable_if<Processor::reads_state>::type
-serialize(Processor& proc, type_erased_tuple& x) {
-  x.save(proc);
+inline auto inspect(serializer& sink, const type_erased_tuple& x) {
+  return x.save(sink);
 }
 
 /// @relates type_erased_tuple
-template <class Processor>
-typename std::enable_if<Processor::writes_state>::type
-serialize(Processor& proc, type_erased_tuple& x) {
-  x.load(proc);
+inline auto inspect(binary_serializer& sink, const type_erased_tuple& x) {
+  return x.save(sink);
+}
+
+/// @relates type_erased_tuple
+inline auto inspect(deserializer& source, type_erased_tuple& x) {
+  return x.load(source);
+}
+
+/// @relates type_erased_tuple
+inline auto inspect(binary_deserializer& source, type_erased_tuple& x) {
+  return x.load(source);
 }
 
 /// @relates type_erased_tuple
@@ -239,7 +257,7 @@ inline std::string to_string(const type_erased_tuple& x) {
 
 /// @relates type_erased_tuple
 /// Dummy objects representing empty tuples.
-class empty_type_erased_tuple : public type_erased_tuple {
+class CAF_CORE_EXPORT empty_type_erased_tuple : public type_erased_tuple {
 public:
   empty_type_erased_tuple() = default;
 
@@ -248,6 +266,8 @@ public:
   void* get_mutable(size_t pos) override;
 
   error load(size_t pos, deserializer& source) override;
+
+  error_code<sec> load(size_t pos, binary_deserializer& source) override;
 
   size_t size() const noexcept override;
 
@@ -262,7 +282,8 @@ public:
   type_erased_value_ptr copy(size_t pos) const override;
 
   error save(size_t pos, serializer& sink) const override;
+
+  error_code<sec> save(size_t pos, binary_serializer& sink) const override;
 };
 
 } // namespace caf
-

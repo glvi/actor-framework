@@ -460,7 +460,7 @@ void scheduled_actor::quit(error x) {
   for (auto i = managers.begin(); i != e; ++i) {
     auto& mgr = *i;
     mgr->shutdown();
-    // Managers can become done after calling quit if they were continous.
+    // Managers can become done after calling quit if they were continuous.
     if (mgr->done()) {
       mgr->stop();
       erase_stream_manager(mgr);
@@ -480,12 +480,12 @@ uint64_t scheduled_actor::set_receive_timeout() {
   CAF_LOG_TRACE("");
   if (bhvr_stack_.empty())
     return 0;
-  auto d = bhvr_stack_.back().timeout();
-  if (!d.valid()) {
+  auto timeout = bhvr_stack_.back().timeout();
+  if (timeout == infinite) {
     unsetf(has_timeout_flag);
     return 0;
   }
-  if (d.is_zero()) {
+  if (timeout == timespan{0}) {
     // immediately enqueue timeout message if duration == 0s
     auto id = ++timeout_id_;
     auto type = receive_atom::value;
@@ -493,7 +493,7 @@ uint64_t scheduled_actor::set_receive_timeout() {
     return id;
   }
   auto t = clock().now();
-  t += d;
+  t += timeout;
   return set_receive_timeout(t);
 }
 
@@ -532,14 +532,14 @@ uint64_t scheduled_actor::set_stream_timeout(actor_clock::time_point x) {
 
 void scheduled_actor::add_awaited_response_handler(message_id response_id,
                                                    behavior bhvr) {
-  if (bhvr.timeout().valid())
+  if (bhvr.timeout() != infinite)
     request_response_timeout(bhvr.timeout(), response_id);
   awaited_responses_.emplace_front(response_id, std::move(bhvr));
 }
 
 void scheduled_actor::add_multiplexed_response_handler(message_id response_id,
                                                        behavior bhvr) {
-  if (bhvr.timeout().valid())
+  if (bhvr.timeout() != infinite)
     request_response_timeout(bhvr.timeout(), response_id);
   multiplexed_responses_.emplace(response_id, std::move(bhvr));
 }
@@ -1076,7 +1076,7 @@ void scheduled_actor::erase_stream_manager(const stream_manager_ptr& mgr) {
 invoke_message_result
 scheduled_actor::handle_open_stream_msg(mailbox_element& x) {
   CAF_LOG_TRACE(CAF_ARG(x));
-  // Fetches a stream manger from a behavior.
+  // Fetches a stream manager from a behavior.
   struct visitor : detail::invoke_result_visitor {
     void operator()() override {
       // nop
@@ -1158,12 +1158,13 @@ scheduled_actor::advance_streams(actor_clock::time_point now) {
     CAF_LOG_DEBUG("new credit round");
     auto cycle = stream_ticks_.interval();
     cycle *= static_cast<decltype(cycle)::rep>(credit_round_ticks_);
-    auto bc = home_system().config().stream_desired_batch_complexity;
     auto& qs = get_downstream_queue().queues();
     for (auto& kvp : qs) {
       auto inptr = kvp.second.policy().handler.get();
-      auto bs = static_cast<int32_t>(kvp.second.total_task_size());
-      inptr->emit_ack_batch(this, bs, now, cycle, bc);
+      if (inptr != nullptr) {
+        auto tts = static_cast<int32_t>(kvp.second.total_task_size());
+        inptr->emit_ack_batch(this, tts, now, cycle);
+      }
     }
   }
   return stream_ticks_.next_timeout(now, {max_batch_delay_ticks_,

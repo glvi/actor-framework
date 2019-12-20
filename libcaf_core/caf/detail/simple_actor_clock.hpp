@@ -24,6 +24,7 @@
 
 #include "caf/actor_clock.hpp"
 #include "caf/actor_control_block.hpp"
+#include "caf/detail/core_export.hpp"
 #include "caf/detail/make_unique.hpp"
 #include "caf/group.hpp"
 #include "caf/mailbox_element.hpp"
@@ -31,10 +32,9 @@
 #include "caf/message_id.hpp"
 #include "caf/variant.hpp"
 
-namespace caf {
-namespace detail {
+namespace caf::detail {
 
-class simple_actor_clock : public actor_clock {
+class CAF_CORE_EXPORT simple_actor_clock : public actor_clock {
 public:
   // -- member types -----------------------------------------------------------
 
@@ -185,7 +185,7 @@ public:
   /// Cancels a delayed event.
   struct cancellation : event {
     cancellation(event_type t, actor_id aid) : event(t), aid(aid) {
-      //nop
+      // nop
     }
 
     actor_id aid;
@@ -246,6 +246,18 @@ public:
     }
   };
 
+  // -- constructors, destructors, and assignment operators --------------------
+
+  simple_actor_clock() = default;
+
+  simple_actor_clock(simple_actor_clock&&) = default;
+
+  simple_actor_clock(const simple_actor_clock&) = delete;
+
+  simple_actor_clock& operator=(simple_actor_clock&&) = default;
+
+  simple_actor_clock& operator=(const simple_actor_clock&) = delete;
+
   // -- properties -------------------------------------------------------------
 
   const schedule_map& schedule() const {
@@ -265,11 +277,11 @@ public:
 
   // -- overridden member functions --------------------------------------------
 
-  void set_ordinary_timeout(time_point t, abstract_actor* self,
-                            atom_value type, uint64_t id) override;
+  void set_ordinary_timeout(time_point t, abstract_actor* self, atom_value type,
+                            uint64_t id) override;
 
-  void set_multi_timeout(time_point t, abstract_actor* self,
-                         atom_value type, uint64_t id) override;
+  void set_multi_timeout(time_point t, abstract_actor* self, atom_value type,
+                         uint64_t id) override;
 
   void set_request_timeout(time_point t, abstract_actor* self,
                            message_id id) override;
@@ -364,5 +376,4 @@ protected:
   actor_lookup_map actor_lookup_;
 };
 
-} // namespace detail
-} // namespace caf
+} // namespace caf::detail

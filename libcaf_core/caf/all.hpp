@@ -46,6 +46,7 @@
 #include "caf/binary_deserializer.hpp"
 #include "caf/binary_serializer.hpp"
 #include "caf/blocking_actor.hpp"
+#include "caf/byte_buffer.hpp"
 #include "caf/composable_behavior.hpp"
 #include "caf/composed_behavior.hpp"
 #include "caf/config_option.hpp"
@@ -61,7 +62,6 @@
 #include "caf/deserializer.hpp"
 #include "caf/detail/config_value_adaptor_field_impl.hpp"
 #include "caf/downstream_msg.hpp"
-#include "caf/duration.hpp"
 #include "caf/error.hpp"
 #include "caf/event_based_actor.hpp"
 #include "caf/exec_main.hpp"
@@ -103,10 +103,7 @@
 #include "caf/spawn_options.hpp"
 #include "caf/stateful_actor.hpp"
 #include "caf/stream.hpp"
-#include "caf/stream_deserializer.hpp"
-#include "caf/stream_serializer.hpp"
 #include "caf/stream_slot.hpp"
-#include "caf/streambuf.hpp"
 #include "caf/system_messages.hpp"
 #include "caf/term.hpp"
 #include "caf/thread_hook.hpp"
@@ -123,14 +120,14 @@
 
 #include "caf/decorator/sequencer.hpp"
 
-#include "caf/meta/type_name.hpp"
 #include "caf/meta/annotation.hpp"
-#include "caf/meta/save_callback.hpp"
 #include "caf/meta/load_callback.hpp"
 #include "caf/meta/omittable_if_empty.hpp"
+#include "caf/meta/save_callback.hpp"
+#include "caf/meta/type_name.hpp"
 
-#include "caf/scheduler/test_coordinator.hpp"
 #include "caf/scheduler/abstract_coordinator.hpp"
+#include "caf/scheduler/test_coordinator.hpp"
 
 ///
 /// @mainpage CAF
@@ -205,7 +202,7 @@
 /// Contains classes and functions used for network abstraction.
 ///
 /// @namespace caf::io::basp
-/// Contains all classes and functions for the Binary Actor Sytem Protocol.
+/// Contains all classes and functions for the Binary Actor System Protocol.
 ///
 /// @defgroup MessageHandling Message Handling
 ///
@@ -289,11 +286,11 @@
 ///
 /// @section Atoms Atoms
 ///
-/// Atoms are a nice way to add semantic informations to a message.
-/// Assuming an actor wants to provide a "math sevice" for integers. It
-/// could provide operations such as addition, subtraction, etc.
-/// This operations all have two operands. Thus, the actor does not know
-/// what operation the sender of a message wanted by receiving just two integers.
+/// Atoms are a nice way to add semantic information to a message. Assuming an
+/// actor wants to provide a "math service" for integers. It could provide
+/// operations such as addition, subtraction, etc. This operations all have two
+/// operands. Thus, the actor does not know what operation the sender of a
+/// message wanted by receiving just two integers.
 ///
 /// Example actor:
 /// ~~
@@ -403,7 +400,7 @@
 /// // sends an std::string containing "cstring" to itself
 /// send(self, cstring);
 ///
-/// // sends an std::u16string containing the UTF16 string "hello unicode world!"
+/// // sends an std::u16string containing "hello unicode world!"
 /// send(self, u"hello unicode world!");
 ///
 /// // x has the type caf::tuple<std::string, std::string>
@@ -422,4 +419,3 @@
 
 /// An event-based "Dining Philosophers" implementation.
 /// @example dining_philosophers.cpp
-

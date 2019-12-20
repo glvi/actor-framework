@@ -18,15 +18,15 @@
 
 #pragma once
 
-#include <vector>
 #include <algorithm>
+#include <vector>
 
+#include "caf/detail/core_export.hpp"
 #include "caf/detail/decorated_tuple.hpp"
 
-namespace caf {
-namespace detail {
+namespace caf::detail {
 
-class concatenated_tuple : public message_data {
+class CAF_CORE_EXPORT concatenated_tuple : public message_data {
 public:
   // -- member types -----------------------------------------------------------
 
@@ -84,7 +84,4 @@ private:
   size_t size_;
 };
 
-} // namespace detail
-} // namespace caf
-
-
+} // namespace caf::detail
