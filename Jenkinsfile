@@ -29,38 +29,19 @@ config = [
     ],
     // Our build matrix. Keys are the operating system labels and values are build configurations.
     buildMatrix: [
-        // Various Linux builds for debug and release.
-        ['debian-8', [
-            builds: ['debug', 'release'],
-            tools: ['clang-4'],
-        ]],
-        ['centos-6', [
-            builds: ['debug', 'release'],
-            tools: ['gcc-7'],
-        ]],
-        ['centos-7', [
-            builds: ['debug', 'release'],
-            tools: ['gcc-7'],
-        ]],
-        ['ubuntu-16.04', [
-            builds: ['debug', 'release'],
-            tools: ['clang-4'],
-        ]],
-        ['ubuntu-18.04', [
-            builds: ['debug', 'release'],
-            tools: ['gcc-7'],
-        ]],
-        // On Fedora 28, our debug build also produces the coverage report.
-        ['fedora-28', [
+        ['Linux', [
             builds: ['debug'],
-            tools: ['gcc-8'],
+            tools: ['gcc7'],
+        ]],
+        ['Linux', [
+            builds: ['debug'],
+            tools: ['gcc8'],
             extraSteps: ['coverageReport'],
         ]],
-        ['fedora-28', [
+        ['Linux', [
             builds: ['release'],
-            tools: ['gcc-8'],
+            tools: ['gcc8'],
         ]],
-        // Other UNIX systems.
         ['macOS', [
             builds: ['debug', 'release'],
             tools: ['clang'],
@@ -69,7 +50,6 @@ config = [
             builds: ['debug', 'release'],
             tools: ['clang'],
         ]],
-        // Non-UNIX systems.
         ['Windows', [
             // TODO: debug build currently broken
             //builds: ['debug', 'release'],
@@ -147,6 +127,24 @@ pipeline {
             agent { label 'clang-format' }
             steps {
                 runClangFormat(config)
+            }
+        }
+        stage('Check Consistency') {
+            agent { label 'unix' }
+            steps {
+                deleteDir()
+                unstash('sources')
+                dir('sources') {
+                    cmakeBuild([
+                        buildDir: 'build',
+                        installation: 'cmake in search path',
+                        sourceDir: '.',
+                        steps: [[
+                            args: '--target consistency-check',
+                            withCmake: true,
+                        ]],
+                    ])
+                }
             }
         }
         stage('Build') {
