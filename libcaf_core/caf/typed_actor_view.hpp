@@ -137,6 +137,11 @@ public:
                                                    std::move(bhvr));
   }
 
+  template <class Handle, class... Ts>
+  auto delegate(const Handle& dest, Ts&&... xs) {
+    return self_->delegate(dest, std::forward<Ts>(xs)...);
+  }
+
   /// Returns a pointer to the sender of the current message.
   /// @pre `current_mailbox_element() != nullptr`
   strong_actor_ptr& current_sender() {
