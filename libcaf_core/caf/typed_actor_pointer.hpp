@@ -30,8 +30,12 @@ public:
   /// Stores the template parameter pack.
   using signatures = detail::type_list<Sigs...>;
 
+  typed_actor_pointer() : view_(nullptr) {
+    // nop
+  }
+
   template <class Supertype>
-  typed_actor_pointer(Supertype* selfptr) : view_(selfptr) {
+  explicit typed_actor_pointer(Supertype* selfptr) : view_(selfptr) {
     using namespace caf::detail;
     static_assert(tl_subset_of<
                     type_list<Sigs...>,
@@ -40,7 +44,7 @@ public:
                   "cannot create a pointer view to an unrelated actor type");
   }
 
-  typed_actor_pointer(std::nullptr_t) : view_(nullptr) {
+  explicit typed_actor_pointer(std::nullptr_t) : view_(nullptr) {
     // nop
   }
 
@@ -87,4 +91,3 @@ private:
 };
 
 } // namespace caf
-
