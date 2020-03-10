@@ -231,8 +231,7 @@ endif()
 #                                compiler setup                                #
 ################################################################################
 
-# leave compiler flags alone when building as subdirectory
-
+# leave most compiler flags alone when building as subdirectory
 if (NOT caf_is_subproject)
   # check for g++ >= 4.8 or clang++ > = 3.2
   if(NOT WIN32 AND NOT CAF_NO_COMPILER_CHECK AND NOT CMAKE_CROSSCOMPILING)
@@ -380,19 +379,6 @@ if (NOT caf_is_subproject)
   if(NOT APPLE AND NOT WIN32)
       build_string("EXTRA_FLAGS" "-pthread")
   endif()
-  # -fPIC generates warnings on MinGW and Cygwin plus extra setup steps needed on MinGW
-  if(MINGW)
-    add_definitions(-D_WIN32_WINNT=0x0600)
-    add_definitions(-DWIN32)
-    include(GenerateExportHeader)
-    list(APPEND CAF_EXTRA_LDFLAGS -lws2_32 -liphlpapi -lpsapi)
-    # build static to avoid runtime dependencies to GCC libraries
-    build_string("EXTRA_FLAGS" "-static")
-  elseif(CYGWIN)
-    build_string("EXTRA_FLAGS" "-U__STRICT_ANSI__")
-  else()
-    build_string("EXTRA_FLAGS" "-fPIC")
-  endif()
   if (WIN32)
     list(APPEND CAF_EXTRA_LDFLAGS ws2_32 iphlpapi)
   endif()
@@ -433,10 +419,27 @@ if (NOT caf_is_subproject)
   if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
   endif()
-  # needed by subprojects
-  if (DEFINED CMAKE_LD_LIBS)
-    list(APPEND ${CMAKE_LD_LIBS})
-  endif()
+endif()
+
+# Make sure to link to platform-specific threading dependency (e.g. pthread).
+if (NOT TARGET Threads::Threads)
+  find_package(Threads REQUIRED)
+endif ()
+list(APPEND CAF_EXTRA_LDFLAGS Threads::Threads)
+
+# Have CMake set -fPIC when necessary.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# Adjust setup for MinGW and Cygwin.
+if(MINGW)
+  add_definitions(-D_WIN32_WINNT=0x0600)
+  add_definitions(-DWIN32)
+  include(GenerateExportHeader)
+  list(APPEND CAF_EXTRA_LDFLAGS -lws2_32 -liphlpapi -lpsapi)
+  # Build static to avoid runtime dependencies to GCC libraries.
+  build_string("EXTRA_FLAGS" "-static")
+elseif(CYGWIN)
+  build_string("EXTRA_FLAGS" "-U__STRICT_ANSI__")
 endif()
 
 ################################################################################
@@ -472,10 +475,12 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
 if(NOT TARGET uninstall)
   add_custom_target(uninstall)
 endif()
-add_custom_command(TARGET uninstall
+add_custom_target(caf_uninstall)
+add_custom_command(TARGET caf_uninstall
                    PRE_BUILD
                    COMMAND "${CMAKE_COMMAND}" -P
                    "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake")
+add_dependencies(uninstall caf_uninstall)
 
 ################################################################################
 #                       set inclue paths for subprojects                       #
@@ -707,9 +712,11 @@ endif()
 # -- Export important variables to the parent scope ----------------------------
 
 if(caf_is_subproject)
-  set(CAF_VERSION "${CAF_VERSION}" PARENT_SCOPE)
-  set(CAF_INCLUDE_DIRS "${CAF_INCLUDE_DIRS}" PARENT_SCOPE)
-  set(CAF_LIBRARIES "${CAF_LIBRARIES}" PARENT_SCOPE)
+  # Make sure parent projects can find build_config.hpp
+  list(APPEND CAF_INCLUDE_DIRS "${CMAKE_CURRENT_BINARY_DIR}/libcaf_core")
+  set(CAF_VERSION  "${CAF_VERSION}" CACHE INTERNAL "CAF release version")
+  set(CAF_LIBRARIES "${CAF_LIBRARIES}" CACHE INTERNAL "Library targets")
+  set(CAF_INCLUDE_DIRS "${CAF_INCLUDE_DIRS}" CACHE INTERNAL "Path to CAF headers")
 endif()
 
 ################################################################################
