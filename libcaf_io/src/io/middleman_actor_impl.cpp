@@ -149,13 +149,27 @@ auto middleman_actor_impl::make_behavior() -> behavior_type {
       delegate(broker_, atm, p);
       return {};
     },
-    [=](spawn_atom atm, node_id& nid, std::string& str, message& msg,
-        std::set<std::string>& ifs) -> delegated<strong_actor_ptr> {
+    [=](spawn_atom atm, node_id& nid, std::string& name, message& msg,
+        std::set<std::string>& ifs) -> result<strong_actor_ptr> {
       CAF_LOG_TRACE("");
+      if (!nid)
+        return make_error(sec::invalid_argument,
+                          "cannot spawn actors on invalid nodes");
+      if (name.empty())
+        return make_error(sec::invalid_argument,
+                          "cannot spawn actors without a type name");
+      auto& sys = system();
+      if (nid == sys.node()) {
+        auto res = sys.spawn<actor>(name, std::move(msg), nullptr, true, &ifs);
+        if (res)
+          return actor_cast<strong_actor_ptr>(std::move(*res));
+        else
+          return std::move(res.error());
+      }
       delegate(broker_, forward_atom::value, nid, atom("SpawnServ"),
-               make_message(atm, std::move(str), std::move(msg),
+               make_message(atm, std::move(name), std::move(msg),
                             std::move(ifs)));
-      return {};
+      return delegated<strong_actor_ptr>{};
     },
     [=](get_atom atm,
         node_id nid) -> delegated<node_id, std::string, uint16_t> {
