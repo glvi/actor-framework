@@ -76,6 +76,7 @@ const char* numbered_type_names[] = {
   "@message",
   "@message_id",
   "@node",
+  "@node_down_msg",
   "@open_stream_msg",
   "@str",
   "@strmap",

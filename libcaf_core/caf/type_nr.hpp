@@ -60,6 +60,7 @@ using sorted_builtin_types =
     message,                            // @message
     message_id,                         // @message_id
     node_id,                            // @node
+    node_down_msg,                      // @node_down_msg
     open_stream_msg,                    // @open_stream_msg
     std::string,                        // @str
     std::map<std::string, std::string>, // @strmap

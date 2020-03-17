@@ -170,7 +170,7 @@ public:
 
   // -- constructors, destructors, and assignment operators --------------------
 
-  constexpr node_id() noexcept {
+  constexpr node_id() noexcept : data_(nullptr) {
     // nop
   }
 

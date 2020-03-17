@@ -155,6 +155,7 @@ struct down_msg;
 struct timeout_msg;
 struct stream_slots;
 struct upstream_msg;
+struct node_down_msg;
 struct group_down_msg;
 struct downstream_msg;
 struct open_stream_msg;
