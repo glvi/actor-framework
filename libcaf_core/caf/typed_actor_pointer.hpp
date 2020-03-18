@@ -25,7 +25,7 @@
 namespace caf {
 
 template <class... Sigs>
-class typed_actor_pointer {
+class typed_actor_pointer : public typed_actor_view_base {
 public:
   /// Stores the template parameter pack.
   using signatures = detail::type_list<Sigs...>;
@@ -43,6 +43,10 @@ public:
                   >::value,
                   "cannot create a pointer view to an unrelated actor type");
   }
+
+  typed_actor_pointer(const typed_actor_pointer&) = default;
+
+  typed_actor_pointer& operator=(const typed_actor_pointer&) = default;
 
   explicit typed_actor_pointer(std::nullptr_t) : view_(nullptr) {
     // nop
