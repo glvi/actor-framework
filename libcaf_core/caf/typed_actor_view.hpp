@@ -39,13 +39,8 @@ public:
 
   using pointer = scheduled_actor*;
 
-  typed_actor_view(scheduled_actor* ptr) : self_(ptr) {
+  explicit typed_actor_view(scheduled_actor* ptr) : self_(ptr) {
     // nop
-  }
-
-  typed_actor_view& operator=(scheduled_actor* ptr) {
-    self_ = ptr;
-    return *this;
   }
 
   // -- spawn functions --------------------------------------------------------
@@ -254,6 +249,11 @@ public:
   /// @private
   scheduled_actor* internal_ptr() const noexcept {
     return self_;
+  }
+
+  /// @private
+  void reset(scheduled_actor* ptr) {
+    self_ = ptr;
   }
 
   operator scheduled_actor*() const noexcept {
