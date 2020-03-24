@@ -120,6 +120,7 @@
 #include "caf/typed_response_promise.hpp"
 #include "caf/unit.hpp"
 #include "caf/upstream_msg.hpp"
+#include "caf/uuid.hpp"
 
 #include "caf/decorator/sequencer.hpp"
 

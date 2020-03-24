@@ -159,6 +159,7 @@ set(LIBCAF_CORE_SRCS
   src/uniform_type_info_map.cpp
   src/uri.cpp
   src/uri_builder.cpp
+  src/uuid.cpp
 )
 
 # configure build_config.hpp header
