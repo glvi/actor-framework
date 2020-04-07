@@ -198,6 +198,15 @@ using stream_slot = uint16_t;
 /// @relates actor_system_config
 const settings& content(const actor_system_config&);
 
+// -- hash inspectors ----------------------------------------------------------
+
+namespace hash {
+
+template <class>
+class fnv;
+
+} // namespace hash
+
 // -- intrusive containers -----------------------------------------------------
 
 namespace intrusive {

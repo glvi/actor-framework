@@ -61,7 +61,6 @@ set(LIBCAF_CORE_SRCS
   src/detail/concatenated_tuple.cpp
   src/detail/decorated_tuple.cpp
   src/detail/dynamic_message_data.cpp
-  src/detail/fnv_hash.cpp
   src/detail/get_mac_addresses.cpp
   src/detail/get_process_id.cpp
   src/detail/get_root_uuid.cpp
