@@ -47,6 +47,12 @@ namespace caf {
 
 namespace {
 
+// Stores the ID of the currently running actor.
+thread_local actor_id current_actor_id;
+
+// Stores a pointer to the system-wide logger.
+thread_local intrusive_ptr<logger> current_logger_ptr;
+
 constexpr string_view log_level_name[] = {
   "QUIET",
   "",
@@ -188,47 +194,13 @@ string_view reduce_symbol(std::ostream& out, string_view symbol) {
   return symbol;
 }
 
-#if defined(CAF_NO_THREAD_LOCAL)
-
-pthread_key_t s_key;
-pthread_once_t s_key_once = PTHREAD_ONCE_INIT;
-
-void logger_ptr_destructor(void* ptr) {
-  if (ptr != nullptr) {
-    intrusive_ptr_release(reinterpret_cast<logger*>(ptr));
-  }
-}
-
-void make_logger_ptr() {
-  pthread_key_create(&s_key, logger_ptr_destructor);
-}
-
-void set_current_logger(logger* x) {
-  pthread_once(&s_key_once, make_logger_ptr);
-  logger_ptr_destructor(pthread_getspecific(s_key));
-  if (x != nullptr)
-    intrusive_ptr_add_ref(x);
-  pthread_setspecific(s_key, x);
-}
-
-logger* get_current_logger() {
-  pthread_once(&s_key_once, make_logger_ptr);
-  return reinterpret_cast<logger*>(pthread_getspecific(s_key));
-}
-
-#else // !CAF_NO_THREAD_LOCAL
-
-thread_local intrusive_ptr<logger> current_logger;
-
 inline void set_current_logger(logger* x) {
-  current_logger.reset(x);
+  current_logger_ptr.reset(x);
 }
 
 inline logger* get_current_logger() {
-  return current_logger.get();
+  return current_logger_ptr.get();
 }
-
-#endif // CAF_NO_THREAD_LOCAL
 
 } // namespace
 
@@ -294,30 +266,13 @@ std::string logger::line_builder::get() const {
   return std::move(str_);
 }
 
-// returns the actor ID for the current thread
 actor_id logger::thread_local_aid() {
-  shared_lock<detail::shared_spinlock> guard{aids_lock_};
-  auto i = aids_.find(std::this_thread::get_id());
-  if (i != aids_.end())
-    return i->second;
-  return 0;
+  return current_actor_id;
 }
 
 actor_id logger::thread_local_aid(actor_id aid) {
-  auto tid = std::this_thread::get_id();
-  upgrade_lock<detail::shared_spinlock> guard{aids_lock_};
-  auto i = aids_.find(tid);
-  if (i != aids_.end()) {
-    // we modify it despite the shared lock because the elements themselves
-    // are considered thread-local
-    auto res = i->second;
-    i->second = aid;
-    return res;
-  }
-  // upgrade to unique lock and insert new element
-  upgrade_to_unique_lock<detail::shared_spinlock> uguard{guard};
-  aids_.emplace(tid, aid);
-  return 0; // was empty before
+  std::swap(current_actor_id, aid);
+  return aid;
 }
 
 void logger::log(event&& x) {
