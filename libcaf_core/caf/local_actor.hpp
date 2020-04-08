@@ -207,27 +207,27 @@ public:
   // -- miscellaneous actor operations -----------------------------------------
 
   /// Returns the execution unit currently used by this actor.
-  inline execution_unit* context() const {
+  execution_unit* context() const noexcept {
     return context_;
   }
 
   /// Sets the execution unit for this actor.
-  inline void context(execution_unit* x) {
+  void context(execution_unit* x) noexcept {
     context_ = x;
   }
 
   /// Returns the hosting actor system.
-  inline actor_system& system() const {
+  actor_system& system() const noexcept {
     return home_system();
   }
 
   /// Returns the config of the hosting actor system.
-  inline const actor_system_config& config() const {
+  const actor_system_config& config() const noexcept {
     return system().config();
   }
 
   /// Returns the clock of the actor system.
-  inline actor_clock& clock() const {
+  actor_clock& clock() const noexcept {
     return home_system().clock();
   }
 
@@ -239,20 +239,20 @@ public:
 
   /// Returns a pointer to the sender of the current message.
   /// @pre `current_mailbox_element() != nullptr`
-  inline strong_actor_ptr& current_sender() {
+  strong_actor_ptr& current_sender() noexcept {
     CAF_ASSERT(current_element_);
     return current_element_->sender;
   }
 
   /// Returns the ID of the current message.
-  inline message_id current_message_id() {
+  message_id current_message_id() noexcept {
     CAF_ASSERT(current_element_);
     return current_element_->mid;
   }
 
   /// Returns the ID of the current message and marks the ID stored in the
   /// current mailbox element as answered.
-  inline message_id take_current_message_id() {
+  message_id take_current_message_id() noexcept {
     CAF_ASSERT(current_element_);
     auto result = current_element_->mid;
     current_element_->mid.mark_as_answered();
@@ -260,14 +260,14 @@ public:
   }
 
   /// Marks the current message ID as answered.
-  inline void drop_current_message_id() {
+  void drop_current_message_id() noexcept {
     CAF_ASSERT(current_element_);
     current_element_->mid.mark_as_answered();
   }
 
   /// Returns a pointer to the next stage from the forwarding path of the
   /// current message or `nullptr` if the path is empty.
-  inline strong_actor_ptr current_next_stage() {
+  strong_actor_ptr current_next_stage() noexcept {
     CAF_ASSERT(current_element_);
     auto& stages = current_element_->stages;
     if (!stages.empty())
@@ -278,7 +278,7 @@ public:
   /// Returns a pointer to the next stage from the forwarding path of the
   /// current message and removes it from the path. Returns `nullptr` if the
   /// path is empty.
-  inline strong_actor_ptr take_current_next_stage() {
+  strong_actor_ptr take_current_next_stage() {
     CAF_ASSERT(current_element_);
     auto& stages = current_element_->stages;
     if (!stages.empty()) {
@@ -290,25 +290,25 @@ public:
   }
 
   /// Returns the forwarding stack from the current mailbox element.
-  const mailbox_element::forwarding_stack& current_forwarding_stack() {
+  const mailbox_element::forwarding_stack& current_forwarding_stack() noexcept {
     CAF_ASSERT(current_element_);
     return current_element_->stages;
   }
 
   /// Moves the forwarding stack from the current mailbox element.
-  mailbox_element::forwarding_stack take_current_forwarding_stack() {
+  mailbox_element::forwarding_stack take_current_forwarding_stack() noexcept {
     CAF_ASSERT(current_element_);
     return std::move(current_element_->stages);
   }
 
   /// Returns a pointer to the currently processed mailbox element.
-  inline mailbox_element* current_mailbox_element() {
+  mailbox_element* current_mailbox_element() noexcept {
     return current_element_;
   }
 
   /// Returns a pointer to the currently processed mailbox element.
   /// @private
-  inline void current_mailbox_element(mailbox_element* ptr) {
+  void current_mailbox_element(mailbox_element* ptr) noexcept {
     current_element_ = ptr;
   }
 
@@ -351,7 +351,7 @@ public:
   }
 
   /// Creates a `response_promise` to respond to a request later on.
-  inline response_promise make_response_promise() {
+  response_promise make_response_promise() {
     return make_response_promise<response_promise>();
   }
 
@@ -382,7 +382,7 @@ public:
   /// Returns the currently defined fail state. If this reason is not
   /// `none` then the actor will terminate with this error after executing
   /// the current message handler.
-  inline const error& fail_state() const {
+  const error& fail_state() const noexcept {
     return fail_state_;
   }
 
@@ -391,7 +391,7 @@ public:
   /// @cond PRIVATE
 
   template <class ActorHandle>
-  inline ActorHandle eval_opts(spawn_options opts, ActorHandle res) {
+  ActorHandle eval_opts(spawn_options opts, ActorHandle res) {
     if (has_monitor_flag(opts))
       monitor(res->address());
     if (has_link_flag(opts))
@@ -401,7 +401,7 @@ public:
 
   // returns 0 if last_dequeued() is an asynchronous or sync request message,
   // a response id generated from the request id otherwise
-  inline message_id get_response_id() const {
+  message_id get_response_id() const {
     auto mid = current_element_->mid;
     return (mid.is_request()) ? mid.response_id() : message_id();
   }
