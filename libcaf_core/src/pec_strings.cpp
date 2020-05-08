@@ -53,6 +53,8 @@ std::string to_string(pec x) {
       return "repeated_field_name";
     case pec::missing_field:
       return "missing_field";
+    case pec::invalid_range_expression:
+      return "invalid_range_expression";
   };
 }
 

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2016                                                  *
+ * Copyright 2011-2020 Dominik Charousset                                     *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
  * (at your option) under the terms and conditions of the Boost Software      *
@@ -18,37 +18,25 @@
 
 #pragma once
 
-#include <unordered_map>
+namespace caf {
 
-#include "caf/actor_clock.hpp"
-#include "caf/io/basp/connection_state.hpp"
-#include "caf/io/basp/header.hpp"
-#include "caf/io/connection_handle.hpp"
-#include "caf/io/datagram_handle.hpp"
-#include "caf/response_promise.hpp"
-#include "caf/timestamp.hpp"
-#include "caf/variant.hpp"
-
-namespace caf::io::basp {
-
-// stores meta information for active endpoints
-struct endpoint_context {
-  // denotes what message we expect from the remote node next
-  basp::connection_state cstate;
-  // our currently processed BASP header
-  basp::header hdr;
-  // the handle for I/O operations
-  connection_handle hdl;
-  // network-agnostic node identifier
-  node_id id;
-  // ports
-  uint16_t remote_port;
-  uint16_t local_port;
-  // pending operations to be performed after handshake completed
-  optional<response_promise> callback;
-  // keeps track of when we've last received a message from this endpoint
-  actor_clock::time_point last_seen;
+/// Customization point for enabling conversion from an enum type to an
+/// @ref error or @ref error_code.
+template <class T>
+struct is_error_code_enum {
+  static constexpr bool value = false;
 };
+
+/// @relates is_error_code_enum
+template <class T>
+constexpr bool is_error_code_enum_v = is_error_code_enum<T>::value;
 
 } // namespace caf
 
+#define CAF_ERROR_CODE_ENUM(type_name)                                         \
+  namespace caf {                                                              \
+  template <>                                                                  \
+  struct is_error_code_enum<type_name> {                                       \
+    static constexpr bool value = true;                                        \
+  };                                                                           \
+  }

@@ -132,7 +132,7 @@ enum class sec : uint8_t {
   malformed_basp_message,
   /// The middleman closed a connection because it failed to serialize or
   /// deserialize a payload.
-  serializing_basp_payload_failed,
+  serializing_basp_payload_failed = 50,
   /// The middleman closed a connection to itself or an already connected node.
   redundant_connection,
   /// Resolving a path on a remote node failed.
@@ -141,6 +141,8 @@ enum class sec : uint8_t {
   no_tracing_context,
   /// No request produced a valid result.
   all_requests_failed,
+  /// Disconnected from a BASP node after reaching the connection timeout.
+  connection_timeout,
 };
 
 /// @relates sec

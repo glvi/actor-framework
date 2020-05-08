@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2016                                                  *
+ * Copyright 2011-2020 Dominik Charousset                                     *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
  * (at your option) under the terms and conditions of the Boost Software      *
@@ -18,37 +18,24 @@
 
 #pragma once
 
-#include <unordered_map>
+#include <cstddef>
+#include <type_traits>
 
-#include "caf/actor_clock.hpp"
-#include "caf/io/basp/connection_state.hpp"
-#include "caf/io/basp/header.hpp"
-#include "caf/io/connection_handle.hpp"
-#include "caf/io/datagram_handle.hpp"
-#include "caf/response_promise.hpp"
-#include "caf/timestamp.hpp"
-#include "caf/variant.hpp"
+namespace caf {
+namespace detail {
 
-namespace caf::io::basp {
+template <class T, size_t = sizeof(T)>
+std::true_type is_complete_impl(T*);
 
-// stores meta information for active endpoints
-struct endpoint_context {
-  // denotes what message we expect from the remote node next
-  basp::connection_state cstate;
-  // our currently processed BASP header
-  basp::header hdr;
-  // the handle for I/O operations
-  connection_handle hdl;
-  // network-agnostic node identifier
-  node_id id;
-  // ports
-  uint16_t remote_port;
-  uint16_t local_port;
-  // pending operations to be performed after handshake completed
-  optional<response_promise> callback;
-  // keeps track of when we've last received a message from this endpoint
-  actor_clock::time_point last_seen;
+std::false_type is_complete_impl(...);
+
+/// Checks whether T is a complete type. For example, passing a forward
+/// declaration or undefined template specialization evaluates to `false`.
+template <class T>
+struct is_complete {
+  static constexpr bool value
+    = decltype(is_complete_impl(std::declval<T*>()))::value;
 };
 
+} // namespace detail
 } // namespace caf
-

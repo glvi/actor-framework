@@ -1,8 +1,5 @@
 cmake_minimum_required(VERSION 2.8.12)
-project(caf C CXX)
-
-include(CheckCSourceCompiles)
-include(CheckCSourceRuns)
+project(caf CXX)
 
 # Set default install paths.
 # See https://cmake.org/cmake/help/latest/module/GNUInstallDirs.html
@@ -442,6 +439,11 @@ elseif(CYGWIN)
   build_string("EXTRA_FLAGS" "-U__STRICT_ANSI__")
 endif()
 
+# Add extra flags.
+if (NOT "${EXTRA_FLAGS}" STREQUAL "")
+  build_string(CMAKE_CXX_FLAGS "${EXTRA_FLAGS}")
+endif()
+
 ################################################################################
 #                                setup logging                                 #
 ################################################################################
@@ -512,10 +514,22 @@ endif()
 # all projects need the headers of the core components
 include_directories("${CAF_INCLUDE_DIRS}")
 
+# -- unit tests setup ----------------------------------------------------------
 
-################################################################################
-#                                 add targets                                  #
-################################################################################
+if(NOT CAF_NO_UNIT_TESTS)
+  enable_testing()
+  function(caf_add_test_suites target)
+    foreach(suiteName ${ARGN})
+      string(REPLACE "." "/" suitePath ${suiteName})
+      target_sources(${target} PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/${suitePath}.cpp")
+      add_test(NAME ${suiteName}
+               COMMAND ${target} -r300 -n -v5 -s"^${suiteName}$")
+    endforeach()
+  endfunction()
+endif()
+
+# -- add targets ---------------------------------------------------------------
 
 macro(add_caf_lib name)
   string(TOUPPER ${name} upper_name)
@@ -601,21 +615,18 @@ elseif(NOT CAF_NO_OPENSSL)
     else()
       if(NOT CMAKE_CROSSCOMPILING)
         # Check if openssl headers and library versions match
-        set(CMAKE_REQUIRED_LIBRARIES ${OPENSSL_LIBRARIES})
-        set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
-        check_c_source_runs("
-          #include <openssl/opensslv.h>
-          #include <openssl/crypto.h>
-          int main() {
-            if (SSLeay() == OPENSSL_VERSION_NUMBER) {
-              return 0;
-            }
-            return -1;
-          }
-        " OPENSSL_CORRECT_VERSION_NUMBER)
-        if (NOT OPENSSL_CORRECT_VERSION_NUMBER)
+        try_run(sslRunResult sslCompileResult
+                "${CMAKE_CURRENT_BINARY_DIR}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/openssl-check.cpp"
+                CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${OPENSSL_INCLUDE_DIR}"
+                LINK_LIBRARIES ${OPENSSL_LIBRARIES}
+                OUTPUT_VARIABLE sslOutput)
+        if (NOT sslCompileResult)
+          message(FATAL_ERROR "failed to compile/link against OpenSSL")
+        endif()
+        if(NOT sslRunResult EQUAL 0)
           message(FATAL_ERROR
-            "OpenSSL library version does not match headers")
+                  "OpenSSL version does not match headers: ${sslOutput}")
         endif()
       endif()
       include_directories(BEFORE ${OPENSSL_INCLUDE_DIR})
@@ -653,48 +664,6 @@ add_optional_caf_binaries(examples)
 
 # build tools if not being told otherwise
 add_optional_caf_binaries(tools)
-
-################################################################################
-#                               unit tests setup                               #
-################################################################################
-
-if(NOT CAF_NO_UNIT_TESTS)
-  # setup unit test binary
-  add_executable(caf-test
-                 libcaf_test/src/caf-test.cpp
-                 libcaf_test/caf/test/unit_test.hpp
-                 libcaf_test/caf/test/unit_test_impl.hpp
-                 ${CAF_ALL_UNIT_TESTS})
-  target_link_libraries(caf-test
-                        ${CAF_EXTRA_LDFLAGS}
-                        ${CAF_LIBRARIES}
-                        ${PTHREAD_LIBRARIES})
-  add_custom_target(all_unit_tests)
-  add_dependencies(caf-test all_unit_tests)
-  # enumerate all test suites.
-  foreach(test ${CAF_ALL_UNIT_TESTS})
-    file(STRINGS ${test} contents)
-    foreach(line ${contents})
-      if ("${line}" MATCHES "CAF_SUITE (.*)")
-        string(REGEX REPLACE ".* CAF_SUITE (.*)" "\\1" suite ${line})
-        list(APPEND suites ${suite})
-      endif()
-    endforeach()
-  endforeach()
-  list(REMOVE_DUPLICATES suites)
-  # creates one CMake test per test suite.
-  macro (make_test suite)
-    string(REPLACE " " "_" test_name ${suite})
-    set(caf_test ${EXECUTABLE_OUTPUT_PATH}/caf-test)
-    add_test(${test_name} ${caf_test} -r 300 -n -v 5 -s "${suite}" ${ARGN})
-  endmacro ()
-  list(LENGTH suites num_suites)
-  message(STATUS "Found ${num_suites} test suites")
-  foreach(suite ${suites})
-    make_test("${suite}")
-  endforeach ()
-endif()
-
 
 # -- Setup for building manual and API documentation ---------------------------
 
