@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 2.8.12)
 project(caf CXX)
 
-# Set default install paths.
-# See https://cmake.org/cmake/help/latest/module/GNUInstallDirs.html
-include(GNUInstallDirs)
+include(GNUInstallDirs)            # Sets default install paths
+include(CMakePackageConfigHelpers) # For creating .cmake files
+
+set(CAF_INSTALL_CMAKEDIR
+    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/CAF" CACHE STRING
+    "Path for installing CMake files, enables 'find_package(CAF)'")
 
 get_directory_property(_parent PARENT_DIRECTORY)
 if(_parent)
@@ -687,6 +690,31 @@ if(caf_is_subproject)
   set(CAF_LIBRARIES "${CAF_LIBRARIES}" CACHE INTERNAL "Library targets")
   set(CAF_INCLUDE_DIRS "${CAF_INCLUDE_DIRS}" CACHE INTERNAL "Path to CAF headers")
 endif()
+
+# -- generate and install .cmake files -----------------------------------------
+
+export(EXPORT CAFTargets FILE CAFTargets.cmake NAMESPACE CAF::)
+
+install(EXPORT CAFTargets
+        DESTINATION "${CAF_INSTALL_CMAKEDIR}"
+        NAMESPACE CAF::)
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/CAFConfigVersion.cmake"
+  VERSION ${CAF_VERSION}
+  COMPATIBILITY ExactVersion)
+
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAFConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/CAFConfig.cmake"
+  INSTALL_DESTINATION "${CAF_INSTALL_CMAKEDIR}")
+
+install(
+  FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/CAFConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/CAFConfigVersion.cmake"
+  DESTINATION
+    "${CAF_INSTALL_CMAKEDIR}")
 
 ################################################################################
 #                                print summary                                 #

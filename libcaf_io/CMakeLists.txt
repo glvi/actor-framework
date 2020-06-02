@@ -84,12 +84,25 @@ if (CAF_BUILD_STATIC_ONLY OR CAF_BUILD_STATIC)
   set_target_properties(libcaf_io_static PROPERTIES OUTPUT_NAME caf_io_static)
   install(TARGETS libcaf_io_static ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
   add_dependencies(libcaf_io_static libcaf_io)
+  set(libcaf_io_export_target libcaf_io_static)
+else()
+  set(libcaf_io_export_target libcaf_io_shared)
 endif ()
 
 # install includes
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/caf
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
         FILES_MATCHING PATTERN "*.hpp")
+
+set_property(TARGET ${libcaf_io_export_target} PROPERTY EXPORT_NAME io)
+
+install(TARGETS ${libcaf_io_export_target}
+        EXPORT CAFTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT io
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT io
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT io)
+
+add_library(CAF::io ALIAS ${libcaf_io_export_target})
 
 # -- build unit tests ----------------------------------------------------------
 

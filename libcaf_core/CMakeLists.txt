@@ -207,12 +207,25 @@ if (CAF_BUILD_STATIC_ONLY OR CAF_BUILD_STATIC)
   set_target_properties(libcaf_core_static PROPERTIES OUTPUT_NAME caf_core_static)
   install(TARGETS libcaf_core_static ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
   add_dependencies(libcaf_core_static libcaf_core)
+  set(libcaf_core_export_target libcaf_core_static)
+else()
+  set(libcaf_core_export_target libcaf_core_shared)
 endif ()
 
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/caf"
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
         FILES_MATCHING PATTERN "*.hpp"
 )
+
+set_property(TARGET ${libcaf_core_export_target} PROPERTY EXPORT_NAME core)
+
+install(TARGETS ${libcaf_core_export_target}
+        EXPORT CAFTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT core
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT core
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT core)
+
+add_library(CAF::core ALIAS ${libcaf_core_export_target})
 
 # -- build unit tests ----------------------------------------------------------
 

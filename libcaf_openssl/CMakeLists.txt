@@ -50,15 +50,27 @@ if (CAF_BUILD_STATIC_ONLY OR CAF_BUILD_STATIC)
     install(TARGETS libcaf_openssl_static ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
   endif()
   add_dependencies(libcaf_openssl_static libcaf_openssl)
+  set(libcaf_openssl_export_target libcaf_openssl_static)
+else()
+  set(libcaf_openssl_export_target libcaf_openssl_shared)
 endif ()
 
 link_directories(${LD_DIRS})
 include_directories(. ${INCLUDE_DIRS})
 
-# install includes
-if(NOT WIN32)
-  install(DIRECTORY caf/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/caf FILES_MATCHING PATTERN "*.hpp")
-endif()
+install(DIRECTORY caf/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/caf
+        FILES_MATCHING PATTERN "*.hpp")
+
+set_property(TARGET ${libcaf_openssl_export_target} PROPERTY EXPORT_NAME openssl)
+
+install(TARGETS ${libcaf_openssl_export_target}
+        EXPORT CAFTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT openssl
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT openssl
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT openssl)
+
+add_library(CAF::openssl ALIAS ${libcaf_openssl_export_target})
 
 # -- build unit tests ----------------------------------------------------------
 
