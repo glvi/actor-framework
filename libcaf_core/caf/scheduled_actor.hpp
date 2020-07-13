@@ -253,7 +253,8 @@ public:
   static void default_exit_handler(pointer ptr, exit_msg& x);
 
 # ifndef CAF_NO_EXCEPTIONS
-  static error default_exception_handler(pointer ptr, std::exception_ptr& x);
+  static error default_exception_handler(local_actor* ptr,
+                                         std::exception_ptr& x);
 # endif // CAF_NO_EXCEPTIONS
 
   // -- constructors and destructors -------------------------------------------
