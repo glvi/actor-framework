@@ -1,31 +1,21 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <chrono>
+#include <list>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
 #include "caf/actor_system.hpp"
+#include "caf/config_value.hpp"
 #include "caf/detail/io_export.hpp"
+#include "caf/detail/remote_group_module.hpp"
 #include "caf/detail/unique_function.hpp"
 #include "caf/expected.hpp"
 #include "caf/fwd.hpp"
@@ -40,9 +30,34 @@
 namespace caf::io {
 
 /// Manages brokers and network backends.
-class CAF_IO_EXPORT middleman : public actor_system::module {
+class CAF_IO_EXPORT middleman : public actor_system::networking_module {
 public:
-  friend class ::caf::actor_system;
+  friend class actor_system;
+
+  /// Metrics that the middleman collects by default.
+  struct metric_singletons_t {
+    /// Samples the size of inbound messages before deserializing them.
+    telemetry::int_histogram* inbound_messages_size = nullptr;
+
+    /// Samples how long the middleman needs to deserialize inbound messages.
+    telemetry::dbl_histogram* deserialization_time = nullptr;
+
+    /// Samples the size of outbound messages after serializing them.
+    telemetry::int_histogram* outbound_messages_size = nullptr;
+
+    /// Samples how long the middleman needs to serialize outbound messages.
+    telemetry::dbl_histogram* serialization_time = nullptr;
+  };
+
+  /// Independent tasks that run in the background, usually in their own thread.
+  struct background_task {
+    virtual ~background_task();
+  };
+
+  using background_task_ptr = std::unique_ptr<background_task>;
+
+  /// Adds message types of the I/O module to the global meta object table.
+  static void init_global_meta_objects();
 
   ~middleman() override;
 
@@ -105,19 +120,29 @@ public:
     return actor_cast<ActorHandle>(std::move(*x));
   }
 
-  /// <group-name>@<host>:<port>
-  expected<group> remote_group(const std::string& group_uri);
+  /// Tries to connect to a group that runs on a different node in the network.
+  /// @param group_locator Locator in the format `<group-name>@<host>:<port>`.
+  expected<group> remote_group(const std::string& group_locator);
 
+  /// Tries to connect to a group that runs on a different node in the network.
+  /// @param group_identifier Unique identifier of the group.
+  /// @param host Hostname or IP address of the remote CAF node.
+  /// @param port TCP port for connecting to the group name server of the node.
   expected<group> remote_group(const std::string& group_identifier,
                                const std::string& host, uint16_t port);
 
+  /// @private
+  void resolve_remote_group_intermediary(const node_id& origin,
+                                         const std::string& group_identifier,
+                                         std::function<void(actor)> callback);
+
   /// Returns the enclosing actor system.
-  inline actor_system& system() {
+  actor_system& system() {
     return system_;
   }
 
   /// Returns the systemw-wide configuration.
-  inline const actor_system_config& config() const {
+  const actor_system_config& config() const {
     return system_.config();
   }
 
@@ -127,7 +152,7 @@ public:
   /// Returns the broker associated with `name` or creates a
   /// new instance of type `Impl`.
   template <class Impl>
-  actor named_broker(atom_value name) {
+  actor named_broker(const std::string& name) {
     auto i = named_brokers_.find(name);
     if (i != named_brokers_.end())
       return i->second;
@@ -152,7 +177,7 @@ public:
   /// associated to this `name`.
   /// @note Blocks the caller until `nid` responded to the lookup
   ///       or an error occurred.
-  strong_actor_ptr remote_lookup(atom_value name, const node_id& nid);
+  strong_actor_ptr remote_lookup(std::string name, const node_id& nid);
 
   /// @experimental
   template <class Handle>
@@ -161,6 +186,8 @@ public:
                timespan timeout = timespan{std::chrono::minutes{1}}) {
     if (!nid || name.empty())
       return sec::invalid_argument;
+    if (nid == system().node())
+      return system().spawn<Handle>(std::move(name), std::move(args));
     auto res = remote_spawn_impl(nid, name, args,
                                  system().message_types<Handle>(), timeout);
     if (!res)
@@ -192,6 +219,10 @@ public:
   id_t id() const override;
 
   void* subtype_ptr() override;
+
+  void monitor(const node_id& node, const actor_addr& observer) override;
+
+  void demonitor(const node_id& node, const actor_addr& observer) override;
 
   /// Spawns a new functor-based broker.
   template <spawn_options Os = no_spawn_options,
@@ -242,6 +273,9 @@ public:
                                        std::forward<Ts>(xs)...);
   }
 
+  /// Adds module-specific options to the config before loading the module.
+  static void add_module_options(actor_system_config& cfg);
+
   /// Returns a middleman using the default network backend.
   static actor_system::module* make(actor_system&, detail::type_list<>);
 
@@ -262,6 +296,21 @@ public:
       Backend backend_;
     };
     return new impl(sys);
+  }
+
+  /// @private
+  actor get_named_broker(const std::string& name) {
+    if (auto i = named_brokers_.find(name); i != named_brokers_.end())
+      return i->second;
+    return {};
+  }
+
+  /// @private
+  metric_singletons_t metric_singletons;
+
+  /// @private
+  uint16_t prometheus_scraping_port() const noexcept {
+    return prometheus_scraping_port_;
   }
 
 protected:
@@ -319,16 +368,30 @@ private:
 
   static int exec_slave_mode(actor_system&, const actor_system_config&);
 
-  // environment
+  /// The actor environment.
   actor_system& system_;
-  // prevents backend from shutting down unless explicitly requested
+
+  /// Prevents backend from shutting down unless explicitly requested.
   network::multiplexer::supervisor_ptr backend_supervisor_;
-  // runs the backend
+
+  /// Runs the backend.
   std::thread thread_;
-  // keeps track of "singleton-like" brokers
-  std::map<atom_value, actor> named_brokers_;
-  // actor offering asynchronous IO by managing this singleton instance
+
+  /// Keeps track of "singleton-like" brokers.
+  std::map<std::string, actor> named_brokers_;
+
+  /// Offers an asynchronous IO by managing this singleton instance.
   middleman_actor manager_;
+
+  /// Handles to tasks that we spin up in start() and destroy in stop().
+  std::vector<background_task_ptr> background_tasks_;
+
+  /// Manages groups that run on a different node in the network.
+  detail::remote_group_module_ptr remote_groups_;
+
+  /// Stores the port where the Prometheus scraper is listening at (0 if no
+  /// scraper is running in the background).
+  uint16_t prometheus_scraping_port_ = 0;
 };
 
 } // namespace caf::io

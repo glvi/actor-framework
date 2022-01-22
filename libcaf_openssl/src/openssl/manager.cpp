@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/openssl/manager.hpp"
 
@@ -97,28 +83,27 @@ manager::~manager() {
 void manager::start() {
   CAF_LOG_TRACE("");
   manager_ = make_middleman_actor(
-    system(), system().middleman().named_broker<io::basp_broker>(atom("BASP")));
+    system(), system().middleman().named_broker<io::basp_broker>("BASP"));
 }
 
 void manager::stop() {
   CAF_LOG_TRACE("");
   scoped_actor self{system(), true};
   self->send_exit(manager_, exit_reason::kill);
-  if (!get_or(config(), "middleman.attach-utility-actors", false))
+  if (!get_or(config(), "caf.middleman.attach-utility-actors", false))
     self->wait_for(manager_);
   manager_ = nullptr;
 }
 
 void manager::init(actor_system_config&) {
-  CAF_LOG_TRACE("");
   ERR_load_crypto_strings();
   OPENSSL_add_all_algorithms_conf();
   SSL_library_init();
   SSL_load_error_strings();
   if (authentication_enabled()) {
-    if (system().config().openssl_certificate.size() == 0)
+    if (system().config().openssl_certificate.empty())
       CAF_RAISE_ERROR("No certificate configured for SSL endpoint");
-    if (system().config().openssl_key.size() == 0)
+    if (system().config().openssl_key.empty())
       CAF_RAISE_ERROR("No private key configured for SSL endpoint");
   }
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
@@ -145,9 +130,25 @@ void* manager::subtype_ptr() {
 
 bool manager::authentication_enabled() {
   auto& cfg = system().config();
-  return cfg.openssl_certificate.size() > 0 || cfg.openssl_key.size() > 0
-         || cfg.openssl_passphrase.size() > 0 || cfg.openssl_capath.size() > 0
-         || cfg.openssl_cafile.size() > 0;
+  return !cfg.openssl_certificate.empty() || !cfg.openssl_key.empty()
+         || !cfg.openssl_passphrase.empty() || !cfg.openssl_capath.empty()
+         || !cfg.openssl_cafile.empty();
+}
+
+void manager::add_module_options(actor_system_config& cfg) {
+  config_option_adder(cfg.custom_options(), "caf.openssl")
+    .add<std::string>(cfg.openssl_certificate, "certificate",
+                      "path to the PEM-formatted certificate file")
+    .add<std::string>(cfg.openssl_key, "key",
+                      "path to the private key file for this node")
+    .add<std::string>(cfg.openssl_passphrase, "passphrase",
+                      "passphrase to decrypt the private key")
+    .add<std::string>(
+      cfg.openssl_capath, "capath",
+      "path to an OpenSSL-style directory of trusted certificates")
+    .add<std::string>(
+      cfg.openssl_cafile, "cafile",
+      "path to a file of concatenated PEM-formatted certificates");
 }
 
 actor_system::module* manager::make(actor_system& sys, detail::type_list<>) {
@@ -157,6 +158,10 @@ actor_system::module* manager::make(actor_system& sys, detail::type_list<>) {
   if (dynamic_cast<io::network::default_multiplexer*>(ptr) == nullptr)
     CAF_RAISE_ERROR("Cannot start OpenSSL module without default backend.");
   return new manager(sys);
+}
+
+void manager::init_global_meta_objects() {
+  // nop
 }
 
 manager::manager(actor_system& sys) : system_(sys) {

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -22,11 +8,11 @@
 #include "caf/logger.hpp"
 #include "caf/make_counted.hpp"
 #include "caf/message_id.hpp"
+#include "caf/policy/arg.hpp"
 #include "caf/sec.hpp"
 #include "caf/stream_manager.hpp"
 #include "caf/stream_sink.hpp"
-
-#include "caf/policy/arg.hpp"
+#include "caf/typed_message_view.hpp"
 
 namespace caf::detail {
 
@@ -50,8 +36,8 @@ public:
   void handle(inbound_path*, downstream_msg::batch& x) override {
     CAF_LOG_TRACE(CAF_ARG(x));
     using vec_type = std::vector<input_type>;
-    if (x.xs.match_elements<vec_type>()) {
-      driver_.process(x.xs.get_mutable_as<vec_type>(0));
+    if (auto view = make_typed_message_view<vec_type>(x.xs)) {
+      driver_.process(get<0>(view));
       return;
     }
     CAF_LOG_ERROR("received unexpected batch type (dropped)");
@@ -59,10 +45,6 @@ public:
 
   int32_t acquire_credit(inbound_path* path, int32_t desired) override {
     return driver_.acquire_credit(path, desired);
-  }
-
-  bool congested() const noexcept override {
-    return driver_.congested();
   }
 
 protected:

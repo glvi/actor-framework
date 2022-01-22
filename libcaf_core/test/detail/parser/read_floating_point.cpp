@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE detail.parser.read_floating_point
 
 #include "caf/detail/parser/read_floating_point.hpp"
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
 
 #include <string>
 
@@ -54,51 +40,51 @@ optional<double> read(string_view str) {
 } // namespace
 
 CAF_TEST(predecimal only) {
-  CAF_CHECK_EQUAL(read("0"), 0.);
-  CAF_CHECK_EQUAL(read("+0"), 0.);
-  CAF_CHECK_EQUAL(read("-0"), 0.);
-  CAF_CHECK_EQUAL(read("1"), 1.);
-  CAF_CHECK_EQUAL(read("+1"), 1.);
-  CAF_CHECK_EQUAL(read("-1"), -1.);
-  CAF_CHECK_EQUAL(read("12"), 12.);
-  CAF_CHECK_EQUAL(read("+12"), 12.);
-  CAF_CHECK_EQUAL(read("-12"), -12.);
+  CHECK_EQ(read("0"), 0.);
+  CHECK_EQ(read("+0"), 0.);
+  CHECK_EQ(read("-0"), 0.);
+  CHECK_EQ(read("1"), 1.);
+  CHECK_EQ(read("+1"), 1.);
+  CHECK_EQ(read("-1"), -1.);
+  CHECK_EQ(read("12"), 12.);
+  CHECK_EQ(read("+12"), 12.);
+  CHECK_EQ(read("-12"), -12.);
 }
 
 CAF_TEST(trailing dot) {
-  CAF_CHECK_EQUAL(read("0."), 0.);
-  CAF_CHECK_EQUAL(read("1."), 1.);
-  CAF_CHECK_EQUAL(read("+1."), 1.);
-  CAF_CHECK_EQUAL(read("-1."), -1.);
-  CAF_CHECK_EQUAL(read("12."), 12.);
-  CAF_CHECK_EQUAL(read("+12."), 12.);
-  CAF_CHECK_EQUAL(read("-12."), -12.);
+  CHECK_EQ(read("0."), 0.);
+  CHECK_EQ(read("1."), 1.);
+  CHECK_EQ(read("+1."), 1.);
+  CHECK_EQ(read("-1."), -1.);
+  CHECK_EQ(read("12."), 12.);
+  CHECK_EQ(read("+12."), 12.);
+  CHECK_EQ(read("-12."), -12.);
 }
 
 CAF_TEST(leading dot) {
-  CAF_CHECK_EQUAL(read(".0"), .0);
-  CAF_CHECK_EQUAL(read(".1"), .1);
-  CAF_CHECK_EQUAL(read("+.1"), .1);
-  CAF_CHECK_EQUAL(read("-.1"), -.1);
-  CAF_CHECK_EQUAL(read(".12"), .12);
-  CAF_CHECK_EQUAL(read("+.12"), .12);
-  CAF_CHECK_EQUAL(read("-.12"), -.12);
+  CHECK_EQ(read(".0"), .0);
+  CHECK_EQ(read(".1"), .1);
+  CHECK_EQ(read("+.1"), .1);
+  CHECK_EQ(read("-.1"), -.1);
+  CHECK_EQ(read(".12"), .12);
+  CHECK_EQ(read("+.12"), .12);
+  CHECK_EQ(read("-.12"), -.12);
 }
 
 CAF_TEST(regular noation) {
-  CAF_CHECK_EQUAL(read("0.0"), .0);
-  CAF_CHECK_EQUAL(read("1.2"), 1.2);
-  CAF_CHECK_EQUAL(read("1.23"), 1.23);
-  CAF_CHECK_EQUAL(read("12.34"), 12.34);
+  CHECK_EQ(read("0.0"), .0);
+  CHECK_EQ(read("1.2"), 1.2);
+  CHECK_EQ(read("1.23"), 1.23);
+  CHECK_EQ(read("12.34"), 12.34);
 }
 
 CAF_TEST(scientific noation) {
-  CAF_CHECK_EQUAL(read("1e2"), 1e2);
-  CAF_CHECK_EQUAL(read("+1e2"), 1e2);
-  CAF_CHECK_EQUAL(read("+1e+2"), 1e2);
-  CAF_CHECK_EQUAL(read("-1e2"), -1e2);
-  CAF_CHECK_EQUAL(read("-1e+2"), -1e2);
-  CAF_CHECK_EQUAL(read("12e-3"), 12e-3);
-  CAF_CHECK_EQUAL(read("+12e-3"), 12e-3);
-  CAF_CHECK_EQUAL(read("-12e-3"), -12e-3);
+  CHECK_EQ(read("1e2"), 1e2);
+  CHECK_EQ(read("+1e2"), 1e2);
+  CHECK_EQ(read("+1e+2"), 1e2);
+  CHECK_EQ(read("-1e2"), -1e2);
+  CHECK_EQ(read("-1e+2"), -1e2);
+  CHECK_EQ(read("12e-3"), 12e-3);
+  CHECK_EQ(read("+12e-3"), 12e-3);
+  CHECK_EQ(read("-12e-3"), -12e-3);
 }

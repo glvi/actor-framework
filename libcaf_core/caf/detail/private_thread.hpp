@@ -1,61 +1,37 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <thread>
 
-#include "caf/detail/core_export.hpp"
+#include "caf/detail/private_thread_pool.hpp"
 #include "caf/fwd.hpp"
 
 namespace caf::detail {
 
-class private_thread {
+class private_thread : public private_thread_pool::node {
 public:
-  enum worker_state { active, shutdown_requested, await_resume_or_shutdown };
+  void resume(resumable* ptr);
 
-  explicit private_thread(scheduled_actor* self);
+  bool stop() override;
 
-  void run();
-
-  bool await_resume();
-
-  void resume();
-
-  void shutdown();
-
-  static void exec(private_thread* this_ptr);
-
-  void notify_self_destroyed();
-
-  void await_self_destroyed();
-
-  void start();
+  static private_thread* launch(actor_system* sys);
 
 private:
+  void run(actor_system* sys);
+
+  std::pair<resumable*, bool> await();
+
+  std::thread thread_;
   std::mutex mtx_;
   std::condition_variable cv_;
-  std::atomic<bool> self_destroyed_;
-  std::atomic<scheduled_actor*> self_;
-  std::atomic<worker_state> state_;
-  actor_system& system_;
+  resumable* job_ = nullptr;
+  bool shutdown_ = false;
 };
 
 } // namespace caf::detail

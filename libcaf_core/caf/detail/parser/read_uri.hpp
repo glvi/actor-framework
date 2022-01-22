@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -66,8 +52,9 @@ void read_uri_percent_encoded(State& ps, std::string& str) {
   // clang-format on
 }
 
-inline bool uri_unprotected_char(char c) {
-  return in_whitelist(alphanumeric_chars, c) || in_whitelist("-._~", c);
+inline bool uri_unprotected_char(char c) noexcept {
+  // Consider valid characters not explicitly stated as reserved as unreserved.
+  return isprint(c) && !in_whitelist(":/?#[]@!$&'()*+,;=<>", c);
 }
 
 // clang-format off
@@ -127,7 +114,9 @@ void read_uri(State& ps, Consumer&& consumer) {
     return res;
   };
   // Allowed character sets.
-  auto path_char = [](char c) { return uri_unprotected_char(c) || c == '/'; };
+  auto path_char = [](char c) {
+    return uri_unprotected_char(c) || c == '/' || c == ':';
+  };
   // Utility setters for avoiding code duplication.
   auto set_path = [&] { consumer.path(take_str()); };
   auto set_host = [&] { consumer.host(take_str()); };
@@ -159,6 +148,8 @@ void read_uri(State& ps, Consumer&& consumer) {
     epsilon(read_path, any_char, str += '/')
   }
   state(start_authority) {
+    // A third '/' skips the authority, e.g., "file:///".
+    transition(read_path, '/', str += '/')
     read_next_char(read_authority, str)
     fsm_transition(read_ipv6_address(ps, ip_consumer), await_end_of_ipv6, '[')
   }

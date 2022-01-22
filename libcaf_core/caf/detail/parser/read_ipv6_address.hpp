@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -153,7 +139,7 @@ template <class F>
 struct read_ipv6_address_piece_consumer {
   F callback;
 
-  inline void value(uint16_t x) {
+  void value(uint16_t x) {
     union {
       uint16_t bits;
       std::array<uint8_t, 2> bytes;
@@ -162,7 +148,7 @@ struct read_ipv6_address_piece_consumer {
     callback(val.bytes.data(), val.bytes.size());
   }
 
-  inline void value(uint8_t x) {
+  void value(uint8_t x) {
     callback(&x, 1);
   }
 };
@@ -189,10 +175,10 @@ void read_ipv6_address(State& ps, Consumer&& consumer) {
   // Computes the result on success.
   auto g = caf::detail::make_scope_guard([&] {
     if (ps.code <= pec::trailing_character) {
-      ipv6_address::array_type bytes;
+      ipv6_address result;
+      auto& bytes = result.bytes();
       for (size_t i = 0; i < ipv6_address::num_bytes; ++i)
         bytes[i] = prefix[i] | suffix[i];
-      ipv6_address result{bytes};
       consumer.value(std::move(result));
     }
   });
@@ -215,9 +201,10 @@ void read_ipv6_address(State& ps, Consumer&& consumer) {
   // Utility function for promoting an IPv4 formatted input.
   auto promote_v4 = [&] {
     if (filled_bytes == 4) {
-      ipv4_address::array_type bytes;
+      ipv4_address v4;
+      auto& bytes = v4.bytes();
       memcpy(bytes.data(), prefix.data(), bytes.size());
-      prefix = ipv6_address{ipv4_address{bytes}}.bytes();
+      prefix = ipv6_address{v4}.bytes();
       return true;
     }
     return false;

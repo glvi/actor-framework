@@ -1,26 +1,13 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE binary_deserializer
 
 #include "caf/binary_serializer.hpp"
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
+#include "nasty.hpp"
 
 #include <cstring>
 #include <vector>
@@ -43,66 +30,43 @@ byte operator"" _b(char x) {
   return static_cast<byte>(x);
 }
 
-enum class test_enum : int32_t {
-  a,
-  b,
-  c,
+struct arr {
+  int8_t xs[3];
+  int8_t operator[](size_t index) const noexcept {
+    return xs[index];
+  }
 };
-
-struct test_data {
-  int32_t i32_;
-  int64_t i64_;
-  float f32_;
-  double f64_;
-  caf::timestamp ts_;
-  test_enum te_;
-  std::string str_;
-};
-
-bool operator==(const test_data& data, const test_data& other) {
-  return (data.f64_ == other.f64_ && data.i32_ == other.i32_
-          && data.i64_ == other.i64_ && data.str_ == other.str_
-          && data.te_ == other.te_ && data.ts_ == other.ts_);
-}
 
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, test_data& x) {
-  return f(caf::meta::type_name("test_data"), x.i32_, x.i64_, x.f32_, x.f64_,
-           x.ts_, x.te_, x.str_);
+bool inspect(Inspector& f, arr& x) {
+  return f.object(x).fields(f.field("xs", x.xs));
 }
 
 struct fixture {
-  template <class T>
-  auto load(const std::vector<byte>& buf) {
-    auto result = T{};
-    binary_deserializer source{nullptr, buf};
-    if (auto err = source(result))
-      CAF_FAIL("binary_deserializer failed to load: "
-               << actor_system_config::render(err));
-    return result;
-  }
-
   template <class... Ts>
   void load(const std::vector<byte>& buf, Ts&... xs) {
     binary_deserializer source{nullptr, buf};
-    if (auto err = source(xs...))
-      CAF_FAIL("binary_deserializer failed to load: "
-               << actor_system_config::render(err));
+    if (!(source.apply(xs) && ...))
+      CAF_FAIL("binary_deserializer failed to load: " << source.get_error());
+  }
+
+  template <class T>
+  auto load(const std::vector<byte>& buf) {
+    auto result = T{};
+    load(buf, result);
+    return result;
   }
 };
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(binary_deserializer_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 #define SUBTEST(msg)                                                           \
-  CAF_MESSAGE(msg);                                                            \
-  for (int subtest_dummy = 0; subtest_dummy < 1; ++subtest_dummy)
+  MESSAGE(msg);                                                                \
+  if (true)
 
-#define CHECK_EQ(lhs, rhs) CAF_CHECK_EQUAL(lhs, rhs)
-
-#define CHECK_LOAD(type, value, ...)                                           \
-  CAF_CHECK_EQUAL(load<type>({__VA_ARGS__}), value)
+#define CHECK_LOAD(type, value, ...) CHECK_EQ(load<type>({__VA_ARGS__}), value)
 
 CAF_TEST(binary deserializer handles all primitive types) {
   SUBTEST("8-bit integers") {
@@ -145,8 +109,8 @@ CAF_TEST(concatenation) {
     int8_t x = 0;
     int16_t y = 0;
     load(byte_buffer({7_b, 0x80_b, 0x55_b}), x, y);
-    CAF_CHECK_EQUAL(x, 7);
-    CAF_CHECK_EQUAL(y, -32683);
+    CHECK_EQ(x, 7);
+    CHECK_EQ(y, -32683);
     load(byte_buffer({0x80_b, 0x55_b, 7_b}), y, x);
     load(byte_buffer({7_b, 0x80_b, 0x55_b}), x, y);
   }
@@ -167,11 +131,11 @@ CAF_TEST(concatenation) {
                0x80_b, 0x55_b, 7_b);
   }
   SUBTEST("arrays behave like tuples") {
-    int8_t xs[] = {0, 0, 0};
+    arr xs{{0, 0, 0}};
     load(byte_buffer({1_b, 2_b, 3_b}), xs);
-    CAF_CHECK_EQUAL(xs[0], 1);
-    CAF_CHECK_EQUAL(xs[1], 2);
-    CAF_CHECK_EQUAL(xs[2], 3);
+    CHECK_EQ(xs[0], 1);
+    CHECK_EQ(xs[1], 2);
+    CHECK_EQ(xs[2], 3);
   }
 }
 
@@ -190,8 +154,8 @@ CAF_TEST(binary serializer picks up inspect functions) {
   SUBTEST("node ID") {
     auto nid = make_node_id(123, "000102030405060708090A0B0C0D0E0F10111213");
     CHECK_LOAD(node_id, unbox(nid),
-               // Implementation ID: atom("default").
-               0_b, 0_b, 0x3E_b, 0x9A_b, 0xAB_b, 0x9B_b, 0xAC_b, 0x79_b,
+               // content index for hashed_node_id (1)
+               1_b,
                // Process ID.
                0_b, 0_b, 0_b, 123_b,
                // Host ID.
@@ -199,14 +163,14 @@ CAF_TEST(binary serializer picks up inspect functions) {
                10_b, 11_b, 12_b, 13_b, 14_b, 15_b, 16_b, 17_b, 18_b, 19_b);
   }
   SUBTEST("custom struct") {
-    test_data value{
-      -345,
-      -1234567890123456789ll,
-      3.45,
-      54.3,
-      caf::timestamp{caf::timestamp::duration{1478715821 * 1000000000ll}},
-      test_enum::b,
-      "Lorem ipsum dolor sit amet."};
+    test_data value{-345,
+                    -1234567890123456789ll,
+                    3.45,
+                    54.3,
+                    caf::timestamp{
+                      caf::timestamp::duration{1478715821 * 1000000000ll}},
+                    test_enum::b,
+                    "Lorem ipsum dolor sit amet."};
     CHECK_LOAD(test_data, value,
                // 32-bit i32_ member: -345
                0xFF_b, 0xFF_b, 0xFE_b, 0xA7_b,
@@ -226,6 +190,10 @@ CAF_TEST(binary serializer picks up inspect functions) {
                'u'_b, 'm'_b, ' '_b, 'd'_b, 'o'_b, 'l'_b, 'o'_b, 'r'_b, ' '_b,
                's'_b, 'i'_b, 't'_b, ' '_b, 'a'_b, 'm'_b, 'e'_b, 't'_b, '.'_b);
   }
+  SUBTEST("enum class with non-default overload") {
+    auto day = weekday::friday;
+    CHECK_LOAD(weekday, day, 0x04_b);
+  }
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

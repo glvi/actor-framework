@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -38,11 +24,9 @@
 #include "caf/dictionary.hpp"
 #include "caf/fwd.hpp"
 #include "caf/is_typed_actor.hpp"
-#include "caf/named_actor_config.hpp"
 #include "caf/settings.hpp"
 #include "caf/stream.hpp"
 #include "caf/thread_hook.hpp"
-#include "caf/type_erased_value.hpp"
 
 namespace caf {
 
@@ -64,20 +48,9 @@ public:
 
   using module_factory_vector = std::vector<module_factory>;
 
-  using value_factory = std::function<type_erased_value_ptr()>;
-
-  using value_factory_string_map = hash_map<std::string, value_factory>;
-
-  using value_factory_rtti_map = hash_map<std::type_index, value_factory>;
-
   using actor_factory_map = hash_map<std::string, actor_factory>;
 
   using portable_name_map = hash_map<std::type_index, std::string>;
-
-  using error_renderer
-    = std::function<std::string(uint8_t, atom_value, const message&)>;
-
-  using error_renderer_map = hash_map<atom_value, error_renderer>;
 
   using group_module_factory = std::function<group_module*()>;
 
@@ -86,8 +59,6 @@ public:
   using config_map = dictionary<config_value::dictionary>;
 
   using string_list = std::vector<std::string>;
-
-  using named_actor_config_map = hash_map<std::string, named_actor_config>;
 
   using opt_group = config_option_adder;
 
@@ -111,7 +82,7 @@ public:
   /// values.
   virtual settings dump_content() const;
 
-  /// Sets a config by using its INI name `config_name` to `config_value`.
+  /// Sets a config by using its name `config_name` to `config_value`.
   template <class T>
   actor_system_config& set(string_view name, T&& value) {
     return set_impl(name, config_value{std::forward<T>(value)});
@@ -119,23 +90,22 @@ public:
 
   // -- modifiers --------------------------------------------------------------
 
-  /// Parses `args` as tuple of strings containing CLI options and `ini_stream`
-  /// as INI formatted input stream.
-  error parse(string_list args, std::istream& ini);
+  /// Parses `args` as tuple of strings containing CLI options and `config` as
+  /// configuration file.
+  error parse(string_list args, std::istream& config);
 
-  /// Parses `args` as tuple of strings containing CLI options and tries to
-  /// open `ini_file_cstr` as INI formatted config file. The parsers tries to
-  /// open `caf-application.ini` if `ini_file_cstr` is `nullptr`.
-  error parse(string_list args, const char* ini_file_cstr = nullptr);
+  /// Parses `args` as CLI options and tries to locate a config file via
+  /// `config_file_path` and `config_file_path_alternative` unless the user
+  /// provides a config file path on the command line.
+  error parse(string_list args);
 
-  /// Parses the CLI options `{argc, argv}` and `ini_stream` as INI formatted
-  /// input stream.
-  error parse(int argc, char** argv, std::istream& ini);
+  /// Parses the CLI options `{argc, argv}` and `config` as configuration file.
+  error parse(int argc, char** argv, std::istream& config);
 
-  /// Parses the CLI options `{argc, argv}` and tries to open `ini_file_cstr`
-  /// as INI formatted config file. The parsers tries to open
-  /// `caf-application.ini` if `ini_file_cstr` is `nullptr`.
-  error parse(int argc, char** argv, const char* ini_file_cstr = nullptr);
+  /// Parses the CLI options `{argc, argv}` and tries to locate a config file
+  /// via `config_file_path` and `config_file_path_alternative` unless the user
+  /// provides a config file path on the command line.
+  error parse(int argc, char** argv);
 
   /// Allows other nodes to spawn actors created by `fun`
   /// dynamically by using `name` as identifier.
@@ -148,8 +118,7 @@ public:
   template <class T, class... Ts>
   actor_system_config& add_actor_type(std::string name) {
     using handle = typename infer_handle_from_class<T>::type;
-    if (!std::is_same<handle, actor>::value)
-      add_message_type<handle>(name);
+    static_assert(detail::is_complete<type_id<handle>>);
     return add_actor_factory(std::move(name), make_actor_factory<T, Ts...>());
   }
 
@@ -159,59 +128,14 @@ public:
   template <class F>
   actor_system_config& add_actor_type(std::string name, F f) {
     using handle = typename infer_handle_from_fun<F>::type;
-    if (!std::is_same<handle, actor>::value)
-      add_message_type<handle>(name);
+    static_assert(detail::is_complete<type_id<handle>>);
     return add_actor_factory(std::move(name), make_actor_factory(std::move(f)));
-  }
-
-  /// Adds message type `T` with runtime type info `name`.
-  template <class T>
-  actor_system_config& add_message_type(std::string name) {
-    static_assert(
-      std::is_empty<T>::value
-        || std::is_same<T, actor>::value // silence add_actor_type err
-        || is_typed_actor<T>::value
-        || (std::is_default_constructible<T>::value
-            && std::is_copy_constructible<T>::value),
-      "T must provide default and copy constructors");
-    std::string stream_name = "stream<";
-    stream_name += name;
-    stream_name += ">";
-    add_message_type_impl<stream<T>>(std::move(stream_name));
-    std::string vec_name = "std::vector<";
-    vec_name += name;
-    vec_name += ">";
-    add_message_type_impl<std::vector<T>>(std::move(vec_name));
-    add_message_type_impl<T>(std::move(name));
-    return *this;
-  }
-
-  /// Enables the actor system to convert errors of this error category
-  /// to human-readable strings via `renderer`.
-  actor_system_config& add_error_category(atom_value x, error_renderer y);
-
-  /// Enables the actor system to convert errors of this error category
-  /// to human-readable strings via `to_string(T)`.
-  template <class T>
-  actor_system_config& add_error_category(atom_value category) {
-    auto f = [=](uint8_t val, const std::string& ctx) -> std::string {
-      std::string result;
-      result = to_string(category);
-      result += ": ";
-      result += to_string(static_cast<T>(val));
-      if (!ctx.empty()) {
-        result += " (";
-        result += ctx;
-        result += ")";
-      }
-      return result;
-    };
-    return add_error_category(category, f);
   }
 
   /// Loads module `T` with optional template parameters `Ts...`.
   template <class T, class... Ts>
   actor_system_config& load() {
+    T::add_module_options(*this);
     module_factories.push_back([](actor_system& sys) -> actor_system::module* {
       return T::make(sys, detail::type_list<Ts...>{});
     });
@@ -247,8 +171,19 @@ public:
   /// and instead return from `main` immediately.
   bool cli_helptext_printed;
 
+  /// Stores the content of `argv[0]` from the arguments passed to `parse`.
+  std::string program_name;
+
   /// Stores CLI arguments that were not consumed by CAF.
   string_list remainder;
+
+  /// Returns the remainder including the program name (`argv[0]`) suitable for
+  /// passing the returned pair of arguments to C-style functions that usually
+  /// accept `(argc, argv)` input as passed to `main`. This function creates the
+  /// necessary buffers lazily on first call.
+  /// @note The returned pointer remains valid only as long as the
+  ///       `actor_system_config` object exists.
+  std::pair<int, char**> c_args_remainder() const noexcept;
 
   // -- caf-run parameters -----------------------------------------------------
 
@@ -264,16 +199,10 @@ public:
   // -- stream parameters ------------------------------------------------------
 
   /// @private
-  timespan stream_desired_batch_complexity;
-
-  /// @private
   timespan stream_max_batch_delay;
 
   /// @private
   timespan stream_credit_round_interval;
-
-  /// @private
-  timespan stream_tick_duration() const noexcept;
 
   // -- OpenSSL parameters -----------------------------------------------------
 
@@ -285,8 +214,6 @@ public:
 
   // -- factories --------------------------------------------------------------
 
-  value_factory_string_map value_factories_by_name;
-  value_factory_rtti_map value_factories_by_rtti;
   actor_factory_map actor_factories;
   module_factory_vector module_factories;
   hook_factory_vector hook_factories;
@@ -306,36 +233,18 @@ public:
   /// @note Has no effect unless building CAF with CAF_ENABLE_ACTOR_PROFILER.
   tracing_data_factory* tracing_context = nullptr;
 
-  // -- run-time type information ----------------------------------------------
-
-  portable_name_map type_names_by_rtti;
-
-  // -- rendering of user-defined types ----------------------------------------
-
-  error_renderer_map error_renderers;
-
   // -- parsing parameters -----------------------------------------------------
 
-  /// Configures the file path for the INI file, `caf-application.ini` per
-  /// default.
+  /// Configures the default path of the configuration file.
   std::string config_file_path;
+
+  /// Configures alternative paths for locating a config file when unable to
+  /// open the default `config_file_path`.
+  std::vector<std::string> config_file_path_alternatives;
 
   // -- utility for caf-run ----------------------------------------------------
 
-  // Config parameter for individual actor types.
-  named_actor_config_map named_actor_configs;
-
   int (*slave_mode_fun)(actor_system&, const actor_system_config&);
-
-  // -- default error rendering functions --------------------------------------
-
-  static std::string render(const error& err);
-
-  static std::string render_sec(uint8_t, atom_value, const message&);
-
-  static std::string render_exit_reason(uint8_t, atom_value, const message&);
-
-  static std::string render_pec(uint8_t, atom_value, const message&);
 
   // -- config file parsing ----------------------------------------------------
 
@@ -394,35 +303,39 @@ public:
   static error parse_config(std::istream& source, const config_option_set& opts,
                             settings& result);
 
+  /// @private
+  config_option_set& custom_options() {
+    return custom_options_;
+  }
+
 protected:
   config_option_set custom_options_;
 
 private:
-  template <class T>
-  void add_message_type_impl(std::string name) {
-    type_names_by_rtti.emplace(std::type_index(typeid(T)), name);
-    value_factories_by_name.emplace(std::move(name),
-                                    &make_type_erased_value<T>);
-    value_factories_by_rtti.emplace(std::type_index(typeid(T)),
-                                    &make_type_erased_value<T>);
-  }
+  void set_remainder(string_list args);
+
+  mutable std::vector<char*> c_args_remainder_;
+  std::vector<char> c_args_remainder_buf_;
 
   actor_system_config& set_impl(string_view name, config_value value);
 
-  error extract_config_file_path(string_list& args);
-
-  /// Adjusts the content of the configuration, e.g., for ensuring backwards
-  /// compatibility with older options.
-  error adjust_content();
+  std::pair<error, std::string> extract_config_file_path(string_list& args);
 };
 
 /// Returns all user-provided configuration parameters.
 CAF_CORE_EXPORT const settings& content(const actor_system_config& cfg);
 
+/// Returns whether `xs` associates a value of type `T` to `name`.
+/// @relates actor_system_config
+template <class T>
+bool holds_alternative(const actor_system_config& cfg, string_view name) {
+  return holds_alternative<T>(content(cfg), name);
+}
+
 /// Tries to retrieve the value associated to `name` from `cfg`.
 /// @relates actor_system_config
 template <class T>
-optional<T> get_if(const actor_system_config* cfg, string_view name) {
+auto get_if(const actor_system_config* cfg, string_view name) {
   return get_if<T>(&content(*cfg), name);
 }
 
@@ -433,29 +346,20 @@ T get(const actor_system_config& cfg, string_view name) {
   return get<T>(content(cfg), name);
 }
 
-/// Retrieves the value associated to `name` from `cfg` or returns
-/// `default_value`.
+/// Retrieves the value associated to `name` from `cfg` or returns `fallback`.
 /// @relates actor_system_config
-template <class T, class = typename std::enable_if<
-                     !std::is_pointer<T>::value
-                     && !std::is_convertible<T, string_view>::value>::type>
-T get_or(const actor_system_config& cfg, string_view name, T default_value) {
-  return get_or(content(cfg), name, std::move(default_value));
+template <class To = get_or_auto_deduce, class Fallback>
+auto get_or(const actor_system_config& cfg, string_view name,
+            Fallback&& fallback) {
+  return get_or<To>(content(cfg), name, std::forward<Fallback>(fallback));
 }
 
-/// Retrieves the value associated to `name` from `cfg` or returns
-/// `default_value`.
-/// @relates actor_system_config
-inline std::string get_or(const actor_system_config& cfg, string_view name,
-                          string_view default_value) {
-  return get_or(content(cfg), name, default_value);
-}
-
-/// Returns whether `xs` associates a value of type `T` to `name`.
+/// Tries to retrieve the value associated to `name` from `cfg` as an instance
+/// of type `T`.
 /// @relates actor_system_config
 template <class T>
-bool holds_alternative(const actor_system_config& cfg, string_view name) {
-  return holds_alternative<T>(content(cfg), name);
+expected<T> get_as(const actor_system_config& cfg, string_view name) {
+  return get_as<T>(content(cfg), name);
 }
 
 } // namespace caf

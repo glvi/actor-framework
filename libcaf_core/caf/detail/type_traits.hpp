@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -27,11 +13,11 @@
 #include <utility>
 #include <vector>
 
-#include "caf/fwd.hpp"
-#include "caf/timestamp.hpp"
-
+#include "caf/detail/is_complete.hpp"
 #include "caf/detail/is_one_of.hpp"
 #include "caf/detail/type_list.hpp"
+#include "caf/fwd.hpp"
+#include "caf/timestamp.hpp"
 
 #define CAF_HAS_MEMBER_TRAIT(name)                                             \
   template <class T>                                                           \
@@ -66,6 +52,9 @@
   }
 
 namespace caf::detail {
+
+template <class T>
+constexpr T* null_v = nullptr;
 
 // -- backport of C++14 additions ----------------------------------------------
 
@@ -142,37 +131,15 @@ struct is_duration : std::false_type {};
 template <class Period, class Rep>
 struct is_duration<std::chrono::duration<Period, Rep>> : std::true_type {};
 
-/// Checks whether `T` is considered a builtin type.
-///
-/// Builtin types are: (1) all arithmetic types (including time types), (2)
-/// string types from the STL, and (3) built-in types such as `actor_ptr`.
-template <class T>
-struct is_builtin {
-  static constexpr bool value = std::is_arithmetic<T>::value
-                                || is_duration<T>::value
-                                || is_one_of<T, timestamp, std::string,
-                                             std::u16string, std::u32string,
-                                             atom_value, message, actor, group,
-                                             node_id>::value;
-};
-
 /// Checks whether `T` is primitive, i.e., either an arithmetic type or
 /// convertible to one of STL's string types.
 template <class T>
 struct is_primitive {
-  static constexpr bool value = std::is_arithmetic<T>::value
-                                || std::is_convertible<T, std::string>::value
+  static constexpr bool value = std::is_convertible<T, std::string>::value
                                 || std::is_convertible<T, std::u16string>::value
                                 || std::is_convertible<T, std::u32string>::value
-                                || std::is_convertible<T, atom_value>::value;
+                                || std::is_arithmetic<T>::value;
 };
-
-// Workaround for weird GCC 4.8 STL implementation that breaks
-// `std::is_convertible<T, atom_value>::value` for tuples containing atom
-// constants.
-// TODO: remove when dropping support for GCC 4.8.
-template <class... Ts>
-struct is_primitive<std::tuple<Ts...>> : std::false_type {};
 
 /// Checks whether `T1` is comparable with `T2`.
 template <class T1, class T2>
@@ -277,10 +244,30 @@ struct callable_trait;
 // good ol' function
 template <class R, class... Ts>
 struct callable_trait<R (Ts...)> {
+  /// The result type as returned by the function.
   using result_type = R;
+
+  /// The unmodified argument types of the function.
   using arg_types = type_list<Ts...>;
+
+  /// The argument types of the function without CV qualifiers.
+  using decayed_arg_types = type_list<std::decay_t<Ts>...>;
+
+  /// The signature of the function.
   using fun_sig = R (Ts...);
+
+  /// The signature of the function, wrapped into a `std::function`.
   using fun_type = std::function<R (Ts...)>;
+
+  /// Tells whether the function takes mutable references as argument.
+  static constexpr bool mutates_args = (is_mutable_ref<Ts>::value || ...);
+
+  /// Selects a suitable view type for passing a ::message to this function.
+  using message_view_type
+    = std::conditional_t<mutates_args, typed_message_view<std::decay_t<Ts>...>,
+                         const_typed_message_view<std::decay_t<Ts>...>>;
+
+  /// Tells the number of arguments of the function.
   static constexpr size_t num_args = sizeof...(Ts);
 };
 
@@ -457,8 +444,10 @@ public:
   static constexpr bool value = sizeof(fun(static_cast<T*>(nullptr))) > 1;
 };
 
-CAF_HAS_MEMBER_TRAIT(size);
+CAF_HAS_MEMBER_TRAIT(clear);
 CAF_HAS_MEMBER_TRAIT(data);
+CAF_HAS_MEMBER_TRAIT(make_behavior);
+CAF_HAS_MEMBER_TRAIT(size);
 
 /// Checks whether F is convertible to either `std::function<void (T&)>`
 /// or `std::function<void (const T&)>`.
@@ -590,6 +579,9 @@ struct is_same_ish
 template <class>
 struct always_false : std::false_type {};
 
+template <class T>
+constexpr bool always_false_v = always_false<T>::value;
+
 /// Utility trait for removing const inside a `map<K, V>::value_type`.
 template <class T>
 struct deconst_kvp {
@@ -648,12 +640,146 @@ struct is_map_like {
 template <class T>
 constexpr bool is_map_like_v = is_map_like<T>::value;
 
+template <class T>
+struct has_insert {
+private:
+  template <class List>
+  static auto sfinae(List* l, typename List::value_type* x = nullptr)
+    -> decltype(l->insert(l->end(), *x), std::true_type());
+
+  template <class U>
+  static auto sfinae(...) -> std::false_type;
+
+  using sfinae_type = decltype(sfinae<T>(nullptr));
+
+public:
+  static constexpr bool value = sfinae_type::value;
+};
+
+template <class T>
+struct has_size {
+private:
+  template <class List>
+  static auto sfinae(List* l) -> decltype(l->size(), std::true_type());
+
+  template <class U>
+  static auto sfinae(...) -> std::false_type;
+
+  using sfinae_type = decltype(sfinae<T>(nullptr));
+
+public:
+  static constexpr bool value = sfinae_type::value;
+};
+
+template <class T>
+struct has_reserve {
+private:
+  template <class List>
+  static auto sfinae(List* l) -> decltype(l->reserve(10), std::true_type());
+
+  template <class U>
+  static auto sfinae(...) -> std::false_type;
+
+  using sfinae_type = decltype(sfinae<T>(nullptr));
+
+public:
+  static constexpr bool value = sfinae_type::value;
+};
+
+template <class T>
+constexpr bool has_reserve_v = has_reserve<T>::value;
+
+template <class T>
+struct has_emplace_back {
+private:
+  template <class List>
+  static auto sfinae(List* l)
+    -> decltype(l->emplace_back(std::declval<typename List::value_type>()),
+                std::true_type());
+
+  template <class U>
+  static auto sfinae(...) -> std::false_type;
+
+  using sfinae_type = decltype(sfinae<T>(nullptr));
+
+public:
+  static constexpr bool value = sfinae_type::value;
+};
+
+template <class T>
+constexpr bool has_emplace_back_v = has_emplace_back<T>::value;
+
+template <class T>
+class has_call_error_handler {
+private:
+  template <class Actor>
+  static auto sfinae(Actor* self)
+    -> decltype(self->call_error_handler(std::declval<error&>()),
+                std::true_type());
+
+  template <class U>
+  static auto sfinae(...) -> std::false_type;
+
+  using sfinae_type = decltype(sfinae<T>(nullptr));
+
+public:
+  static constexpr bool value = sfinae_type::value;
+};
+
+template <class T>
+constexpr bool has_call_error_handler_v = has_call_error_handler<T>::value;
+
+template <class T>
+class has_add_awaited_response_handler {
+private:
+  template <class Actor>
+  static auto sfinae(Actor* self)
+    -> decltype(self->add_awaited_response_handler(std::declval<message_id>(),
+                                                   std::declval<behavior&>()),
+                std::true_type());
+
+  template <class U>
+  static auto sfinae(...) -> std::false_type;
+
+  using sfinae_type = decltype(sfinae<T>(nullptr));
+
+public:
+  static constexpr bool value = sfinae_type::value;
+};
+
+template <class T>
+constexpr bool has_add_awaited_response_handler_v
+  = has_add_awaited_response_handler<T>::value;
+
+template <class T>
+class has_add_multiplexed_response_handler {
+private:
+  template <class Actor>
+  static auto sfinae(Actor* self)
+    -> decltype(self->add_multiplexed_response_handler(
+                  std::declval<message_id>(), std::declval<behavior&>()),
+                std::true_type());
+
+  template <class U>
+  static auto sfinae(...) -> std::false_type;
+
+  using sfinae_type = decltype(sfinae<T>(nullptr));
+
+public:
+  static constexpr bool value = sfinae_type::value;
+};
+
+template <class T>
+constexpr bool has_add_multiplexed_response_handler_v
+  = has_add_multiplexed_response_handler<T>::value;
+
 /// Checks whether T behaves like `std::vector`, `std::list`, or `std::set`.
 template <class T>
 struct is_list_like {
   static constexpr bool value = is_iterable<T>::value
                                 && has_value_type_alias<T>::value
-                                && !has_mapped_type_alias<T>::value;
+                                && !has_mapped_type_alias<T>::value
+                                && has_insert<T>::value && has_size<T>::value;
 };
 
 template <class T>
@@ -711,7 +837,8 @@ template <class T, class Arg>
 struct can_apply {
   template <class U>
   static auto sfinae(U* x)
-    -> decltype(x->apply(std::declval<Arg>()), std::true_type{});
+    -> decltype(CAF_IGNORE_UNUSED(x->apply(std::declval<Arg>())),
+                std::true_type{});
 
   template <class U>
   static auto sfinae(...) -> std::false_type;
@@ -742,6 +869,165 @@ struct is_stl_tuple_type {
 
 template <class T>
 constexpr bool is_stl_tuple_type_v = is_stl_tuple_type<T>::value;
+
+template <class Inspector>
+class has_context {
+private:
+  template <class F>
+  static auto sfinae(F& f) -> decltype(f.context());
+
+  static void sfinae(...);
+
+  using result_type = decltype(sfinae(std::declval<Inspector&>()));
+
+public:
+  static constexpr bool value
+    = std::is_same<result_type, execution_unit*>::value;
+};
+
+/// Checks whether `T` provides an `inspect` overload for `Inspector`.
+template <class Inspector, class T>
+class has_inspect_overload {
+private:
+  template <class U>
+  static auto sfinae(Inspector& x, U& y)
+    -> decltype(inspect(x, y), std::true_type{});
+
+  static std::false_type sfinae(Inspector&, ...);
+
+  using result_type
+    = decltype(sfinae(std::declval<Inspector&>(), std::declval<T&>()));
+
+public:
+  static constexpr bool value = result_type::value;
+};
+
+/// Checks whether the inspector has a `builtin_inspect` overload for `T`.
+template <class Inspector, class T>
+class has_builtin_inspect {
+private:
+  template <class I, class U>
+  static auto sfinae(I& f, U& x)
+    -> decltype(f.builtin_inspect(x), std::true_type{});
+
+  template <class I>
+  static std::false_type sfinae(I&, ...);
+
+  using sfinae_result
+    = decltype(sfinae(std::declval<Inspector&>(), std::declval<T&>()));
+
+public:
+  static constexpr bool value = sfinae_result::value;
+};
+
+/// Checks whether inspectors are required to provide a `value` overload for T.
+template <bool IsLoading, class T>
+struct is_trivial_inspector_value;
+
+template <class T>
+struct is_trivial_inspector_value<true, T> {
+  static constexpr bool value = false;
+};
+
+template <class T>
+struct is_trivial_inspector_value<false, T> {
+  static constexpr bool value = std::is_convertible<T, string_view>::value;
+};
+
+#define CAF_ADD_TRIVIAL_LOAD_INSPECTOR_VALUE(type)                             \
+  template <>                                                                  \
+  struct is_trivial_inspector_value<true, type> {                              \
+    static constexpr bool value = true;                                        \
+  };
+
+#define CAF_ADD_TRIVIAL_SAVE_INSPECTOR_VALUE(type)                             \
+  template <>                                                                  \
+  struct is_trivial_inspector_value<false, type> {                             \
+    static constexpr bool value = true;                                        \
+  };
+
+#define CAF_ADD_TRIVIAL_INSPECTOR_VALUE(type)                                  \
+  CAF_ADD_TRIVIAL_LOAD_INSPECTOR_VALUE(type)                                   \
+  CAF_ADD_TRIVIAL_SAVE_INSPECTOR_VALUE(type)
+
+CAF_ADD_TRIVIAL_INSPECTOR_VALUE(bool)
+CAF_ADD_TRIVIAL_INSPECTOR_VALUE(float)
+CAF_ADD_TRIVIAL_INSPECTOR_VALUE(double)
+CAF_ADD_TRIVIAL_INSPECTOR_VALUE(long double)
+CAF_ADD_TRIVIAL_INSPECTOR_VALUE(std::u16string)
+CAF_ADD_TRIVIAL_INSPECTOR_VALUE(std::u32string)
+CAF_ADD_TRIVIAL_INSPECTOR_VALUE(std::vector<bool>)
+CAF_ADD_TRIVIAL_INSPECTOR_VALUE(span<byte>)
+
+CAF_ADD_TRIVIAL_SAVE_INSPECTOR_VALUE(span<const byte>)
+
+CAF_ADD_TRIVIAL_LOAD_INSPECTOR_VALUE(std::string)
+
+#undef CAF_ADD_TRIVIAL_INSPECTOR_VALUE
+#undef CAF_ADD_TRIVIAL_SAVE_INSPECTOR_VALUE
+#undef CAF_ADD_TRIVIAL_LOAD_INSPECTOR_VALUE
+
+template <bool IsLoading, class T>
+constexpr bool is_trivial_inspector_value_v
+  = is_trivial_inspector_value<IsLoading, T>::value;
+
+/// Checks whether the inspector has an `opaque_value` overload for `T`.
+template <class Inspector, class T>
+class accepts_opaque_value {
+private:
+  template <class F, class U>
+  static auto sfinae(F* f, U* x)
+    -> decltype(f->opaque_value(*x), std::true_type{});
+
+  static std::false_type sfinae(...);
+
+  using sfinae_result = decltype(sfinae(null_v<Inspector>, null_v<T>));
+
+public:
+  static constexpr bool value = sfinae_result::value;
+};
+
+/// Checks whether `T` is primitive, i.e., either an arithmetic type or
+/// convertible to one of STL's string types.
+template <class T, bool IsLoading>
+struct is_builtin_inspector_type {
+  static constexpr bool value = std::is_arithmetic<T>::value;
+};
+
+template <bool IsLoading>
+struct is_builtin_inspector_type<byte, IsLoading> {
+  static constexpr bool value = true;
+};
+
+template <bool IsLoading>
+struct is_builtin_inspector_type<span<byte>, IsLoading> {
+  static constexpr bool value = true;
+};
+
+template <bool IsLoading>
+struct is_builtin_inspector_type<std::string, IsLoading> {
+  static constexpr bool value = true;
+};
+
+template <bool IsLoading>
+struct is_builtin_inspector_type<std::u16string, IsLoading> {
+  static constexpr bool value = true;
+};
+
+template <bool IsLoading>
+struct is_builtin_inspector_type<std::u32string, IsLoading> {
+  static constexpr bool value = true;
+};
+
+template <>
+struct is_builtin_inspector_type<string_view, false> {
+  static constexpr bool value = true;
+};
+
+template <>
+struct is_builtin_inspector_type<span<const byte>, false> {
+  static constexpr bool value = true;
+};
 
 } // namespace caf::detail
 

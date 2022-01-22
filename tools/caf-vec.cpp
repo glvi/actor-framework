@@ -1,12 +1,26 @@
-#include <string>
-#include <vector>
-#include <cctype>
-#include <utility>
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
+
 #include <cassert>
+#include <cctype>
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "caf/all.hpp"
+
+struct entity;
+struct se_event;
+
+CAF_BEGIN_TYPE_ID_BLOCK(caf_vec, first_custom_type_id)
+
+  CAF_ADD_TYPE_ID(caf_vec, (entity))
+  CAF_ADD_TYPE_ID(caf_vec, (se_event))
+
+CAF_END_TYPE_ID_BLOCK(caf_vec)
 
 using std::string;
 
@@ -28,7 +42,7 @@ void trim(string& s) {
 
 // -- convenience functions for I/O streams
 
-using istream_fun = std::function<std::istream& (std::istream&)>;
+using istream_fun = std::function<std::istream&(std::istream&)>;
 
 std::istream& skip_whitespaces(std::istream& in) {
   while (in.peek() == ' ')
@@ -76,7 +90,7 @@ std::istream& operator>>(std::istream& in, istream_char_consumer x) {
   skip_whitespaces(in);
   // ignore trailing '\0'
   for (size_t i = 0; i < x.count; ++i) {
-//cout << "in: " << (char) in.peek() << ", x: " << x.what[i] << endl;
+    // cout << "in: " << (char) in.peek() << ", x: " << x.what[i] << endl;
     if (in.get() != x.what[i]) {
       in.setstate(std::ios::failbit);
       break;
@@ -99,7 +113,7 @@ vector_timestamp& merge(vector_timestamp& x, const vector_timestamp& y) {
   return x;
 }
 
-constexpr const char* log_level_name[] = {"ERROR", "WARN", "INFO",
+constexpr const char* log_level_name[] = {"ERROR", "WARN",  "INFO",
                                           "DEBUG", "TRACE", "?????"};
 
 enum class log_level { error, warn, info, debug, trace, invalid };
@@ -111,9 +125,7 @@ std::ostream& operator<<(std::ostream& out, const log_level& lvl) {
 std::istream& operator>>(std::istream& in, log_level& lvl) {
   std::string tmp;
   in >> tmp;
-  auto pred = [&](const char* cstr) {
-    return cstr == tmp;
-  };
+  auto pred = [&](const char* cstr) { return cstr == tmp; };
   auto b = std::begin(log_level_name);
   auto e = std::end(log_level_name);
   auto i = std::find_if(b, e, pred);
@@ -199,9 +211,11 @@ struct entity {
 };
 
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, entity& x) {
-  return f(meta::type_name("entity"), x.aid, x.tid, x.nid, x.vid, x.hidden,
-           x.pretty_name);
+bool inspect(Inspector& f, entity& x) {
+  return f.object(x).fields(f.field("aid", x.aid), f.field("tid", x.tid),
+                            f.field("nid", x.nid), f.field("vid", x.vid),
+                            f.field("hidden", x.hidden),
+                            f.field("pretty_name", x.pretty_name));
 }
 
 mailbox_id to_mailbox_id(const entity& x) {
@@ -415,17 +429,16 @@ struct se_event {
 string to_string(const se_event& x) {
   string res;
   res += "node{";
-  res += to_string(*x.source);
+  res += deep_to_string(*x.source);
   res += ", ";
   res += deep_to_string(x.vstamp);
   res += ", ";
-  res += to_string(x.type);
+  res += deep_to_string(x.type);
   res += ", ";
   res += deep_to_string(x.fields);
   res += "}";
   return res;
 }
-
 
 CAF_ALLOW_UNSAFE_MESSAGE_TYPE(se_event)
 
@@ -435,8 +448,8 @@ bool field_key_compare(const std::pair<const std::string, std::string>& x,
 }
 
 #define ATM_CASE(name, value)                                                  \
-  case static_cast<uint64_t>(atom(name)):                                      \
-    y.type = se_type::value
+  if (type == name)                                                            \
+  y.type = se_type::value
 
 #define CHECK_FIELDS(...)                                                      \
   {                                                                            \
@@ -464,38 +477,36 @@ expected<se_event> parse_event(const enhanced_log_entry& x) {
   in >> consume(";");
   while (in >> field_name >> consume("=") >> rd_line(field_content, ';'))
     y.fields.emplace(std::move(field_name), std::move(field_content));
-  switch (static_cast<uint64_t>(atom_from_string(type))) {
-    default:
-      return sec::invalid_argument;
-    ATM_CASE("SPAWN", spawn);
-      CHECK_FIELDS("ID", "ARGS");
-      break;
-    ATM_CASE("INIT", init);
-      CHECK_FIELDS("NAME", "HIDDEN");
-      break;
-    ATM_CASE("SEND", send);
-      CHECK_FIELDS("TO", "FROM", "STAGES", "CONTENT");
-      break;
-    ATM_CASE("REJECT", reject);
-      CHECK_NO_FIELDS();
-      break;
-    ATM_CASE("RECEIVE", receive);
-      CHECK_FIELDS("FROM", "STAGES", "CONTENT");
-      // insert TO field to allow comparing SEND and RECEIVE events easily
-      y.fields.emplace("TO", to_string(to_mailbox_id(x.id)));
-      break;
-    ATM_CASE("DROP", drop);
-      CHECK_NO_FIELDS();
-      break;
-    ATM_CASE("SKIP", skip);
-      CHECK_NO_FIELDS();
-      break;
-    ATM_CASE("FINALIZE", finalize);
-      CHECK_NO_FIELDS();
-      break;
-    ATM_CASE("TERMINATE", terminate);
-      CHECK_FIELDS("REASON");
-      break;
+  if (type == "SPAWN") {
+    y.type = se_type::spawn;
+    CHECK_FIELDS("ID", "ARGS");
+  } else if (type == "INIT") {
+    y.type = se_type::init;
+    CHECK_FIELDS("NAME", "HIDDEN");
+  } else if (type == "SEND") {
+    y.type = se_type::send;
+    CHECK_FIELDS("TO", "FROM", "STAGES", "CONTENT");
+  } else if (type == "REJECT") {
+    y.type = se_type::reject;
+    CHECK_NO_FIELDS();
+  } else if (type == "RECEIVE") {
+    y.type = se_type::receive;
+    CHECK_FIELDS("FROM", "STAGES", "CONTENT");
+    // insert TO field to allow comparing SEND and RECEIVE events easily
+    y.fields.emplace("TO", to_string(to_mailbox_id(x.id)));
+  } else if (type == "DROP") {
+    y.type = se_type::drop;
+    CHECK_NO_FIELDS();
+  } else if (type == "SKIP") {
+    y.type = se_type::skip;
+    CHECK_NO_FIELDS();
+
+  } else if (type == "FINALIZE") {
+    y.type = se_type::finalize;
+    CHECK_NO_FIELDS();
+  } else if (type == "TERMINATE") {
+    y.type = se_type::terminate;
+    CHECK_FIELDS("REASON");
   }
   return {std::move(y)};
 }
@@ -504,17 +515,15 @@ std::ostream& operator<<(std::ostream& out, const enhanced_log_entry& x) {
   return out << x.json_vstamp << ' ' << x.data.timestamp << ' '
              << x.data.component << ' ' << x.data.level << ' '
              << x.id.pretty_name << ' ' << x.data.class_name << ' '
-             << x.data.function_name << ' '
-             << x.data.file_name << ':' << x.data.line_number << ' '
-             << x.data.message;
+             << x.data.function_name << ' ' << x.data.file_name << ':'
+             << x.data.line_number << ' ' << x.data.message;
 }
 
 std::istream& operator>>(std::istream& in, log_entry& x) {
-  in >> x.timestamp >> x.component >> x.level
-     >> consume("actor") >> x.id.aid >> x.id.tid
-     >> x.class_name >> x.function_name
-     >> skip_whitespaces >> rd_line(x.file_name, ':')
-     >> x.line_number >> skip_whitespaces >> rd_line(x.message);
+  in >> x.timestamp >> x.component >> x.level >> consume("actor") >> x.id.aid
+    >> x.id.tid >> x.class_name >> x.function_name >> skip_whitespaces
+    >> rd_line(x.file_name, ':') >> x.line_number >> skip_whitespaces
+    >> rd_line(x.message);
   if (x.level == log_level::invalid)
     in.setstate(std::ios::failbit);
   return in;
@@ -534,11 +543,7 @@ struct first_pass_result {
   std::map<logger_id, logger_id_meta_data> entities;
 };
 
-enum verbosity_level {
-  silent,
-  informative,
-  noisy
-};
+enum verbosity_level { silent, informative, noisy };
 
 expected<first_pass_result> first_pass(blocking_actor* self, std::istream& in,
                                        verbosity_level vl) {
@@ -546,10 +551,9 @@ expected<first_pass_result> first_pass(blocking_actor* self, std::istream& in,
   // read first line to extract the node ID of local actors
   // _ caf INFO actor0 _ caf.logger start _:_ level = _, node = NODE
   if (!(in >> skip_word >> consume("caf") >> consume("INFO")
-           >> consume("actor0") >> skip_word >> consume("caf.logger")
-           >> consume("start") >> skip_word
-           >> consume("level =") >> skip_word >> consume("node = ")
-           >> res.this_node >> skip_to_next_line)) {
+        >> consume("actor0") >> skip_word >> consume("caf.logger")
+        >> consume("start") >> skip_word >> consume("level =") >> skip_word
+        >> consume("node = ") >> res.this_node >> skip_to_next_line)) {
     std::cerr << "*** malformed log file, expect the first line to contain "
               << "an INFO entry of the logger" << std::endl;
     return sec::invalid_argument;
@@ -558,10 +562,11 @@ expected<first_pass_result> first_pass(blocking_actor* self, std::istream& in,
     aout(self) << "found node " << res.this_node << std::endl;
   logger_id id;
   string message;
-  while (in >> skip_word >> skip_word >> skip_word >> id
-            >> skip_word >> skip_word >> skip_word >> rd_line(message)) {
+  while (in >> skip_word >> skip_word >> skip_word >> id >> skip_word
+         >> skip_word >> skip_word >> rd_line(message)) {
     // store in map
-    auto i = res.entities.emplace(id, logger_id_meta_data{false, "actor"}).first;
+    auto i
+      = res.entities.emplace(id, logger_id_meta_data{false, "actor"}).first;
     if (starts_with(message, "INIT ; NAME = ")) {
       std::istringstream iss{message};
       iss >> consume("INIT ; NAME = ") >> rd_line(i->second.pretty_name, ';');
@@ -620,33 +625,31 @@ void second_pass(blocking_actor* self, const group& grp,
   // lambda for broadcasting events that could cross node boundary
   auto bcast = [&](const se_event& x) {
     if (vl >= verbosity_level::noisy)
-      aout(self) << "broadcast event from " << nid
-                 << ": " << deep_to_string(x) << std::endl;
+      aout(self) << "broadcast event from " << nid << ": " << deep_to_string(x)
+                 << std::endl;
     if (self != nullptr)
       self->send(grp, x);
   };
   // fetch message from another node via the group
-  auto fetch_message = [&](const std::map<string, string>& fields)
-                       -> se_event& {
+  auto fetch_message
+    = [&](const std::map<string, string>& fields) -> se_event& {
     // TODO: this receive unconditionally waits on a message,
     //       i.e., is a potential deadlock
     if (vl >= verbosity_level::noisy)
       aout(self) << "wait for send from another node matching fields "
                  << deep_to_string(fields) << std::endl;
     se_event* res = nullptr;
-    self->receive_while([&] { return res == nullptr; })(
-      [&](const se_event& x) {
-        switch (x.type) {
-          default:
-            break;
-          case se_type::send:
-            in_flight_messages.emplace_back(x);
-            if (x.fields == fields)
-              res = &in_flight_messages.back();
-            break;
-        }
+    self->receive_while([&] { return res == nullptr; })([&](const se_event& x) {
+      switch (x.type) {
+        default:
+          break;
+        case se_type::send:
+          in_flight_messages.emplace_back(x);
+          if (x.fields == fields)
+            res = &in_flight_messages.back();
+          break;
       }
-    );
+    });
     return *res;
   };
   // second pass
@@ -753,12 +756,12 @@ struct config : public actor_system_config {
   size_t verbosity = 0;
   config() {
     opt_group{custom_options_, "global"}
-    .add(output_file, "output-file,o", "Path for the output file")
-    .add(include_hidden_actors, "include-hidden-actors,i",
-         "Include hidden (system-level) actors")
-    .add(verbosity, "verbosity,v", "Debug output (from 0 to 2)");
+      .add(output_file, "output-file,o", "Path for the output file")
+      .add(include_hidden_actors, "include-hidden-actors,i",
+           "Include hidden (system-level) actors")
+      .add(verbosity, "verbosity,v", "Debug output (from 0 to 2)");
     // shutdown logging per default
-    set("logger.verbosity", atom("quiet"));
+    set("logger.verbosity", "quiet");
   }
 };
 
@@ -800,9 +803,7 @@ void caf_main(actor_system& sys, const config& cfg) {
     intermediate_res(intermediate_res&&) = default;
     intermediate_res& operator=(intermediate_res&&) = default;
     intermediate_res(file_path fp, ifstream_ptr fs, first_pass_result&& fr)
-        : fname(std::move(fp)),
-          fstream(std::move(fs)),
-          res(std::move(fr)) {
+      : fname(std::move(fp)), fstream(std::move(fs)), res(std::move(fr)) {
       // nop
     }
   };
@@ -849,7 +850,7 @@ void caf_main(actor_system& sys, const config& cfg) {
       auto& pn = kvp.second.pretty_name;
       if (kvp.first.aid != 0)
         pretty_name = pn + std::to_string(++pretty_actor_names[pn]);
-        //"actor" + std::to_string(kvp.first.aid);
+      //"actor" + std::to_string(kvp.first.aid);
       else
         pretty_name = "thread" + std::to_string(++thread_count);
       auto vid = entities.size(); // position in the vector timestamp
@@ -859,9 +860,7 @@ void caf_main(actor_system& sys, const config& cfg) {
     }
   }
   // check whether entities set is in the right order
-  auto vid_cmp = [](const entity& x, const entity& y) {
-    return x.vid < y.vid;
-  };
+  auto vid_cmp = [](const entity& x, const entity& y) { return x.vid < y.vid; };
   if (!std::is_sorted(entities.begin(), entities.end(), vid_cmp)) {
     cerr << "*** ERROR: entity set not sorted by vector timestamp ID:\n"
          << deep_to_string(entities) << endl;
@@ -871,16 +870,15 @@ void caf_main(actor_system& sys, const config& cfg) {
   // first line is the regex to parse the remainder of the file
   out << R"((?<clock>\S+) (?<timestamp>\d+) (?<component>\S+) )"
       << R"((?<level>\S+) (?<host>\S+) (?<class>\S+) (?<function>\S+) )"
-      << R"((?<file>\S+):(?<line>\d+) (?<event>.+))"
-      << endl;
+      << R"((?<file>\S+):(?<line>\d+) (?<event>.+))" << endl;
   // second line is the separator for multiple runs
   out << endl;
   std::mutex out_mtx;
   auto grp = sys.groups().anonymous();
-  for (auto& fpr : intermediate_results) {
+  for (auto& res : intermediate_results) {
     sys.spawn_in_group(grp, [&](blocking_actor* self) {
-      second_pass(self, grp, entities, fpr.res.this_node, entity_names,
-                  *fpr.fstream, out, out_mtx, !cfg.include_hidden_actors, vl);
+      second_pass(self, grp, entities, res.res.this_node, entity_names,
+                  *res.fstream, out, out_mtx, !cfg.include_hidden_actors, vl);
     });
   }
   sys.await_all_actors_done();
@@ -888,5 +886,4 @@ void caf_main(actor_system& sys, const config& cfg) {
 
 } // namespace
 
-CAF_MAIN()
-
+CAF_MAIN(id_block::caf_vec)

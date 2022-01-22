@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -47,7 +33,7 @@ public:
   std::deque<resumable*> jobs;
 
   /// Returns whether at least one job is in the queue.
-  inline bool has_job() const {
+  bool has_job() const {
     return !jobs.empty();
   }
 
@@ -60,13 +46,18 @@ public:
   }
 
   /// Peeks into the mailbox of `next_job<scheduled_actor>()`.
-  template <class T>
-  const T& peek() {
+  template <class... Ts>
+  decltype(auto) peek() {
     auto ptr = next_job<scheduled_actor>().mailbox().peek();
     CAF_ASSERT(ptr != nullptr);
-    if (!ptr->content().match_elements<T>())
-      CAF_RAISE_ERROR("Mailbox element does not match T.");
-    return ptr->content().get_as<T>(0);
+    if (auto view = make_const_typed_message_view<Ts...>(ptr->payload)) {
+      if constexpr (sizeof...(Ts) == 1)
+        return get<0>(view);
+      else
+        return to_tuple(view);
+    } else {
+      CAF_RAISE_ERROR("Mailbox element does not match.");
+    }
   }
 
   /// Puts `x` at the front of the queue unless it cannot be found in the queue.

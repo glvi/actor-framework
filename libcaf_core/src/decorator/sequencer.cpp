@@ -1,27 +1,11 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/decorator/sequencer.hpp"
 
 #include "caf/actor_system.hpp"
 #include "caf/default_attachable.hpp"
-
-#include "caf/detail/disposer.hpp"
 #include "caf/detail/sync_request_bouncer.hpp"
 
 namespace caf::decorator {
@@ -47,13 +31,13 @@ sequencer::sequencer(strong_actor_ptr f, strong_actor_ptr g,
   }
 }
 
-void sequencer::enqueue(mailbox_element_ptr what, execution_unit* context) {
+bool sequencer::enqueue(mailbox_element_ptr what, execution_unit* context) {
   auto down_msg_handler = [&](down_msg& dm) {
     // quit if either `f` or `g` are no longer available
     cleanup(std::move(dm.reason), context);
   };
   if (handle_system_message(*what, context, false, down_msg_handler))
-    return;
+    return true;
   strong_actor_ptr f;
   strong_actor_ptr g;
   error err;
@@ -65,13 +49,13 @@ void sequencer::enqueue(mailbox_element_ptr what, execution_unit* context) {
   if (!f) {
     // f and g are invalid only after the sequencer terminated
     bounce(what, err);
-    return;
+    return false;
   }
   // process and forward the non-system message;
   // store `f` as the next stage in the forwarding chain
   what->stages.push_back(std::move(f));
   // forward modified message to `g`
-  g->enqueue(std::move(what), context);
+  return g->enqueue(std::move(what), context);
 }
 
 sequencer::message_types_set sequencer::message_types() const {

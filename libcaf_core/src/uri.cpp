@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/uri.hpp"
 
@@ -22,20 +8,65 @@
 #include "caf/binary_serializer.hpp"
 #include "caf/deserializer.hpp"
 #include "caf/detail/append_percent_encoded.hpp"
-#include "caf/detail/fnv_hash.hpp"
 #include "caf/detail/overload.hpp"
 #include "caf/detail/parse.hpp"
 #include "caf/detail/parser/read_uri.hpp"
-#include "caf/detail/uri_impl.hpp"
 #include "caf/error.hpp"
 #include "caf/expected.hpp"
+#include "caf/hash/fnv.hpp"
 #include "caf/make_counted.hpp"
 #include "caf/optional.hpp"
 #include "caf/serializer.hpp"
 
+namespace {
+
+caf::uri::impl_type default_instance;
+
+} // namespace
+
 namespace caf {
 
-uri::uri() : impl_(&detail::uri_impl::default_instance) {
+uri::impl_type::impl_type() : rc_(1) {
+  // nop
+}
+
+void uri::impl_type::assemble_str() {
+  str.clear();
+  using detail::append_percent_encoded;
+  append_percent_encoded(str, scheme);
+  str += ':';
+  if (authority.empty()) {
+    CAF_ASSERT(!path.empty());
+    append_percent_encoded(str, path, true);
+  } else {
+    str += "//";
+    str += to_string(authority);
+    if (!path.empty()) {
+      str += '/';
+      append_percent_encoded(str, path, true);
+    }
+  }
+  if (!query.empty()) {
+    str += '?';
+    auto i = query.begin();
+    auto add_kvp = [&](decltype(*i) kvp) {
+      append_percent_encoded(str, kvp.first);
+      str += '=';
+      append_percent_encoded(str, kvp.second);
+    };
+    add_kvp(*i);
+    for (++i; i != query.end(); ++i) {
+      str += '&';
+      add_kvp(*i);
+    }
+  }
+  if (!fragment.empty()) {
+    str += '#';
+    append_percent_encoded(str, fragment);
+  }
+}
+
+uri::uri() : impl_(&default_instance) {
   // nop
 }
 
@@ -43,42 +74,14 @@ uri::uri(impl_ptr ptr) : impl_(std::move(ptr)) {
   CAF_ASSERT(impl_ != nullptr);
 }
 
-bool uri::empty() const noexcept {
-  return str().empty();
-}
-
-string_view uri::str() const noexcept {
-  return impl_->str;
-}
-
-string_view uri::scheme() const noexcept {
-  return impl_->scheme;
-}
-
-const uri::authority_type& uri::authority() const noexcept {
-  return impl_->authority;
-}
-
-string_view uri::path() const noexcept {
-  return impl_->path;
-}
-
-const uri::query_map& uri::query() const noexcept {
-  return impl_->query;
-}
-
-string_view uri::fragment() const noexcept {
-  return impl_->fragment;
-}
-
 size_t uri::hash_code() const noexcept {
-  return detail::fnv_hash(str());
+  return hash::fnv<size_t>::compute(str());
 }
 
 optional<uri> uri::authority_only() const {
   if (empty() || authority().empty())
     return none;
-  auto result = make_counted<detail::uri_impl>();
+  auto result = make_counted<uri::impl_type>();
   result->scheme = impl_->scheme;
   result->authority = impl_->authority;
   auto& str = result->str;
@@ -88,40 +91,63 @@ optional<uri> uri::authority_only() const {
   return uri{std::move(result)};
 }
 
-// -- comparison ---------------------------------------------------------------
+// -- parsing ------------------------------------------------------------------
 
-int uri::compare(const uri& other) const noexcept {
-  return str().compare(other.str());
-}
+namespace {
 
-int uri::compare(string_view x) const noexcept {
-  return string_view{str()}.compare(x);
-}
+class nop_builder {
+public:
+  template <class T>
+  nop_builder& scheme(T&&) {
+    return *this;
+  }
 
-// -- friend functions ---------------------------------------------------------
+  template <class T>
+  nop_builder& userinfo(T&&) {
+    return *this;
+  }
 
-error inspect(caf::serializer& dst, uri& x) {
-  return inspect(dst, const_cast<detail::uri_impl&>(*x.impl_));
-}
+  template <class T>
+  nop_builder& host(T&&) {
+    return *this;
+  }
 
-error inspect(caf::deserializer& src, uri& x) {
-  auto impl = make_counted<detail::uri_impl>();
-  auto err = inspect(src, *impl);
-  if (err == none)
-    x = uri{std::move(impl)};
-  return err;
-}
+  template <class T>
+  nop_builder& port(T&&) {
+    return *this;
+  }
 
-error_code<sec> inspect(caf::binary_serializer& dst, uri& x) {
-  return inspect(dst, const_cast<detail::uri_impl&>(*x.impl_));
-}
+  template <class T>
+  nop_builder& path(T&&) {
+    return *this;
+  }
 
-error_code<sec> inspect(caf::binary_deserializer& src, uri& x) {
-  auto impl = make_counted<detail::uri_impl>();
-  auto err = inspect(src, *impl);
-  if (err == none)
-    x = uri{std::move(impl)};
-  return err;
+  template <class T>
+  nop_builder& query(T&&) {
+    return *this;
+  }
+
+  template <class T>
+  nop_builder& fragment(T&&) {
+    return *this;
+  }
+};
+
+} // namespace
+
+bool uri::can_parse(string_view str) noexcept {
+  string_parser_state ps{str.begin(), str.end()};
+  nop_builder builder;
+  if (ps.consume('<')) {
+    detail::parser::read_uri(ps, builder);
+    if (ps.code > pec::trailing_character)
+      return false;
+    if (!ps.consume('>'))
+      return false;
+  } else {
+    detail::parser::read_uri(ps, builder);
+  }
+  return ps.code == pec::success;
 }
 
 // -- related free functions ---------------------------------------------------

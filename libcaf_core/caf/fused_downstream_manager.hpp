@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -63,13 +49,14 @@ private:
 };
 
 struct downstream_manager_selector {
-  inline downstream_manager* operator()(const message&) {
+  downstream_manager* operator()(const message&) {
     return nullptr;
   }
 
   template <class T, class... Ts>
   downstream_manager* operator()(const message& msg, T& x, Ts&... xs) {
-    if (msg.match_element<stream<typename T::value_type>>(0))
+    if (msg.size() > 1
+        && msg.type_at(0) == type_id_v<stream<typename T::value_type>>)
       return &x;
     return (*this)(msg, xs...);
   }
@@ -140,18 +127,12 @@ public:
 
   template <class U>
   U& get() {
-    static constexpr auto i = detail::tl_index_of<param_list, U>::value;
-    return std::get<i>(nested_);
-    // TODO: replace with this line when switching to C++14
-    // return std::get<U>(substreams_);
+    return std::get<U>(nested_);
   }
 
   template <class U>
   const U& get() const {
-    static constexpr auto i = detail::tl_index_of<param_list, U>::value;
-    return std::get<i>(nested_);
-    // TODO: replace with this line when switching to C++14
-    // return std::get<U>(substreams_);
+    return std::get<U>(nested_);
   }
 
   /// Requires a previous call to `add_path` for given slot.
@@ -212,6 +193,8 @@ public:
     return i->second.ptr;
   }
 
+  using downstream_manager::close;
+
   void close() override {
     CAF_LOG_TRACE(CAF_ARG(paths_));
     for (auto ptr : ptrs_)
@@ -251,6 +234,16 @@ public:
     size_t result = 0;
     for (auto ptr : ptrs_)
       result = std::max(result, ptr->buffered());
+    return result;
+  }
+
+  size_t buffered(stream_slot slot) const noexcept override {
+    // We don't know which nested manager stores this path. Only one will give a
+    // valid answer, though. Everyone else always responds with 0. Hence, we can
+    // simply call all managers and sum up the results.
+    size_t result = 0;
+    for (auto ptr : ptrs_)
+      result += ptr->buffered(slot);
     return result;
   }
 

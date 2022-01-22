@@ -1,49 +1,28 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <string>
 
 #include "caf/detail/core_export.hpp"
-#include "caf/detail/type_list.hpp"
+#include "caf/fwd.hpp"
 
 namespace caf {
 
-/// @cond PRIVATE
+/// @private
 CAF_CORE_EXPORT std::string
 replies_to_type_name(size_t input_size, const std::string* input,
                      size_t output_size, const std::string* output);
-/// @endcond
-
-template <class...>
-struct output_tuple {};
-
-template <class Input, class Output>
-struct typed_mpi {};
 
 template <class... Is>
 struct replies_to {
   template <class... Os>
-  using with = typed_mpi<detail::type_list<Is...>, output_tuple<Os...>>;
+  using with = result<Os...>(Is...);
 };
 
 template <class... Is>
-using reacts_to = typed_mpi<detail::type_list<Is...>, output_tuple<void>>;
+using reacts_to = result<void>(Is...);
 
 } // namespace caf

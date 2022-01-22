@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -24,18 +10,17 @@
 #include "caf/detail/io_export.hpp"
 #include "caf/error.hpp"
 #include "caf/io/basp/message_type.hpp"
-#include "caf/meta/omittable.hpp"
-#include "caf/meta/type_name.hpp"
 #include "caf/node_id.hpp"
 
 namespace caf::io::basp {
 
 /// @addtogroup BASP
+/// @{
 
-/// The header of a Binary Actor System Protocol (BASP) message.
-/// A BASP header consists of a routing part, i.e., source and
-/// destination, as well as an operation and operation data. Several
-/// message types consist of only a header.
+/// The header of a Binary Actor System Protocol (BASP) message. A BASP header
+/// consists of a routing part, i.e., source and destination, as well as an
+/// operation and operation data. Several message types consist of only a
+/// header.
 struct header {
   message_type operation;
   uint8_t padding1;
@@ -57,11 +42,16 @@ struct header {
       dest_actor(m_dest_actor) {
     // nop
   }
-
   header() = default;
 
   /// Identifies a receiver by name rather than ID.
   static const uint8_t named_receiver_flag = 0x01;
+
+  /// Identifies the config server.
+  static const uint64_t config_server_id = 1;
+
+  /// Identifies the spawn server.
+  static const uint64_t spawn_server_id = 2;
 
   /// Queries whether this header has the given flag.
   bool has(uint8_t flag) const {
@@ -71,11 +61,15 @@ struct header {
 
 /// @relates header
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, header& hdr) {
+bool inspect(Inspector& f, header& x) {
   uint8_t pad = 0;
-  return f(meta::type_name("header"), hdr.operation, meta::omittable(), pad,
-           meta::omittable(), pad, hdr.flags, hdr.payload_len,
-           hdr.operation_data, hdr.source_actor, hdr.dest_actor);
+  return f.object(x).fields(f.field("operation", x.operation),
+                            f.field("pad1", pad), f.field("pad2", pad),
+                            f.field("flags", x.flags),
+                            f.field("payload_len", x.payload_len),
+                            f.field("operation_data", x.operation_data),
+                            f.field("source_actor", x.source_actor),
+                            f.field("dest_actor", x.dest_actor));
 }
 
 /// @relates header
@@ -102,8 +96,9 @@ inline bool is_heartbeat(const header& hdr) {
 CAF_IO_EXPORT bool valid(const header& hdr);
 
 /// Size of a BASP header in serialized form
-constexpr size_t header_size
-  = sizeof(actor_id) * 2 + sizeof(uint32_t) * 2 + sizeof(uint64_t);
+/// @relates header
+constexpr size_t header_size = sizeof(actor_id) * 2 + sizeof(uint32_t) * 2
+                               + sizeof(uint64_t);
 
 /// @}
 

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -58,6 +44,10 @@ struct parser_state {
     e = last;
   }
 
+  parser_state(const parser_state&) noexcept = default;
+
+  parser_state& operator=(const parser_state&) noexcept = default;
+
   /// Returns the null terminator when reaching the end of the string,
   /// otherwise the next character.
   char next() noexcept {
@@ -91,10 +81,44 @@ struct parser_state {
       c = next();
   }
 
-  /// Tries to read `x` as the next character (skips any whitespaces).
+  /// Tries to read `x` as the next character, automatically skipping leading
+  /// whitespaces.
   bool consume(char x) noexcept {
     skip_whitespaces();
     if (current() == x) {
+      next();
+      return true;
+    }
+    return false;
+  }
+
+  /// Consumes the next character if it satisfies given predicate, automatically
+  /// skipping leading whitespaces.
+  template <class Predicate>
+  bool consume_if(Predicate predicate) noexcept {
+    skip_whitespaces();
+    if (predicate(current())) {
+      next();
+      return true;
+    }
+    return false;
+  }
+
+  /// Tries to read `x` as the next character without automatically skipping
+  /// leading whitespaces.
+  bool consume_strict(char x) noexcept {
+    if (current() == x) {
+      next();
+      return true;
+    }
+    return false;
+  }
+
+  /// Consumes the next character if it satisfies given predicate without
+  /// automatically skipping leading whitespaces.
+  template <class Predicate>
+  bool consume_strict_if(Predicate predicate) noexcept {
+    if (predicate(current())) {
       next();
       return true;
     }
@@ -104,10 +128,12 @@ struct parser_state {
 
 /// Returns an error object from the current code in `ps` as well as its
 /// current position.
-template <class Iterator, class Sentinel>
-auto make_error(const parser_state<Iterator, Sentinel>& ps)
+template <class Iterator, class Sentinel, class... Ts>
+auto make_error(const parser_state<Iterator, Sentinel>& ps, Ts&&... xs)
   -> decltype(make_error(ps.code, ps.line, ps.column)) {
-  return make_error(ps.code, ps.line, ps.column);
+  if (ps.code == pec::success)
+    return {};
+  return make_error(ps.code, ps.line, ps.column, std::forward<Ts>(xs)...);
 }
 
 /// Specialization for parsers operating on string views.

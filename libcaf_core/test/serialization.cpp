@@ -1,24 +1,10 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE serialization
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -30,6 +16,7 @@
 #include <limits>
 #include <list>
 #include <locale>
+#include <map>
 #include <memory>
 #include <new>
 #include <set>
@@ -52,44 +39,67 @@
 #include "caf/detail/ieee_754.hpp"
 #include "caf/detail/int_list.hpp"
 #include "caf/detail/safe_equal.hpp"
+#include "caf/detail/stringification_inspector.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/event_based_actor.hpp"
-#include "caf/make_type_erased_tuple_view.hpp"
-#include "caf/make_type_erased_view.hpp"
+#include "caf/json_reader.hpp"
+#include "caf/json_writer.hpp"
 #include "caf/message.hpp"
 #include "caf/message_handler.hpp"
-#include "caf/primitive_variant.hpp"
 #include "caf/proxy_registry.hpp"
 #include "caf/ref_counted.hpp"
+#include "caf/sec.hpp"
 #include "caf/serializer.hpp"
 #include "caf/variant.hpp"
 
-using namespace std;
+struct opaque {
+  int secret;
+};
+
+CAF_ALLOW_UNSAFE_MESSAGE_TYPE(opaque)
+
+struct the_great_unknown {
+  int secret;
+};
+
 using namespace caf;
-using caf::detail::type_erased_value_impl;
 
-namespace {
+using bs = binary_serializer;
 
-using strmap = map<string, u16string>;
+using si = detail::stringification_inspector;
 
-struct raw_struct {
-  string str;
+using iat = inspector_access_type;
+
+template <class Inspector, class T>
+struct access_of {
+  template <class What>
+  static constexpr bool is
+    = std::is_same<decltype(inspect_access_type<Inspector, T>()), What>::value;
 };
 
-template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, raw_struct& x) {
-  return f(x.str);
-}
+static_assert(access_of<bs, variant<int, double>>::is<iat::specialization>);
 
-bool operator==(const raw_struct& lhs, const raw_struct& rhs) {
-  return lhs.str == rhs.str;
-}
+static_assert(access_of<bs, sec>::is<iat::inspect>);
 
-enum class test_enum : uint32_t {
-  a,
-  b,
-  c,
-};
+static_assert(access_of<bs, int>::is<iat::builtin>);
+
+static_assert(access_of<bs, dummy_tag_type>::is<iat::empty>);
+
+static_assert(access_of<bs, opaque>::is<iat::unsafe>);
+
+static_assert(access_of<bs, std::tuple<int, double>>::is<iat::tuple>);
+
+static_assert(access_of<bs, std::map<int, int>>::is<iat::map>);
+
+static_assert(access_of<bs, std::vector<bool>>::is<iat::list>);
+
+static_assert(access_of<bs, the_great_unknown>::is<iat::none>);
+
+// The stringification inspector picks up to_string via builtin_inspect.
+
+static_assert(access_of<si, sec>::is<iat::builtin_inspect>);
+
+static_assert(access_of<si, timespan>::is<iat::builtin_inspect>);
 
 const char* test_enum_strings[] = {
   "a",
@@ -101,52 +111,30 @@ std::string to_string(test_enum x) {
   return test_enum_strings[static_cast<uint32_t>(x)];
 }
 
-struct test_array {
-  int value[4];
-  int value2[2][4];
-};
-
-template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, test_array& x) {
-  return f(x.value, x.value2);
+void test_empty_non_pod::foo() {
+  // nop
 }
 
-struct test_empty_non_pod {
-  test_empty_non_pod() = default;
-  test_empty_non_pod(const test_empty_non_pod&) = default;
-  test_empty_non_pod& operator=(const test_empty_non_pod&) = default;
-  virtual void foo() {
-    // nop
-  }
-  virtual ~test_empty_non_pod() {
-    // nop
-  }
-};
-
-template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, test_empty_non_pod&) {
-  return f();
+test_empty_non_pod::~test_empty_non_pod() {
+  // nop
 }
 
-class config : public actor_system_config {
-public:
-  config() {
-    add_message_type<test_enum>("test_enum");
-    add_message_type<raw_struct>("raw_struct");
-    add_message_type<test_array>("test_array");
-    add_message_type<test_empty_non_pod>("test_empty_non_pod");
-    add_message_type<std::vector<bool>>("bool_vector");
-  }
-};
+namespace {
 
-struct fixture : test_coordinator_fixture<config> {
+struct fixture : test_coordinator_fixture<> {
   int32_t i32 = -345;
   int64_t i64 = -1234567890123456789ll;
   float f32 = 3.45f;
+  float f32_nan = std::numeric_limits<float>::quiet_NaN();
+  float f32_pos_inf = std::numeric_limits<float>::infinity();
+  float f32_neg_inf = -std::numeric_limits<float>::infinity();
   double f64 = 54.3;
+  double f64_nan = std::numeric_limits<double>::quiet_NaN();
+  double f64_pos_inf = std::numeric_limits<double>::infinity();
+  double f64_neg_inf = -std::numeric_limits<double>::infinity();
   timestamp ts = timestamp{timestamp::duration{1478715821 * 1000000000ll}};
   test_enum te = test_enum::b;
-  string str = "Lorem ipsum dolor sit amet.";
+  std::string str = "Lorem ipsum dolor sit amet.";
   raw_struct rs;
   test_array ta{
     {0, 1, 2, 3},
@@ -157,13 +145,17 @@ struct fixture : test_coordinator_fixture<config> {
   message msg;
   message recursive;
 
+  json_writer jwriter;
+
+  json_reader jreader;
+
   template <class... Ts>
   byte_buffer serialize(const Ts&... xs) {
     byte_buffer buf;
     binary_serializer sink{sys, buf};
-    if (auto err = sink(xs...))
+    if (!(sink.apply(xs) && ...))
       CAF_FAIL("serialization failed: "
-               << sys.render(err)
+               << sink.get_error()
                << ", data: " << deep_to_string(std::forward_as_tuple(xs...)));
     return buf;
   }
@@ -171,16 +163,43 @@ struct fixture : test_coordinator_fixture<config> {
   template <class... Ts>
   void deserialize(const byte_buffer& buf, Ts&... xs) {
     binary_deserializer source{sys, buf};
-    if (auto err = source(xs...))
-      CAF_FAIL("deserialization failed: " << sys.render(err));
+    if (!(source.apply(xs) && ...))
+      CAF_FAIL("deserialization failed: " << source.get_error());
+  }
+
+  template <class... Ts>
+  std::string serialize_json(const Ts&... xs) {
+    jwriter.reset();
+    if (!(jwriter.apply(xs) && ...))
+      CAF_FAIL("JSON serialization failed: "
+               << jwriter.get_error()
+               << ", data: " << deep_to_string(std::forward_as_tuple(xs...)));
+    auto str = jwriter.str();
+    return std::string{str.begin(), str.end()};
+  }
+
+  template <class... Ts>
+  void deserialize_json(const std::string& str, Ts&... xs) {
+    if (!jreader.load(str))
+      CAF_FAIL("JSON loading failed: " << jreader.get_error()
+                                       << "\n     input: " << str);
+    if (!(jreader.apply(xs) && ...))
+      CAF_FAIL("JSON deserialization failed: " << jreader.get_error()
+                                               << "\n     input: " << str);
   }
 
   // serializes `x` and then deserializes and returns the serialized value
   template <class T>
-  T roundtrip(T x) {
-    T result;
-    deserialize(serialize(x), result);
-    return result;
+  T roundtrip(T x, bool enable_json = true) {
+    auto r1 = T{};
+    deserialize(serialize(x), r1);
+    if (enable_json) {
+      auto r2 = T{};
+      deserialize_json(serialize_json(x), r2);
+      if (!CHECK_EQ(r1, r2))
+        MESSAGE("generated JSON: " << serialize_json(x));
+    }
+    return r1;
   }
 
   // converts `x` to a message, serialize it, then deserializes it, and
@@ -189,17 +208,20 @@ struct fixture : test_coordinator_fixture<config> {
   T msg_roundtrip(const T& x) {
     message result;
     auto tmp = make_message(x);
-    deserialize(serialize(tmp), result);
+    auto buf = serialize(tmp);
+    MESSAGE("serialized " << to_string(tmp) << " into " << buf.size()
+                          << " bytes");
+    deserialize(buf, result);
     if (!result.match_elements<T>())
       CAF_FAIL("expected: " << x << ", got: " << result);
     return result.get_as<T>(0);
   }
 
-  fixture() {
-    rs.str.assign(string(str.rbegin(), str.rend()));
+  fixture() : jwriter(sys), jreader(sys) {
+    rs.str.assign(std::string(str.rbegin(), str.rend()));
     msg = make_message(i32, i64, ts, te, str, rs);
     config_value::dictionary dict;
-    put(dict, "scheduler.policy", atom("none"));
+    put(dict, "scheduler.policy", "none");
     put(dict, "scheduler.max-threads", 42);
     put(dict, "nodes.preload",
         make_config_value_list("sun", "venus", "mercury", "earth", "mars"));
@@ -218,9 +240,9 @@ struct is_message {
   bool equal(T&& v, Ts&&... vs) {
     bool ok = false;
     // work around for gcc 4.8.4 bug
-    auto tup = tie(v, vs...);
+    auto tup = std::tie(v, vs...);
     message_handler impl{
-      [&](T const& u, Ts const&... us) { ok = tup == tie(u, us...); }};
+      [&](T const& u, Ts const&... us) { ok = tup == std::tie(u, us...); }};
     impl(msg);
     return ok;
   }
@@ -228,26 +250,29 @@ struct is_message {
 
 } // namespace
 
-#define CHECK_RT(val) CAF_CHECK_EQUAL(val, roundtrip(val))
+#define CHECK_RT(val)                                                          \
+  do {                                                                         \
+    MESSAGE(#val);                                                             \
+    CHECK_EQ(val, roundtrip(val));                                             \
+  } while (false)
 
-#define CHECK_MSG_RT(val) CAF_CHECK_EQUAL(val, msg_roundtrip(val))
+#define CHECK_PRED_RT(pred, value)                                             \
+  do {                                                                         \
+    MESSAGE(#pred "(" #value ")");                                             \
+    CHECK(pred(roundtrip(value, false)));                                      \
+  } while (false)
 
-CAF_TEST_FIXTURE_SCOPE(serialization_tests, fixture)
+#define CHECK_SIGN_RT(value)                                                   \
+  CHECK_EQ(std::signbit(roundtrip(value, false)), std::signbit(value))
 
-CAF_TEST(ieee_754_conversion) {
-  // check conversion of float
-  float f1 = 3.1415925f;              // float value
-  auto p1 = caf::detail::pack754(f1); // packet value
-  CAF_CHECK_EQUAL(p1, static_cast<decltype(p1)>(0x40490FDA));
-  auto u1 = caf::detail::unpack754(p1); // unpacked value
-  CAF_CHECK_EQUAL(f1, u1);
-  // check conversion of double
-  double f2 = 3.14159265358979311600; // double value
-  auto p2 = caf::detail::pack754(f2); // packet value
-  CAF_CHECK_EQUAL(p2, static_cast<decltype(p2)>(0x400921FB54442D18));
-  auto u2 = caf::detail::unpack754(p2); // unpacked value
-  CAF_CHECK_EQUAL(f2, u2);
-}
+#define CHECK_MSG_RT(val) CHECK_EQ(val, msg_roundtrip(val))
+
+#define CHECK_PRED_MSG_RT(pred, value) CHECK(pred(msg_roundtrip(value)))
+
+#define CHECK_SIGN_MSG_RT(value)                                               \
+  CHECK_EQ(std::signbit(msg_roundtrip(value)), std::signbit(value))
+
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(serializing and then deserializing produces the same value) {
   CHECK_RT(i32);
@@ -258,7 +283,16 @@ CAF_TEST(serializing and then deserializing produces the same value) {
   CHECK_RT(te);
   CHECK_RT(str);
   CHECK_RT(rs);
-  CHECK_RT(atom("foo"));
+  CHECK_PRED_RT(std::isnan, f32_nan);
+  CHECK_PRED_RT(std::isinf, f32_pos_inf);
+  CHECK_PRED_RT(std::isinf, f32_neg_inf);
+  CHECK_PRED_RT(std::isnan, f64_nan);
+  CHECK_PRED_RT(std::isinf, f64_pos_inf);
+  CHECK_PRED_RT(std::isinf, f64_neg_inf);
+  CHECK_SIGN_RT(f32_pos_inf);
+  CHECK_SIGN_RT(f32_neg_inf);
+  CHECK_SIGN_RT(f64_pos_inf);
+  CHECK_SIGN_RT(f64_neg_inf);
 }
 
 CAF_TEST(messages serialize and deserialize their content) {
@@ -270,7 +304,16 @@ CAF_TEST(messages serialize and deserialize their content) {
   CHECK_MSG_RT(te);
   CHECK_MSG_RT(str);
   CHECK_MSG_RT(rs);
-  CHECK_MSG_RT(atom("foo"));
+  CHECK_PRED_MSG_RT(std::isnan, f32_nan);
+  CHECK_PRED_MSG_RT(std::isinf, f32_pos_inf);
+  CHECK_PRED_MSG_RT(std::isinf, f32_neg_inf);
+  CHECK_PRED_MSG_RT(std::isnan, f64_nan);
+  CHECK_PRED_MSG_RT(std::isinf, f64_pos_inf);
+  CHECK_PRED_MSG_RT(std::isinf, f64_neg_inf);
+  CHECK_SIGN_MSG_RT(f32_pos_inf);
+  CHECK_SIGN_MSG_RT(f32_neg_inf);
+  CHECK_SIGN_MSG_RT(f64_pos_inf);
+  CHECK_SIGN_MSG_RT(f64_neg_inf);
 }
 
 CAF_TEST(raw_arrays) {
@@ -278,7 +321,7 @@ CAF_TEST(raw_arrays) {
   int x[3];
   deserialize(buf, x);
   for (auto i = 0; i < 3; ++i)
-    CAF_CHECK_EQUAL(ra[i], x[i]);
+    CHECK_EQ(ra[i], x[i]);
 }
 
 CAF_TEST(arrays) {
@@ -286,10 +329,10 @@ CAF_TEST(arrays) {
   test_array x;
   deserialize(buf, x);
   for (auto i = 0; i < 4; ++i)
-    CAF_CHECK_EQUAL(ta.value[i], x.value[i]);
+    CHECK_EQ(ta.value[i], x.value[i]);
   for (auto i = 0; i < 2; ++i)
     for (auto j = 0; j < 4; ++j)
-      CAF_CHECK_EQUAL(ta.value2[i][j], x.value2[i][j]);
+      CHECK_EQ(ta.value2[i][j], x.value2[i][j]);
 }
 
 CAF_TEST(empty_non_pods) {
@@ -317,16 +360,16 @@ CAF_TEST(messages) {
   message x;
   auto buf1 = serialize(msg);
   deserialize(buf1, x);
-  CAF_CHECK_EQUAL(to_string(msg), to_string(x));
-  CAF_CHECK(is_message(x).equal(i32, i64, ts, te, str, rs));
+  CHECK_EQ(to_string(msg), to_string(x));
+  CHECK(is_message(x).equal(i32, i64, ts, te, str, rs));
   // serialize fully dynamic message again (do another roundtrip)
   message y;
   auto buf2 = serialize(x);
-  CAF_CHECK_EQUAL(buf1, buf2);
+  CHECK_EQ(buf1, buf2);
   deserialize(buf2, y);
-  CAF_CHECK_EQUAL(to_string(msg), to_string(y));
-  CAF_CHECK(is_message(y).equal(i32, i64, ts, te, str, rs));
-  CAF_CHECK_EQUAL(to_string(recursive), to_string(roundtrip(recursive)));
+  CHECK_EQ(to_string(msg), to_string(y));
+  CHECK(is_message(y).equal(i32, i64, ts, te, str, rs));
+  CHECK_EQ(to_string(recursive), to_string(roundtrip(recursive, false)));
 }
 
 CAF_TEST(multiple_messages) {
@@ -336,73 +379,43 @@ CAF_TEST(multiple_messages) {
   message m1;
   message m2;
   deserialize(buf, t, m1, m2);
-  CAF_CHECK_EQUAL(std::make_tuple(t, to_string(m1), to_string(m2)),
-                  std::make_tuple(te, to_string(m), to_string(msg)));
-  CAF_CHECK(is_message(m1).equal(rs, te));
-  CAF_CHECK(is_message(m2).equal(i32, i64, ts, te, str, rs));
-}
-
-CAF_TEST(type_erased_value) {
-  auto buf = serialize(str);
-  type_erased_value_ptr ptr{new type_erased_value_impl<std::string>};
-  binary_deserializer source{sys, buf};
-  ptr->load(source);
-  CAF_CHECK_EQUAL(str, *reinterpret_cast<const std::string*>(ptr->get()));
-}
-
-CAF_TEST(type_erased_view) {
-  auto str_view = make_type_erased_view(str);
-  auto buf = serialize(str_view);
-  std::string res;
-  deserialize(buf, res);
-  CAF_CHECK_EQUAL(str, res);
-}
-
-CAF_TEST(type_erased_tuple) {
-  auto tview = make_type_erased_tuple_view(str, i32);
-  CAF_CHECK_EQUAL(to_string(tview), deep_to_string(std::make_tuple(str, i32)));
-  auto buf = serialize(tview);
-  CAF_REQUIRE(!buf.empty());
-  std::string tmp1;
-  int32_t tmp2;
-  deserialize(buf, tmp1, tmp2);
-  CAF_CHECK_EQUAL(tmp1, str);
-  CAF_CHECK_EQUAL(tmp2, i32);
-  deserialize(buf, tview);
-  CAF_CHECK_EQUAL(to_string(tview), deep_to_string(std::make_tuple(str, i32)));
+  CHECK_EQ(std::make_tuple(t, to_string(m1), to_string(m2)),
+           std::make_tuple(te, to_string(m), to_string(msg)));
+  CHECK(is_message(m1).equal(rs, te));
+  CHECK(is_message(m2).equal(i32, i64, ts, te, str, rs));
 }
 
 CAF_TEST(long_sequences) {
   byte_buffer data;
   binary_serializer sink{nullptr, data};
   size_t n = std::numeric_limits<uint32_t>::max();
-  sink.begin_sequence(n);
-  sink.end_sequence();
+  CHECK(sink.begin_sequence(n));
+  CHECK(sink.end_sequence());
   binary_deserializer source{nullptr, data};
   size_t m = 0;
-  source.begin_sequence(m);
-  source.end_sequence();
-  CAF_CHECK_EQUAL(n, m);
+  CHECK(source.begin_sequence(m));
+  CHECK(source.end_sequence());
+  CHECK_EQ(n, m);
 }
 
 CAF_TEST(non_empty_vector) {
-  CAF_MESSAGE("deserializing into a non-empty vector overrides any content");
+  MESSAGE("deserializing into a non-empty vector overrides any content");
   std::vector<int> foo{1, 2, 3};
   std::vector<int> bar{0};
   auto buf = serialize(foo);
   deserialize(buf, bar);
-  CAF_CHECK_EQUAL(foo, bar);
+  CHECK_EQ(foo, bar);
 }
 
 CAF_TEST(variant_with_tree_types) {
-  CAF_MESSAGE("deserializing into a non-empty vector overrides any content");
+  MESSAGE("deserializing into a non-empty vector overrides any content");
   using test_variant = variant<int, double, std::string>;
   test_variant x{42};
-  CAF_CHECK_EQUAL(x, roundtrip(x));
+  CHECK_EQ(x, roundtrip(x, false));
   x = 12.34;
-  CAF_CHECK_EQUAL(x, roundtrip(x));
+  CHECK_EQ(x, roundtrip(x, false));
   x = std::string{"foobar"};
-  CAF_CHECK_EQUAL(x, roundtrip(x));
+  CHECK_EQ(x, roundtrip(x, false));
 }
 
 // -- our vector<bool> serialization packs into an uint64_t. Hence, the
@@ -410,30 +423,30 @@ CAF_TEST(variant_with_tree_types) {
 
 CAF_TEST(bool_vector_size_0) {
   std::vector<bool> xs;
-  CAF_CHECK_EQUAL(deep_to_string(xs), "[]");
-  CAF_CHECK_EQUAL(xs, roundtrip(xs));
-  CAF_CHECK_EQUAL(xs, msg_roundtrip(xs));
+  CHECK_EQ(deep_to_string(xs), "[]");
+  CHECK_EQ(xs, roundtrip(xs));
+  CHECK_EQ(xs, msg_roundtrip(xs));
 }
 
 CAF_TEST(bool_vector_size_1) {
   std::vector<bool> xs{true};
-  CAF_CHECK_EQUAL(deep_to_string(xs), "[true]");
-  CAF_CHECK_EQUAL(xs, roundtrip(xs));
-  CAF_CHECK_EQUAL(xs, msg_roundtrip(xs));
+  CHECK_EQ(deep_to_string(xs), "[true]");
+  CHECK_EQ(xs, roundtrip(xs));
+  CHECK_EQ(xs, msg_roundtrip(xs));
 }
 
 CAF_TEST(bool_vector_size_2) {
   std::vector<bool> xs{true, true};
-  CAF_CHECK_EQUAL(deep_to_string(xs), "[true, true]");
-  CAF_CHECK_EQUAL(xs, roundtrip(xs));
-  CAF_CHECK_EQUAL(xs, msg_roundtrip(xs));
+  CHECK_EQ(deep_to_string(xs), "[true, true]");
+  CHECK_EQ(xs, roundtrip(xs));
+  CHECK_EQ(xs, msg_roundtrip(xs));
 }
 
 CAF_TEST(bool_vector_size_63) {
   std::vector<bool> xs;
   for (int i = 0; i < 63; ++i)
     xs.push_back(i % 3 == 0);
-  CAF_CHECK_EQUAL(
+  CHECK_EQ(
     deep_to_string(xs),
     "[true, false, false, true, false, false, true, false, false, true, false, "
     "false, true, false, false, true, false, false, true, false, false, true, "
@@ -441,32 +454,32 @@ CAF_TEST(bool_vector_size_63) {
     "true, false, false, true, false, false, true, false, false, true, false, "
     "false, true, false, false, true, false, false, true, false, false, true, "
     "false, false, true, false, false, true, false, false]");
-  CAF_CHECK_EQUAL(xs, roundtrip(xs));
-  CAF_CHECK_EQUAL(xs, msg_roundtrip(xs));
+  CHECK_EQ(xs, roundtrip(xs));
+  CHECK_EQ(xs, msg_roundtrip(xs));
 }
 
 CAF_TEST(bool_vector_size_64) {
   std::vector<bool> xs;
   for (int i = 0; i < 64; ++i)
     xs.push_back(i % 5 == 0);
-  CAF_CHECK_EQUAL(deep_to_string(xs),
-                  "[true, false, false, false, false, true, false, false, "
-                  "false, false, true, false, false, false, false, true, "
-                  "false, false, false, false, true, false, false, false, "
-                  "false, true, false, false, false, false, true, false, "
-                  "false, false, false, true, false, false, false, false, "
-                  "true, false, false, false, false, true, false, false, "
-                  "false, false, true, false, false, false, false, true, "
-                  "false, false, false, false, true, false, false, false]");
-  CAF_CHECK_EQUAL(xs, roundtrip(xs));
-  CAF_CHECK_EQUAL(xs, msg_roundtrip(xs));
+  CHECK_EQ(deep_to_string(xs),
+           "[true, false, false, false, false, true, false, false, "
+           "false, false, true, false, false, false, false, true, "
+           "false, false, false, false, true, false, false, false, "
+           "false, true, false, false, false, false, true, false, "
+           "false, false, false, true, false, false, false, false, "
+           "true, false, false, false, false, true, false, false, "
+           "false, false, true, false, false, false, false, true, "
+           "false, false, false, false, true, false, false, false]");
+  CHECK_EQ(xs, roundtrip(xs));
+  CHECK_EQ(xs, msg_roundtrip(xs));
 }
 
 CAF_TEST(bool_vector_size_65) {
   std::vector<bool> xs;
   for (int i = 0; i < 65; ++i)
     xs.push_back(!(i % 7 == 0));
-  CAF_CHECK_EQUAL(
+  CHECK_EQ(
     deep_to_string(xs),
     "[false, true, true, true, true, true, true, false, true, true, true, "
     "true, true, true, false, true, true, true, true, true, true, false, true, "
@@ -474,8 +487,22 @@ CAF_TEST(bool_vector_size_65) {
     "false, true, true, true, true, true, true, false, true, true, true, true, "
     "true, true, false, true, true, true, true, true, true, false, true, true, "
     "true, true, true, true, false, true]");
-  CAF_CHECK_EQUAL(xs, roundtrip(xs));
-  CAF_CHECK_EQUAL(xs, msg_roundtrip(xs));
+  CHECK_EQ(xs, roundtrip(xs));
+  CHECK_EQ(xs, msg_roundtrip(xs));
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+CAF_TEST(serializers handle actor handles) {
+  auto dummy = sys.spawn([]() -> behavior {
+    return {
+      [](int i) { return i; },
+    };
+  });
+  CHECK_EQ(dummy, roundtrip(dummy, false));
+  CHECK_EQ(dummy, msg_roundtrip(dummy));
+  std::vector<strong_actor_ptr> wrapped{actor_cast<strong_actor_ptr>(dummy)};
+  CHECK_EQ(wrapped, roundtrip(wrapped, false));
+  CHECK_EQ(wrapped, msg_roundtrip(wrapped));
+  anon_send_exit(dummy, exit_reason::user_shutdown);
+}
+
+END_FIXTURE_SCOPE()

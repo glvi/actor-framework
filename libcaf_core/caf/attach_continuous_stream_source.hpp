@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -33,10 +19,7 @@ namespace caf {
 /// implementation with `Driver`. The returned manager is not connected to any
 /// slot and thus not stored by the actor automatically.
 /// @param self Points to the hosting actor.
-/// @param init Function object for initializing the state of the source.
-/// @param pull Generator function object for producing downstream messages.
-/// @param done Predicate returning `true` when generator is done.
-/// @param fin Cleanup handler.
+/// @param xs Parameter pack for constructing the driver.
 /// @returns The new `stream_manager`.
 template <class Driver, class... Ts>
 typename Driver::source_ptr_type

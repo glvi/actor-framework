@@ -1,24 +1,10 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright (C) 2011 - 2017                                                  *
- * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
+#include <limits>
 #include <utility>
 
 #include "caf/config.hpp"
@@ -116,6 +102,13 @@ public:
     list_.peek_all(f);
   }
 
+  /// Tries to find the next element in the queue (excluding cached elements)
+  /// that matches the given predicate.
+  template <class Predicate>
+  pointer find_if(Predicate pred) {
+    return list_.find_if(pred);
+  }
+
   // -- modifiers -------------------------------------------------------------
 
   /// Removes all elements from the queue.
@@ -169,7 +162,7 @@ public:
   /// @returns `true` if `f` consumed at least one item.
   template <class F>
   bool consume(F& f) noexcept(noexcept(f(std::declval<value_type&>()))) {
-    return new_round(0, f).consumed_items;
+    return new_round(0, f).consumed_items > 0;
   }
 
   /// Run a new round with `quantum`, dispatching all tasks to `consumer`.
@@ -177,12 +170,12 @@ public:
   new_round_result new_round(deficit_type quantum, F& consumer) noexcept(
     noexcept(consumer(std::declval<value_type&>()))) {
     if (list_.empty())
-      return {false, false};
+      return {0, false};
     deficit_ += quantum;
-    long consumed = 0;
     auto ptr = next();
     if (ptr == nullptr)
-      return {false, false};
+      return {0, false};
+    size_t consumed = 0;
     do {
       auto consumer_res = consumer(*ptr);
       switch (consumer_res) {
@@ -193,7 +186,7 @@ public:
           cache_.push_back(ptr.release());
           if (list_.empty()) {
             deficit_ = 0;
-            return {consumed != 0, false};
+            return {consumed, false};
           }
           break;
         case task_result::resume:
@@ -201,7 +194,7 @@ public:
           flush_cache();
           if (list_.empty()) {
             deficit_ = 0;
-            return {consumed != 0, false};
+            return {consumed, false};
           }
           break;
         default:
@@ -209,15 +202,19 @@ public:
           flush_cache();
           if (list_.empty())
             deficit_ = 0;
-          return {consumed != 0, consumer_res == task_result::stop_all};
+          return {consumed, consumer_res == task_result::stop_all};
       }
       ptr = next();
     } while (ptr != nullptr);
-    return {consumed != 0, false};
+    return {consumed, false};
   }
 
   cache_type& cache() noexcept {
     return cache_;
+  }
+
+  list_type& items() noexcept {
+    return list_;
   }
 
   // -- insertion --------------------------------------------------------------

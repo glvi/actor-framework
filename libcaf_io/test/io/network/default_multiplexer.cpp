@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE io.network.default_multiplexer
 
 #include "caf/io/network/default_multiplexer.hpp"
 
-#include "caf/test/io_dsl.hpp"
+#include "io-test.hpp"
 
 #include <algorithm>
 #include <vector>
@@ -63,20 +49,20 @@ struct fixture {
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(default_multiplexer_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(doorman io_failure) {
-  CAF_MESSAGE("add doorman to server");
+  MESSAGE("add doorman to server");
   // The multiplexer adds a pipe reader on startup.
-  CAF_CHECK_EQUAL(server.mpx.num_socket_handlers(), 1u);
+  CHECK_EQ(server.mpx.num_socket_handlers(), 1u);
   auto doorman = unbox(server.mpx.new_tcp_doorman(0, nullptr, false));
   doorman->add_to_loop();
   server.mpx.handle_internal_events();
-  CAF_CHECK_EQUAL(server.mpx.num_socket_handlers(), 2u);
-  CAF_MESSAGE("trigger I/O failure in doorman");
+  CHECK_EQ(server.mpx.num_socket_handlers(), 2u);
+  MESSAGE("trigger I/O failure in doorman");
   doorman->io_failure(&server.mpx, io::network::operation::propagate_error);
   server.mpx.handle_internal_events();
-  CAF_CHECK_EQUAL(server.mpx.num_socket_handlers(), 1u);
+  CHECK_EQ(server.mpx.num_socket_handlers(), 1u);
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE ipv6_endpoint
 
 #include "caf/ipv6_endpoint.hpp"
 
-#include "caf/test/unit_test.hpp"
+#include "core-test.hpp"
 
 #include <cassert>
 #include <vector>
@@ -54,37 +40,36 @@ struct fixture {
   T roundtrip(T x) {
     byte_buffer buf;
     binary_serializer sink(sys, buf);
-    if (auto err = sink(x))
-      CAF_FAIL("serialization failed: " << sys.render(err));
+    if (!sink.apply(x))
+      CAF_FAIL("serialization failed: " << sink.get_error());
     binary_deserializer source(sys, make_span(buf));
     T y;
-    if (auto err = source(y))
-      CAF_FAIL("deserialization failed: " << sys.render(err));
+    if (!source.apply(y))
+      CAF_FAIL("serialization failed: " << source.get_error());
     return y;
   }
 };
 
-#define CHECK_TO_STRING(addr) CAF_CHECK_EQUAL(addr, to_string(addr##_ep))
+#define CHECK_TO_STRING(addr) CHECK_EQ(addr, to_string(addr##_ep))
 
 #define CHECK_COMPARISON(addr1, addr2)                                         \
-  CAF_CHECK_GREATER(addr2##_ep, addr1##_ep);                                   \
-  CAF_CHECK_GREATER_OR_EQUAL(addr2##_ep, addr1##_ep);                          \
-  CAF_CHECK_GREATER_OR_EQUAL(addr1##_ep, addr1##_ep);                          \
-  CAF_CHECK_GREATER_OR_EQUAL(addr2##_ep, addr2##_ep);                          \
-  CAF_CHECK_EQUAL(addr1##_ep, addr1##_ep);                                     \
-  CAF_CHECK_EQUAL(addr2##_ep, addr2##_ep);                                     \
-  CAF_CHECK_LESS_OR_EQUAL(addr1##_ep, addr2##_ep);                             \
-  CAF_CHECK_LESS_OR_EQUAL(addr1##_ep, addr1##_ep);                             \
-  CAF_CHECK_LESS_OR_EQUAL(addr2##_ep, addr2##_ep);                             \
-  CAF_CHECK_NOT_EQUAL(addr1##_ep, addr2##_ep);                                 \
-  CAF_CHECK_NOT_EQUAL(addr2##_ep, addr1##_ep);
+  CHECK_GT(addr2##_ep, addr1##_ep);                                            \
+  CHECK_GE(addr2##_ep, addr1##_ep);                                            \
+  CHECK_GE(addr1##_ep, addr1##_ep);                                            \
+  CHECK_GE(addr2##_ep, addr2##_ep);                                            \
+  CHECK_EQ(addr1##_ep, addr1##_ep);                                            \
+  CHECK_EQ(addr2##_ep, addr2##_ep);                                            \
+  CHECK_LE(addr1##_ep, addr2##_ep);                                            \
+  CHECK_LE(addr1##_ep, addr1##_ep);                                            \
+  CHECK_LE(addr2##_ep, addr2##_ep);                                            \
+  CHECK_NE(addr1##_ep, addr2##_ep);                                            \
+  CHECK_NE(addr2##_ep, addr1##_ep);
 
-#define CHECK_SERIALIZATION(addr)                                              \
-  CAF_CHECK_EQUAL(addr##_ep, roundtrip(addr##_ep))
+#define CHECK_SERIALIZATION(addr) CHECK_EQ(addr##_ep, roundtrip(addr##_ep))
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(comparison_scope, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(constructing assigning and hash_code) {
   const uint16_t port = 8888;
@@ -92,22 +77,22 @@ CAF_TEST(constructing assigning and hash_code) {
                                  0, 0, 0, 0, 0, 0, 0, 1};
   auto addr = ipv6_address{bytes};
   ipv6_endpoint ep1(addr, port);
-  CAF_CHECK_EQUAL(ep1.address(), addr);
-  CAF_CHECK_EQUAL(ep1.port(), port);
+  CHECK_EQ(ep1.address(), addr);
+  CHECK_EQ(ep1.port(), port);
   ipv6_endpoint ep2;
   ep2.address(addr);
   ep2.port(port);
-  CAF_CHECK_EQUAL(ep2.address(), addr);
-  CAF_CHECK_EQUAL(ep2.port(), port);
-  CAF_CHECK_EQUAL(ep1, ep2);
-  CAF_CHECK_EQUAL(ep1.hash_code(), ep2.hash_code());
+  CHECK_EQ(ep2.address(), addr);
+  CHECK_EQ(ep2.port(), port);
+  CHECK_EQ(ep1, ep2);
+  CHECK_EQ(ep1.hash_code(), ep2.hash_code());
 }
 
 CAF_TEST(comparison to IPv4) {
   ipv4_endpoint v4{ipv4_address({127, 0, 0, 1}), 8080};
   ipv6_endpoint v6{v4.address(), v4.port()};
-  CAF_CHECK_EQUAL(v4, v6);
-  CAF_CHECK_EQUAL(v6, v4);
+  CHECK_EQ(v4, v6);
+  CHECK_EQ(v6, v4);
 }
 
 CAF_TEST(to_string) {
@@ -153,4 +138,4 @@ CAF_TEST(serialization) {
   CHECK_SERIALIZATION("[4432::33:1]:999");
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

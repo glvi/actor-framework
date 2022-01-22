@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/io/middleman_actor_impl.hpp"
 
@@ -25,17 +11,16 @@
 #include "caf/actor.hpp"
 #include "caf/actor_proxy.hpp"
 #include "caf/actor_system_config.hpp"
+#include "caf/io/basp/header.hpp"
+#include "caf/io/basp_broker.hpp"
+#include "caf/io/network/default_multiplexer.hpp"
+#include "caf/io/network/interfaces.hpp"
+#include "caf/io/system_messages.hpp"
 #include "caf/logger.hpp"
 #include "caf/node_id.hpp"
 #include "caf/sec.hpp"
 #include "caf/send.hpp"
 #include "caf/typed_event_based_actor.hpp"
-
-#include "caf/io/basp_broker.hpp"
-#include "caf/io/system_messages.hpp"
-
-#include "caf/io/network/default_multiplexer.hpp"
-#include "caf/io/network/interfaces.hpp"
 
 namespace caf::io {
 
@@ -69,7 +54,7 @@ void middleman_actor_impl::on_exit() {
 }
 
 const char* middleman_actor_impl::name() const {
-  return "middleman_actor";
+  return "caf.system.middleman-actor";
 }
 
 auto middleman_actor_impl::make_behavior() -> behavior_type {
@@ -113,7 +98,7 @@ auto middleman_actor_impl::make_behavior() -> behavior_type {
       auto& ptr = *r;
       std::vector<response_promise> tmp{std::move(rp)};
       pending_.emplace(key, std::move(tmp));
-      request(broker_, infinite, connect_atom::value, std::move(ptr), port)
+      request(broker_, infinite, connect_atom_v, std::move(ptr), port)
         .then(
           [=](node_id& nid, strong_actor_ptr& addr, mpi_set& sigs) {
             auto i = pending_.find(key);
@@ -149,18 +134,45 @@ auto middleman_actor_impl::make_behavior() -> behavior_type {
       delegate(broker_, atm, p);
       return {};
     },
-    [=](spawn_atom atm, node_id& nid, std::string& str, message& msg,
-        std::set<std::string>& ifs) -> delegated<strong_actor_ptr> {
+    [=](spawn_atom, node_id& nid, std::string& name, message& args,
+        std::set<std::string>& ifs) -> result<strong_actor_ptr> {
       CAF_LOG_TRACE("");
-      delegate(broker_, forward_atom::value, nid, atom("SpawnServ"),
-               make_message(atm, std::move(str), std::move(msg),
+      if (!nid)
+        return make_error(sec::invalid_argument,
+                          "cannot spawn actors on invalid nodes");
+      if (name.empty())
+        return make_error(sec::invalid_argument,
+                          "cannot spawn actors without a type name");
+      if (nid == system().node()) {
+        if (auto res = system().spawn<actor>(name, std::move(args), nullptr,
+                                             true, &ifs))
+          return actor_cast<strong_actor_ptr>(std::move(*res));
+        else
+          return std::move(res.error());
+      }
+      // This local variable prevents linker errors (delegate forms an lvalue
+      // reference but spawn_server_id is constexpr).
+      auto id = basp::header::spawn_server_id;
+      delegate(broker_, forward_atom_v, nid, id,
+               make_message(spawn_atom_v, std::move(name), std::move(args),
                             std::move(ifs)));
-      return {};
+      return delegated<strong_actor_ptr>{};
     },
-    [=](get_atom atm,
-        node_id nid) -> delegated<node_id, std::string, uint16_t> {
+    [=](get_atom, group_atom, node_id& nid,
+        std::string& group_id) -> result<actor> {
       CAF_LOG_TRACE("");
-      delegate(broker_, atm, std::move(nid));
+      if (!nid)
+        return make_error(sec::invalid_argument,
+                          "cannot get group intermediaries from invalid nodes");
+      auto id = basp::header::config_server_id;
+      delegate(broker_, forward_atom_v, nid, id,
+               make_message(get_atom_v, group_atom_v, std::move(nid),
+                            std::move(group_id)));
+      return delegated<actor>{};
+    },
+    [=](get_atom, node_id& nid) -> delegated<node_id, std::string, uint16_t> {
+      CAF_LOG_TRACE("");
+      delegate(broker_, get_atom_v, std::move(nid));
       return {};
     },
   };
@@ -180,7 +192,7 @@ middleman_actor_impl::put(uint16_t port, strong_actor_ptr& whom, mpi_set& sigs,
     return std::move(res.error());
   auto& ptr = *res;
   actual_port = ptr->port();
-  anon_send(broker_, publish_atom::value, std::move(ptr), actual_port,
+  anon_send(broker_, publish_atom_v, std::move(ptr), actual_port,
             std::move(whom), std::move(sigs));
   return actual_port;
 }
@@ -199,7 +211,7 @@ middleman_actor_impl::put_udp(uint16_t port, strong_actor_ptr& whom,
     return std::move(res.error());
   auto& ptr = *res;
   actual_port = ptr->local_port();
-  anon_send(broker_, publish_udp_atom::value, std::move(ptr), actual_port,
+  anon_send(broker_, publish_udp_atom_v, std::move(ptr), actual_port,
             std::move(whom), std::move(sigs));
   return actual_port;
 }

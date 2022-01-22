@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE detail.serialized_size
 
 #include "caf/detail/serialized_size.hpp"
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
 
 #include <vector>
 
@@ -39,18 +25,18 @@ struct fixture : test_coordinator_fixture<> {
   size_t actual_size(const Ts&... xs) {
     byte_buffer buf;
     binary_serializer sink{sys, buf};
-    if (auto err = sink(xs...))
-      CAF_FAIL("failed to serialize data: " << sys.render(err));
+    if (!(sink.apply(xs) && ...))
+      CAF_FAIL("failed to serialize data: " << sink.get_error());
     return buf.size();
   }
 };
 
 } // namespace
 
-#define CHECK_SAME_SIZE(...)                                                   \
-  CAF_CHECK_EQUAL(serialized_size(sys, __VA_ARGS__), actual_size(__VA_ARGS__))
+#define CHECK_SAME_SIZE(value)                                                 \
+  CHECK_EQ(serialized_size(value), actual_size(value))
 
-CAF_TEST_FIXTURE_SCOPE(serialized_size_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(numbers) {
   CHECK_SAME_SIZE(int8_t{42});
@@ -77,4 +63,4 @@ CAF_TEST(messages) {
   CHECK_SAME_SIZE(make_message("hello", "world"));
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

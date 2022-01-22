@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/io/scribe.hpp"
 
@@ -65,10 +51,9 @@ void scribe::data_transferred(execution_unit* ctx, size_t written,
   if (detached())
     return;
   using transferred_t = data_transferred_msg;
-  using tmp_t = mailbox_element_vals<data_transferred_msg>;
-  tmp_t tmp{strong_actor_ptr{}, make_message_id(),
-            mailbox_element::forwarding_stack{},
-            transferred_t{hdl(), written, remaining}};
+  mailbox_element tmp{strong_actor_ptr{}, make_message_id(),
+                      mailbox_element::forwarding_stack{},
+                      make_message(transferred_t{hdl(), written, remaining})};
   invoke_mailbox_element_impl(ctx, tmp);
   // data_transferred_msg tmp{hdl(), written, remaining};
   // auto ptr = make_mailbox_element(nullptr, invalid_message_id, {}, tmp);

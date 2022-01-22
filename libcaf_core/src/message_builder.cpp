@@ -1,82 +1,98 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/message_builder.hpp"
 
-#include <vector>
-
-#include "caf/detail/dynamic_message_data.hpp"
-#include "caf/make_copy_on_write.hpp"
-#include "caf/message_handler.hpp"
+#include "caf/detail/meta_object.hpp"
+#include "caf/raise_error.hpp"
 
 namespace caf {
 
-message_builder::message_builder() {
-  init();
-}
+namespace {
 
-message_builder::~message_builder() {
-  // nop
-}
+using namespace detail;
 
-void message_builder::init() {
-  // this should really be done by delegating
-  // constructors, but we want to support
-  // some compilers without that feature...
-  data_ = make_copy_on_write<detail::dynamic_message_data>();
-}
+enum to_msg_policy {
+  move_msg,
+  copy_msg,
+};
 
-void message_builder::clear() {
-  if (data_->unique())
-    data_.unshared().clear();
+template <to_msg_policy Policy, class TypeListBuilder, class ElementVector>
+message to_message_impl(size_t storage_size, TypeListBuilder& types,
+                        ElementVector& elements) {
+  if (storage_size == 0)
+    return message{};
+  auto vptr = malloc(sizeof(message_data) + storage_size);
+  if (vptr == nullptr)
+    CAF_RAISE_ERROR(std::bad_alloc, "bad_alloc");
+  message_data* raw_ptr;
+  if constexpr (Policy == move_msg)
+    raw_ptr = new (vptr) message_data(types.move_to_list());
   else
-    init();
+    raw_ptr = new (vptr) message_data(types.copy_to_list());
+  intrusive_cow_ptr<message_data> ptr{raw_ptr, false};
+  auto storage = raw_ptr->storage();
+  for (auto& element : elements)
+    if constexpr (Policy == move_msg)
+      storage = element->move_init(storage);
+    else
+      storage = element->copy_init(storage);
+  return message{std::move(ptr)};
 }
 
-size_t message_builder::size() const {
-  return data_->size();
-}
+class message_builder_element_adapter final : public message_builder_element {
+public:
+  message_builder_element_adapter(message src, size_t index)
+    : src_(std::move(src)), index_(index) {
+    // nop
+  }
 
-bool message_builder::empty() const {
-  return size() == 0;
-}
+  byte* copy_init(byte* storage) const override {
+    auto* meta = global_meta_object(src_.type_at(index_));
+    meta->copy_construct(storage, src_.data().at(index_));
+    return storage + meta->padded_size;
+  }
 
-message_builder& message_builder::emplace(type_erased_value_ptr x) {
-  data_.unshared().append(std::move(x));
+  byte* move_init(byte* storage) override {
+    return copy_init(storage);
+  }
+
+private:
+  message src_;
+  size_t index_;
+};
+
+} // namespace
+
+message_builder& message_builder::append_from(const caf::message& msg,
+                                              size_t first, size_t n) {
+  if (!msg || first >= msg.size())
+    return *this;
+  auto end = std::min(msg.size(), first + n);
+  for (size_t index = first; index < end; ++index) {
+    auto tid = msg.type_at(index);
+    auto* meta = detail::global_meta_object(tid);
+    storage_size_ += meta->padded_size;
+    types_.push_back(tid);
+    elements_.emplace_back(
+      std::make_unique<message_builder_element_adapter>(msg, index));
+  }
   return *this;
 }
 
+void message_builder::clear() noexcept {
+  storage_size_ = 0;
+  types_.clear();
+  elements_.clear();
+}
+
 message message_builder::to_message() const {
-  return message{data_};
+  return to_message_impl<copy_msg>(storage_size_, types_, elements_);
 }
 
 message message_builder::move_to_message() {
-  return message{std::move(data_)};
-}
-
-optional<message> message_builder::apply(message_handler handler) {
-  // Avoid detaching of data_ by moving the data to a message object,
-  // calling message::apply and moving the data back.
-  auto msg = move_to_message();
-  auto res = msg.apply(std::move(handler));
-  data_.reset(static_cast<detail::dynamic_message_data*>(msg.vals().release()),
-              false);
-  return res;
+  return to_message_impl<move_msg>(storage_size_, types_, elements_);
 }
 
 } // namespace caf

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -26,29 +12,20 @@
 #include "caf/actor_system.hpp"
 #include "caf/composed_type.hpp"
 #include "caf/decorator/sequencer.hpp"
-#include "caf/detail/mpi_splice.hpp"
+#include "caf/fwd.hpp"
 #include "caf/intrusive_ptr.hpp"
 #include "caf/make_actor.hpp"
 #include "caf/replies_to.hpp"
 #include "caf/stateful_actor.hpp"
+#include "caf/type_id_list.hpp"
+#include "caf/typed_actor_view_base.hpp"
 #include "caf/typed_behavior.hpp"
 #include "caf/typed_response_promise.hpp"
 
 namespace caf {
 
-template <class... Sigs>
-class typed_event_based_actor;
-
-namespace io {
-
-template <class... Sigs>
-class typed_broker;
-
-} // namespace io
-
 /// Identifies a statically typed actor.
-/// @tparam Sigs Signature of this actor as `replies_to<...>::with<...>`
-///              parameter pack.
+/// @tparam Sigs Function signatures for all accepted messages.
 template <class... Sigs>
 class typed_actor : detail::comparable<typed_actor<Sigs...>>,
                     detail::comparable<typed_actor<Sigs...>, actor>,
@@ -57,14 +34,15 @@ class typed_actor : detail::comparable<typed_actor<Sigs...>>,
 public:
   static_assert(sizeof...(Sigs) > 0, "Empty typed actor handle");
 
+  static_assert((detail::is_normalized_signature_v<Sigs> && ...),
+                "Function signatures must be normalized to the format "
+                "'result<Out...>(In...)', no qualifiers or references allowed");
+
   // -- friend types that need access to private ctors
   friend class local_actor;
 
   template <class>
   friend class data_processor;
-
-  template <class>
-  friend class detail::type_erased_value_impl;
 
   template <class...>
   friend class typed_actor;
@@ -75,6 +53,9 @@ public:
 
   // tell actor_cast which semantic this type uses
   static constexpr bool has_weak_ptr_semantics = false;
+
+  /// Stores the template parameter pack.
+  using signatures = detail::type_list<Sigs...>;
 
   /// Creates a new `typed_actor` type by extending this one with `Es...`.
   template <class... Es>
@@ -90,28 +71,33 @@ public:
   /// for their behavior stack.
   using behavior_type = typed_behavior<Sigs...>;
 
-  /// Identifies pointers to instances of this kind of actor.
-  using pointer = typed_event_based_actor<Sigs...>*;
+  /// The default, event-based type for implementing this messaging interface.
+  using impl = typed_event_based_actor<Sigs...>;
 
-  /// Identifies the base class for this kind of actor.
-  using base = typed_event_based_actor<Sigs...>;
+  /// Identifies pointers to instances of this kind of actor.
+  using pointer = impl*;
+
+  /// A view to an actor that implements this messaging interface without
+  /// knowledge of the actual type.
+  using pointer_view = typed_actor_pointer<Sigs...>;
+
+  /// A class type suitable as base type class-based implementations.
+  using base = impl;
+
+  /// The default, event-based type for implementing this messaging interface as
+  /// a stateful actor.
+  template <class State>
+  using stateful_impl = stateful_actor<State, impl>;
+
+  /// Convenience alias for `stateful_impl<State>*`.
+  template <class State>
+  using stateful_pointer = stateful_impl<State>*;
 
   /// Identifies pointers to brokers implementing this interface.
   using broker_pointer = io::typed_broker<Sigs...>*;
 
   /// Identifies the base class of brokers implementing this interface.
   using broker_base = io::typed_broker<Sigs...>;
-
-  /// Stores the template parameter pack.
-  using signatures = detail::type_list<Sigs...>;
-
-  /// Identifies the base class for this kind of actor with actor.
-  template <class State>
-  using stateful_base = stateful_actor<State, base>;
-
-  /// Identifies the base class for this kind of actor with actor.
-  template <class State>
-  using stateful_pointer = stateful_actor<State, base>*;
 
   /// Identifies the broker_base class for this kind of actor with actor.
   template <class State>
@@ -144,6 +130,15 @@ public:
     CAF_ASSERT(ptr != nullptr);
   }
 
+  // Enable `handle_type{self}` for typed actor views.
+  template <class T, class = std::enable_if_t<
+                       std::is_base_of<typed_actor_view_base, T>::value>>
+  explicit typed_actor(T ptr) : ptr_(ptr.ctrl()) {
+    static_assert(
+      detail::tl_subset_of<signatures, typename T::signatures>::value,
+      "Cannot assign T to incompatible handle type");
+  }
+
   template <class... Ts>
   typed_actor& operator=(const typed_actor<Ts...>& other) {
     static_assert(
@@ -153,18 +148,18 @@ public:
     return *this;
   }
 
-  inline typed_actor& operator=(std::nullptr_t) {
+  typed_actor& operator=(std::nullptr_t) {
     ptr_.reset();
     return *this;
   }
 
   /// Queries whether this actor handle is valid.
-  inline explicit operator bool() const {
+  explicit operator bool() const {
     return static_cast<bool>(ptr_);
   }
 
   /// Queries whether this actor handle is invalid.
-  inline bool operator!() const {
+  bool operator!() const {
     return !ptr_;
   }
 
@@ -184,7 +179,7 @@ public:
   }
 
   /// Returns the hosting actor system.
-  inline actor_system& home_system() const noexcept {
+  actor_system& home_system() const noexcept {
     return *ptr_->home_system;
   }
 
@@ -223,23 +218,27 @@ public:
     // nop
   }
 
-  friend inline std::string to_string(const typed_actor& x) {
+  friend std::string to_string(const typed_actor& x) {
     return to_string(x.ptr_);
   }
 
-  friend inline void append_to_string(std::string& x, const typed_actor& y) {
+  friend void append_to_string(std::string& x, const typed_actor& y) {
     return append_to_string(x, y.ptr_);
   }
 
   template <class Inspector>
-  friend typename Inspector::result_type inspect(Inspector& f, typed_actor& x) {
-    return f(x.ptr_);
+  friend bool inspect(Inspector& f, typed_actor& x) {
+    return inspect(f, x.ptr_);
   }
 
   /// Releases the reference held by handle `x`. Using the
   /// handle after invalidating it is undefined behavior.
   friend void destroy(typed_actor& x) {
     x.ptr_.reset();
+  }
+
+  static std::array<type_id_list, sizeof...(Sigs)> allowed_inputs() {
+    return {{detail::make_argument_type_id_list<Sigs>()...}};
   }
 
   /// @endcond

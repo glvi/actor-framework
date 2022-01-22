@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -65,33 +51,33 @@ public:
 
   /// Returns the bits of the IP address in a single integer arranged in network
   /// byte order.
-  inline uint32_t bits() const noexcept {
+  uint32_t bits() const noexcept {
     return bits_;
   }
 
   /// Sets all bits of the IP address with a single 32-bit write. Expects
   /// argument in network byte order.
-  inline void bits(uint32_t value) noexcept {
+  void bits(uint32_t value) noexcept {
     bits_ = value;
   }
 
   /// Returns the bytes of the IP address as array.
-  inline array_type& bytes() noexcept {
+  array_type& bytes() noexcept {
     return bytes_;
   }
 
   /// Returns the bytes of the IP address as array.
-  inline const array_type& bytes() const noexcept {
+  const array_type& bytes() const noexcept {
     return bytes_;
   }
 
   /// Alias for `bytes()`.
-  inline array_type& data() noexcept {
+  array_type& data() noexcept {
     return bytes_;
   }
 
   /// Alias for `bytes()`.
-  inline const array_type& data() const noexcept {
+  const array_type& data() const noexcept {
     return bytes_;
   }
 
@@ -104,9 +90,8 @@ public:
   // -- inspection -------------------------------------------------------------
 
   template <class Inspector>
-  friend typename Inspector::result_type
-  inspect(Inspector& f, ipv4_address& x) {
-    return f(x.bits_);
+  friend bool inspect(Inspector& f, ipv4_address& x) {
+    return f.object(x).fields(f.field("value", x.bits_));
   }
 
 private:

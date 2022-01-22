@@ -1,31 +1,20 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <cstdint>
 #include <string>
+#include <type_traits>
 
+#include "caf/default_enum_inspect.hpp"
 #include "caf/detail/io_export.hpp"
 
 namespace caf::io::basp {
 
 /// @addtogroup BASP
+/// @{
 
 /// Describes the first header field of a BASP message and determines the
 /// interpretation of the other header fields.
@@ -73,8 +62,17 @@ enum class message_type : uint8_t {
   heartbeat = 0x06,
 };
 
-/// @relates message_type
 CAF_IO_EXPORT std::string to_string(message_type);
+
+CAF_IO_EXPORT bool from_string(string_view, message_type&);
+
+CAF_IO_EXPORT bool from_integer(std::underlying_type_t<message_type>,
+                                message_type&);
+
+template <class Inspector>
+bool inspect(Inspector& f, message_type& x) {
+  return default_enum_inspect(f, x);
+}
 
 /// @}
 

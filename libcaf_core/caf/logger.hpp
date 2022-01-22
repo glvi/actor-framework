@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -28,7 +14,6 @@
 #include <unordered_map>
 
 #include "caf/abstract_actor.hpp"
-#include "caf/atom.hpp"
 #include "caf/config.hpp"
 #include "caf/deep_to_string.hpp"
 #include "caf/detail/arg_wrapper.hpp"
@@ -45,7 +30,6 @@
 #include "caf/ref_counted.hpp"
 #include "caf/string_view.hpp"
 #include "caf/timestamp.hpp"
-#include "caf/type_nr.hpp"
 #include "caf/unifyn.hpp"
 
 /*
@@ -115,7 +99,7 @@ public:
 
     event& operator=(const event&) = default;
 
-    event(unsigned lvl, unsigned line, atom_value cat, string_view full_fun,
+    event(unsigned lvl, unsigned line, string_view cat, string_view full_fun,
           string_view fun, string_view fn, std::string msg, std::thread::id t,
           actor_id a, timestamp ts);
 
@@ -128,7 +112,7 @@ public:
     unsigned line_number;
 
     /// Name of the category (component) logging the event.
-    atom_value category_name;
+    string_view category_name;
 
     /// Name of the current function as reported by `__PRETTY_FUNCTION__`.
     string_view pretty_fun;
@@ -152,7 +136,6 @@ public:
     timestamp tstamp;
   };
 
-  /// Internal representation of format string entities.
   enum field_type {
     invalid_field,
     category_field,
@@ -223,14 +206,14 @@ public:
   // -- properties -------------------------------------------------------------
 
   /// Returns the ID of the actor currently associated to the calling thread.
-  actor_id thread_local_aid();
+  static actor_id thread_local_aid();
 
   /// Associates an actor ID to the calling thread and returns the last value.
-  actor_id thread_local_aid(actor_id aid);
+  static actor_id thread_local_aid(actor_id aid);
 
   /// Returns whether the logger is configured to accept input for given
   /// component and log level.
-  bool accepts(unsigned level, atom_value component_name);
+  bool accepts(unsigned level, string_view component_name);
 
   /// Returns the output format used for the log file.
   const line_format& file_format() const {
@@ -261,9 +244,6 @@ public:
 
   /// Renders the name of a fully qualified function.
   static void render_fun_name(std::ostream& out, const event& x);
-
-  /// Renders the difference between `t0` and `tn` in milliseconds.
-  static void render_time_diff(std::ostream& out, timestamp t0, timestamp tn);
 
   /// Renders the date of `x` in ISO 8601 format.
   static void render_date(std::ostream& out, timestamp x);
@@ -346,8 +326,15 @@ private:
   // Configures verbosity and output generation.
   config cfg_;
 
-  // Filters events by component name.
-  std::vector<atom_value> component_blacklist;
+  // Filters events by component name before enqueuing a log event. Intersection
+  // of file_filter_ and console_filter_ if both outputs are enabled.
+  std::vector<std::string> global_filter_;
+
+  // Filters events by component name for file output.
+  std::vector<std::string> file_filter_;
+
+  // Filters events by component name for console output.
+  std::vector<std::string> console_filter_;
 
   // References the parent system.
   actor_system& system_;
@@ -377,7 +364,6 @@ private:
   std::thread thread_;
 };
 
-/// @relates logger::field_type
 CAF_CORE_EXPORT std::string to_string(logger::field_type x);
 
 /// @relates logger::field
@@ -414,8 +400,8 @@ CAF_CORE_EXPORT bool operator==(const logger::field& x, const logger::field& y);
 #define CAF_CAT(a, b) a##b
 
 #define CAF_LOG_MAKE_EVENT(aid, component, loglvl, message)                    \
-  ::caf::logger::event(loglvl, __LINE__, caf::atom(component), CAF_PRETTY_FUN, \
-                       __func__, caf::logger::skip_path(__FILE__),             \
+  ::caf::logger::event(loglvl, __LINE__, component, CAF_PRETTY_FUN, __func__,  \
+                       caf::logger::skip_path(__FILE__),                       \
                        (::caf::logger::line_builder{} << message).get(),       \
                        ::std::this_thread::get_id(), aid,                      \
                        ::caf::make_timestamp())
@@ -436,31 +422,22 @@ CAF_CORE_EXPORT bool operator==(const logger::field& x, const logger::field& y);
   do {                                                                         \
     auto CAF_UNIFYN(caf_logger) = caf::logger::current_logger();               \
     if (CAF_UNIFYN(caf_logger) != nullptr                                      \
-        && CAF_UNIFYN(caf_logger)->accepts(loglvl, caf::atom(component)))      \
+        && CAF_UNIFYN(caf_logger)->accepts(loglvl, component))                 \
       CAF_UNIFYN(caf_logger)                                                   \
-        ->log(CAF_LOG_MAKE_EVENT(CAF_UNIFYN(caf_logger)->thread_local_aid(),   \
-                                 component, loglvl, message));                 \
+        ->log(CAF_LOG_MAKE_EVENT(caf::logger::thread_local_aid(), component,   \
+                                 loglvl, message));                            \
   } while (false)
 
 #define CAF_PUSH_AID(aarg)                                                     \
-  auto CAF_UNIFYN(caf_tmp_ptr) = caf::logger::current_logger();                \
-  caf::actor_id CAF_UNIFYN(caf_aid_tmp) = 0;                                   \
-  if (CAF_UNIFYN(caf_tmp_ptr))                                                 \
-    CAF_UNIFYN(caf_aid_tmp) = CAF_UNIFYN(caf_tmp_ptr)->thread_local_aid(aarg); \
-  auto CAF_UNIFYN(aid_aid_tmp_guard) = caf::detail::make_scope_guard([=] {     \
-    auto CAF_UNIFYN(caf_tmp2_ptr) = caf::logger::current_logger();             \
-    if (CAF_UNIFYN(caf_tmp2_ptr))                                              \
-      CAF_UNIFYN(caf_tmp2_ptr)->thread_local_aid(CAF_UNIFYN(caf_aid_tmp));     \
-  })
+  caf::actor_id CAF_UNIFYN(caf_aid_tmp) = caf::logger::thread_local_aid(aarg); \
+  auto CAF_UNIFYN(caf_aid_tmp_guard) = caf::detail::make_scope_guard(          \
+    [=] { caf::logger::thread_local_aid(CAF_UNIFYN(caf_aid_tmp)); })
 
 #define CAF_PUSH_AID_FROM_PTR(some_ptr)                                        \
   auto CAF_UNIFYN(caf_aid_ptr) = some_ptr;                                     \
   CAF_PUSH_AID(CAF_UNIFYN(caf_aid_ptr) ? CAF_UNIFYN(caf_aid_ptr)->id() : 0)
 
-#define CAF_SET_AID(aid_arg)                                                   \
-  (caf::logger::current_logger()                                               \
-     ? caf::logger::current_logger()->thread_local_aid(aid_arg)                \
-     : 0)
+#define CAF_SET_AID(aid_arg) caf::logger::thread_local_aid(aid_arg)
 
 #define CAF_SET_LOGGER_SYS(ptr) caf::logger::set_current_actor_system(ptr)
 
@@ -493,8 +470,10 @@ CAF_CORE_EXPORT bool operator==(const logger::field& x, const logger::field& y);
     CAF_LOG_IMPL(CAF_LOG_COMPONENT, CAF_LOG_LEVEL_WARNING, output)
 #endif
 
-#define CAF_LOG_ERROR(output)                                                  \
-  CAF_LOG_IMPL(CAF_LOG_COMPONENT, CAF_LOG_LEVEL_ERROR, output)
+#if CAF_LOG_LEVEL >= CAF_LOG_LEVEL_ERROR
+#  define CAF_LOG_ERROR(output)                                                \
+    CAF_LOG_IMPL(CAF_LOG_COMPONENT, CAF_LOG_LEVEL_ERROR, output)
+#endif
 
 #ifndef CAF_LOG_INFO
 #  define CAF_LOG_INFO(output) CAF_VOID_STMT

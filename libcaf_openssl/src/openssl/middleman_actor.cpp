@@ -1,22 +1,16 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/io/middleman_actor.hpp"
+
+#ifdef CAF_WINDOWS
+#  include <winsock2.h>
+#  include <ws2tcpip.h> // socket_size_type, etc. (MSVC20xx)
+#else
+#  include <sys/socket.h>
+#  include <sys/types.h>
+#endif
 
 #include <stdexcept>
 #include <tuple>
@@ -25,6 +19,7 @@
 #include "caf/actor.hpp"
 #include "caf/actor_proxy.hpp"
 #include "caf/actor_system_config.hpp"
+#include "caf/detail/socket_guard.hpp"
 #include "caf/logger.hpp"
 #include "caf/node_id.hpp"
 #include "caf/sec.hpp"
@@ -40,15 +35,30 @@
 #include "caf/io/network/interfaces.hpp"
 #include "caf/io/network/stream_impl.hpp"
 
-#include "caf/openssl/session.hpp"
-
 #ifdef CAF_WINDOWS
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif // CAF_WINDOWS
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif // NOMINMAX
+#  ifdef CAF_MINGW
+#    undef _WIN32_WINNT
+#    undef WINVER
+#    define _WIN32_WINNT WindowsVista
+#    define WINVER WindowsVista
+#    include <w32api.h>
+#  endif // CAF_MINGW
+#  include <windows.h>
 #  include <winsock2.h>
-#  include <ws2tcpip.h> // socket_size_type, etc. (MSVC20xx)
+#  include <ws2ipdef.h>
+#  include <ws2tcpip.h>
 #else
 #  include <sys/socket.h>
 #  include <sys/types.h>
 #endif
+
+#include "caf/openssl/session.hpp"
 
 namespace caf::openssl {
 
@@ -201,6 +211,7 @@ public:
       return false;
     auto& dm = acceptor_.backend();
     auto fd = acceptor_.accepted_socket();
+    detail::socket_guard sguard{fd};
     io::network::nonblocking(fd, true);
     auto sssn = make_session(parent()->system(), fd, true);
     if (sssn == nullptr) {
@@ -208,6 +219,7 @@ public:
       return false;
     }
     auto scrb = make_counted<scribe_impl>(dm, fd, std::move(sssn));
+    sguard.release(); // The scribe claims ownership of the socket.
     auto hdl = scrb->hdl();
     parent()->add_scribe(std::move(scrb));
     return doorman::new_connection(&dm, hdl);
@@ -261,7 +273,7 @@ private:
 } // namespace
 
 io::middleman_actor make_middleman_actor(actor_system& sys, actor db) {
-  return !get_or(sys.config(), "middleman.attach-utility-actors", false)
+  return !get_or(sys.config(), "caf.middleman.attach-utility-actors", false)
            ? sys.spawn<middleman_actor_impl, detached + hidden>(std::move(db))
            : sys.spawn<middleman_actor_impl, hidden>(std::move(db));
 }

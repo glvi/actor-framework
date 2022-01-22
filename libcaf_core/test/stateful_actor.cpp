@@ -1,52 +1,32 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
-
-#include "caf/config.hpp"
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE stateful_actor
-#include "caf/test/unit_test.hpp"
 
-#include "caf/all.hpp"
+#include "caf/stateful_actor.hpp"
 
-#define ERROR_HANDLER                                                          \
-  [&](error& err) { CAF_FAIL(system.render(err)); }
+#include "core-test.hpp"
 
-using namespace std;
+#include "caf/event_based_actor.hpp"
+
 using namespace caf;
+
+using namespace std::string_literals;
 
 namespace {
 
-using typed_adder_actor = typed_actor<reacts_to<add_atom, int>,
-                                      replies_to<get_atom>::with<int>>;
+using typed_adder_actor
+  = typed_actor<result<void>(add_atom, int), result<int>(get_atom)>;
 
 struct counter {
   int value = 0;
-  local_actor* self_;
 };
 
 behavior adder(stateful_actor<counter>* self) {
   return {
-    [=](add_atom, int x) {
-      self->state.value += x;
-    },
-    [=](get_atom) {
-      return self->state.value;
-    }
+    [=](add_atom, int x) { self->state.value += x; },
+    [=](get_atom) { return self->state.value; },
   };
 }
 
@@ -64,18 +44,14 @@ public:
 typed_adder_actor::behavior_type
 typed_adder(typed_adder_actor::stateful_pointer<counter> self) {
   return {
-    [=](add_atom, int x) {
-      self->state.value += x;
-    },
-    [=](get_atom) {
-      return self->state.value;
-    }
+    [=](add_atom, int x) { self->state.value += x; },
+    [=](get_atom) { return self->state.value; },
   };
 }
 
-class typed_adder_class : public typed_adder_actor::stateful_base<counter> {
+class typed_adder_class : public typed_adder_actor::stateful_impl<counter> {
 public:
-  using super = typed_adder_actor::stateful_base<counter>;
+  using super = typed_adder_actor::stateful_impl<counter>;
 
   typed_adder_class(actor_config& cfg) : super(cfg) {
     // nop
@@ -86,86 +62,172 @@ public:
   }
 };
 
-struct fixture {
-  actor_system_config cfg;
-  actor_system system;
-
-  fixture() : system(cfg) {
+struct fixture : test_coordinator_fixture<> {
+  fixture() {
     // nop
   }
 
   template <class ActorUnderTest>
   void test_adder(ActorUnderTest aut) {
-    scoped_actor self{system};
-    self->send(aut, add_atom::value, 7);
-    self->send(aut, add_atom::value, 4);
-    self->send(aut, add_atom::value, 9);
-    self->request(aut, infinite, get_atom::value).receive(
-      [](int x) {
-        CAF_CHECK_EQUAL(x, 20);
-      },
-      ERROR_HANDLER
-    );
+    inject((add_atom, int), from(self).to(aut).with(add_atom_v, 7));
+    inject((add_atom, int), from(self).to(aut).with(add_atom_v, 4));
+    inject((add_atom, int), from(self).to(aut).with(add_atom_v, 9));
+    inject((get_atom), from(self).to(aut).with(get_atom_v));
+    expect((int), from(aut).to(self).with(20));
   }
 
   template <class State>
   void test_name(const char* expected) {
-    auto aut = system.spawn([](stateful_actor<State>* self) -> behavior {
-      return [=](get_atom) {
-        self->quit();
-        return self->name();
+    auto aut = sys.spawn([](stateful_actor<State>* self) -> behavior {
+      return {
+        [=](get_atom) {
+          self->quit();
+          return self->name();
+        },
       };
     });
-    scoped_actor self{system};
-    self->request(aut, infinite, get_atom::value).receive(
-      [&](const string& str) {
-        CAF_CHECK_EQUAL(str, expected);
-      },
-      ERROR_HANDLER
-    );
+    inject((get_atom), from(self).to(aut).with(get_atom_v));
+    expect((std::string), from(aut).to(self).with(expected));
   }
 };
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(dynamic_stateful_actor_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
-CAF_TEST(dynamic_stateful_actor) {
-  CAF_REQUIRE(monitored + monitored == monitored);
-  test_adder(system.spawn(adder));
+CAF_TEST(stateful actors can be dynamically typed) {
+  test_adder(sys.spawn(adder));
+  test_adder(sys.spawn<typed_adder_class>());
 }
 
-CAF_TEST(typed_stateful_actor) {
-  test_adder(system.spawn(typed_adder));
+CAF_TEST(stateful actors can be statically typed) {
+  test_adder(sys.spawn(typed_adder));
+  test_adder(sys.spawn<adder_class>());
 }
 
-CAF_TEST(dynamic_stateful_actor_class) {
-  test_adder(system.spawn<adder_class>());
-}
-
-CAF_TEST(typed_stateful_actor_class) {
-  test_adder(system.spawn<typed_adder_class>());
-}
-
-CAF_TEST(no_name) {
+CAF_TEST(stateful actors without explicit name use the name of the parent) {
   struct state {
     // empty
   };
-  test_name<state>("scheduled_actor");
+  test_name<state>("user.scheduled-actor");
 }
 
-CAF_TEST(char_name) {
-  struct state {
-    const char* name = "testee";
+namespace {
+
+struct named_state {
+  static inline const char* name = "testee";
+};
+
+} // namespace
+
+CAF_TEST(states with static C string names override the default name) {
+  test_name<named_state>("testee");
+}
+
+namespace {
+
+int32_t add_operation(int32_t x, int32_t y) {
+  return x + y;
+}
+
+} // namespace
+
+CAF_TEST(states can accept constructor arguments and provide a behavior) {
+  struct state_type {
+    using operation_type = int32_t (*)(int32_t, int32_t);
+    int32_t x;
+    int32_t y;
+    operation_type f;
+    state_type(int32_t x, int32_t y, operation_type f) : x(x), y(y), f(f) {
+      // nop
+    }
+    behavior make_behavior() {
+      return {
+        [=](int32_t x, int32_t y) {
+          this->x = x;
+          this->y = y;
+        },
+        [=](get_atom) { return f(x, y); },
+      };
+    }
   };
-  test_name<state>("testee");
+  using actor_type = stateful_actor<state_type>;
+  auto testee = sys.spawn<actor_type>(10, 20, add_operation);
+  auto& state = deref<actor_type>(testee).state;
+  CHECK_EQ(state.x, 10);
+  CHECK_EQ(state.y, 20);
+  inject((get_atom), from(self).to(testee).with(get_atom_v));
+  expect((int32_t), from(testee).to(self).with(30));
+  inject((int32_t, int32_t), to(testee).with(1, 2));
+  CHECK_EQ(state.x, 1);
+  CHECK_EQ(state.y, 2);
+  inject((get_atom), from(self).to(testee).with(get_atom_v));
+  expect((int32_t), from(testee).to(self).with(3));
 }
 
-CAF_TEST(string_name) {
-  struct state {
-    string name = "testee2";
+CAF_TEST(states optionally take the self pointer as first argument) {
+  struct state_type : named_state {
+    event_based_actor* self;
+    int x;
+    state_type(event_based_actor* self, int x) : self(self), x(x) {
+      // nop
+    }
+    behavior make_behavior() {
+      return {
+        [=](get_atom) { return self->name(); },
+      };
+    }
   };
-  test_name<state>("testee2");
+  using actor_type = stateful_actor<state_type>;
+  auto testee = sys.spawn<actor_type>(10);
+  auto& state = deref<actor_type>(testee).state;
+  CHECK(state.self == &deref<actor_type>(testee));
+  CHECK_EQ(state.x, 10);
+  inject((get_atom), from(self).to(testee).with(get_atom_v));
+  expect((std::string), from(testee).to(self).with("testee"s));
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+CAF_TEST(typed actors can use typed_actor_pointer as self pointer) {
+  struct state_type : named_state {
+    using self_pointer = typed_adder_actor::pointer_view;
+    self_pointer self;
+    int value;
+    state_type(self_pointer self, int x) : self(self), value(x) {
+      // nop
+    }
+    auto make_behavior() {
+      return make_typed_behavior([=](add_atom, int x) { value += x; },
+                                 [=](get_atom) { return value; });
+    }
+  };
+  using actor_type = typed_adder_actor::stateful_impl<state_type>;
+  auto testee = sys.spawn<actor_type>(10);
+  auto& state = deref<actor_type>(testee).state;
+  CHECK(state.self == &deref<actor_type>(testee));
+  CHECK_EQ(state.value, 10);
+  inject((add_atom, int), from(self).to(testee).with(add_atom_v, 1));
+  inject((get_atom), from(self).to(testee).with(get_atom_v));
+  expect((int), from(testee).to(self).with(11));
+}
+
+CAF_TEST(returned behaviors take precedence over make_behavior in the state) {
+  struct state_type : named_state {
+    behavior make_behavior() {
+      CAF_LOG_TRACE("");
+      return {
+        [](int32_t x, int32_t y) { return x - y; },
+      };
+    }
+  };
+  auto fun = [](stateful_actor<state_type>*, int32_t num) -> behavior {
+    CAF_LOG_TRACE(CAF_ARG(num));
+    return {
+      [num](int32_t x, int32_t y) { return x + y + num; },
+    };
+  };
+  auto testee = sys.spawn<lazy_init>(fun, 10);
+  inject((int32_t, int32_t), from(self).to(testee).with(1, 2));
+  expect((int32_t), from(testee).to(self).with(13));
+}
+
+END_FIXTURE_SCOPE()

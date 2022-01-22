@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE uri
 
 #include "caf/uri.hpp"
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
 
 #include "caf/byte_buffer.hpp"
 #include "caf/ipv4_address.hpp"
@@ -30,9 +16,11 @@ using namespace caf;
 
 namespace {
 
-struct authority_separator_t {} authority_separator;
+struct authority_separator_t {
+} authority_separator;
 
-struct path_separator_t {} path_separator;
+struct path_separator_t {
+} path_separator;
 
 struct uri_str_builder {
   std::string res;
@@ -74,7 +62,7 @@ struct uri_str_builder {
   }
 
   uri_str_builder& host(ip_address addr) {
-    return add(authority_separator, '[', to_string(addr),  ']');
+    return add(authority_separator, '[', to_string(addr), ']');
   }
 
   uri_str_builder& port(uint16_t value) {
@@ -133,56 +121,62 @@ struct fixture {
   byte_buffer serialize(uri x) {
     byte_buffer buf;
     binary_serializer sink{nullptr, buf};
-    if (auto err = sink(x))
-      CAF_FAIL("unable to serialize " << x << ": " << to_string(err));
+    if (!sink.apply(x))
+      CAF_FAIL("unable to serialize " << x << ": " << sink.get_error());
     return buf;
   }
 
   uri deserialize(byte_buffer buf) {
     uri result;
     binary_deserializer source{nullptr, buf};
-    if (auto err = source(result))
-      CAF_FAIL("unable to deserialize from byte_buffer: " << to_string(err));
+    if (!source.apply(result))
+      CAF_FAIL("unable to deserialize from buffer: " << source.get_error());
     return result;
   }
 };
 
-struct me_t {} me;
+struct me_t {
+} me;
 
 template <class T>
 T& operator<<(T& builder, me_t) {
   return builder.userinfo("me");
 }
 
-struct node_t {} node;
+struct node_t {
+} node;
 
 template <class T>
 T& operator<<(T& builder, node_t) {
   return builder.host("node");
 }
 
-struct port80_t {} port80;
+struct port80_t {
+} port80;
 
 template <class T>
 T& operator<<(T& builder, port80_t) {
   return builder.port(80);
 }
 
-struct file_t {} file;
+struct file_t {
+} file;
 
 template <class T>
 T& operator<<(T& builder, file_t) {
   return builder.path("file");
 }
 
-struct frag_t {} frag;
+struct frag_t {
+} frag;
 
 template <class T>
 T& operator<<(T& builder, frag_t) {
   return builder.fragment("42");
 }
 
-struct kvp_t {} kvp;
+struct kvp_t {
+} kvp;
 
 template <class T>
 T& operator<<(T& builder, kvp_t) {
@@ -197,7 +191,7 @@ uri operator*(uri_builder& builder) {
   return result;
 }
 
-uri operator "" _u(const char* cstr, size_t cstr_len) {
+uri operator"" _u(const char* cstr, size_t cstr_len) {
   uri result;
   string_view str{cstr, cstr_len};
   auto err = parse(str, result);
@@ -206,30 +200,40 @@ uri operator "" _u(const char* cstr, size_t cstr_len) {
   return result;
 }
 
-bool operator "" _i(const char* cstr, size_t cstr_len) {
+bool operator"" _i(const char* cstr, size_t cstr_len) {
   uri result;
   string_view str{cstr, cstr_len};
+  CHECK(!uri::can_parse(str));
   auto err = parse(str, result);
   return err != none;
 }
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(uri_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
-CAF_TEST(constructing) {
+CAF_TEST(default URIs are empty) {
   uri x;
-  CAF_CHECK_EQUAL(x.empty(), true);
-  CAF_CHECK_EQUAL(x.str(), "");
+  CHECK_EQ(x.empty(), true);
+  CHECK_EQ(x.str(), "");
+}
+
+CAF_TEST(URIs recognize IP addresses while parsing) {
+  auto v6_localhost = "tcp://[::1]:8080"_u;
+  CHECK(holds_alternative<ip_address>(v6_localhost.authority().host));
+  auto v4_localhost = "tcp://127.0.0.1:8080"_u;
+  CHECK(holds_alternative<ip_address>(v4_localhost.authority().host));
+  auto str_localhost = "tcp://localhost:8080"_u;
+  CHECK(holds_alternative<std::string>(str_localhost.authority().host));
 }
 
 #define BUILD(components)                                                      \
-  CAF_CHECK_EQUAL(*(http << components), *(http_str << components))
+  CHECK_EQ(*(http << components), *(http_str << components))
 
 CAF_TEST(builder construction) {
   auto minimal = *(http << file);
-  CAF_CHECK_EQUAL(minimal.empty(), false);
-  CAF_CHECK_EQUAL(minimal, "http:file");
+  CHECK_EQ(minimal.empty(), false);
+  CHECK_EQ(minimal, "http:file");
   // all combinations of components
   BUILD(file);
   BUILD(file << kvp);
@@ -275,15 +279,20 @@ CAF_TEST(builder construction) {
                    .path("file 1")
                    .fragment("[42]")
                    .make();
-  CAF_CHECK_EQUAL(escaped, "hi%20there://it%27s@me%2F/file%201#%5B42%5D");
+  CHECK_EQ(escaped, "hi%20there://it%27s@me%2F/file%201#%5B42%5D");
 }
 
-#define ROUNDTRIP(str) CAF_CHECK_EQUAL(str##_u, str)
+#define ROUNDTRIP(str)                                                         \
+  do {                                                                         \
+    CHECK(uri::can_parse(str));                                                \
+    CHECK_EQ(str##_u, str);                                                    \
+  } while (false)
 
 CAF_TEST(from string) {
   // all combinations of components
   ROUNDTRIP("http:file");
   ROUNDTRIP("http:foo-bar");
+  ROUNDTRIP("http:foo:bar");
   ROUNDTRIP("http:file?a=1&b=2");
   ROUNDTRIP("http:file#42");
   ROUNDTRIP("http:file?a=1&b=2#42");
@@ -319,7 +328,7 @@ CAF_TEST(from string) {
   ROUNDTRIP("http://me@node:80/file?a=1&b=2");
   ROUNDTRIP("http://me@node:80/file#42");
   ROUNDTRIP("http://me@node:80/file?a=1&b=2#42");
-  // all combinations of with IPv6 host
+  // all combinations of components with IPv6 host
   ROUNDTRIP("http://[::1]");
   ROUNDTRIP("http://[::1]?a=1&b=2");
   ROUNDTRIP("http://[::1]#42");
@@ -354,31 +363,33 @@ CAF_TEST(from string) {
   ROUNDTRIP("http://me@[::1]:80/file?a=1&b=2#42");
   // percent encoding
   ROUNDTRIP("hi%20there://it%27s@me%21/file%201#%5B42%5D");
+  ROUNDTRIP("file://localhost/tmp/test/test.{%3A04d}.exr");
 }
 
 #undef ROUNDTRIP
 
 CAF_TEST(empty components) {
-  CAF_CHECK_EQUAL("foo:/"_u, "foo:/");
-  CAF_CHECK_EQUAL("foo:/#"_u, "foo:/");
-  CAF_CHECK_EQUAL("foo:/?"_u, "foo:/");
-  CAF_CHECK_EQUAL("foo:/?#"_u, "foo:/");
-  CAF_CHECK_EQUAL("foo:bar#"_u, "foo:bar");
-  CAF_CHECK_EQUAL("foo:bar?"_u, "foo:bar");
-  CAF_CHECK_EQUAL("foo:bar?#"_u, "foo:bar");
-  CAF_CHECK_EQUAL("foo://bar#"_u, "foo://bar");
-  CAF_CHECK_EQUAL("foo://bar?"_u, "foo://bar");
-  CAF_CHECK_EQUAL("foo://bar?#"_u, "foo://bar");
+  CHECK_EQ("foo:/"_u, "foo:/");
+  CHECK_EQ("foo:///"_u, "foo:/");
+  CHECK_EQ("foo:/#"_u, "foo:/");
+  CHECK_EQ("foo:/?"_u, "foo:/");
+  CHECK_EQ("foo:/?#"_u, "foo:/");
+  CHECK_EQ("foo:bar#"_u, "foo:bar");
+  CHECK_EQ("foo:bar?"_u, "foo:bar");
+  CHECK_EQ("foo:bar?#"_u, "foo:bar");
+  CHECK_EQ("foo://bar#"_u, "foo://bar");
+  CHECK_EQ("foo://bar?"_u, "foo://bar");
+  CHECK_EQ("foo://bar?#"_u, "foo://bar");
 }
 
 CAF_TEST(invalid uris) {
-  CAF_CHECK("http"_i);
-  CAF_CHECK("http://"_i);
-  CAF_CHECK("http://foo:66000"_i);
+  CHECK("http"_i);
+  CHECK("http://"_i);
+  CHECK("http://foo:66000"_i);
 }
 
 #define SERIALIZATION_ROUNDTRIP(str)                                           \
-  CAF_CHECK_EQUAL(deserialize(serialize(str##_u)), str)
+  CHECK_EQ(deserialize(serialize(str##_u)), str)
 
 CAF_TEST(serialization) {
   // all combinations of components
@@ -457,4 +468,4 @@ CAF_TEST(serialization) {
 
 #undef SERIALIZATION_ROUNDTRIP
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

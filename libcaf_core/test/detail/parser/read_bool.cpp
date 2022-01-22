@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE detail.parser.read_bool
 
 #include "caf/detail/parser/read_bool.hpp"
 
-#include "caf/test/unit_test.hpp"
+#include "core-test.hpp"
 
 #include <string>
 
@@ -48,7 +34,8 @@ struct bool_parser {
     detail::parser::read_bool(res, f);
     if (res.code == pec::success)
       return f.x;
-    return res.code;
+    else
+      return res.code;
   }
 };
 
@@ -58,26 +45,26 @@ struct fixture {
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(read_bool_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(valid booleans) {
-  CAF_CHECK_EQUAL(p("true"), true);
-  CAF_CHECK_EQUAL(p("false"), false);
+  CHECK_EQ(p("true"), res_t{true});
+  CHECK_EQ(p("false"), res_t{false});
 }
 
 CAF_TEST(invalid booleans) {
-  CAF_CHECK_EQUAL(p(""), pec::unexpected_eof);
-  CAF_CHECK_EQUAL(p("t"), pec::unexpected_eof);
-  CAF_CHECK_EQUAL(p("tr"), pec::unexpected_eof);
-  CAF_CHECK_EQUAL(p("tru"), pec::unexpected_eof);
-  CAF_CHECK_EQUAL(p(" true"), pec::unexpected_character);
-  CAF_CHECK_EQUAL(p("f"), pec::unexpected_eof);
-  CAF_CHECK_EQUAL(p("fa"), pec::unexpected_eof);
-  CAF_CHECK_EQUAL(p("fal"), pec::unexpected_eof);
-  CAF_CHECK_EQUAL(p("fals"), pec::unexpected_eof);
-  CAF_CHECK_EQUAL(p(" false"), pec::unexpected_character);
-  CAF_CHECK_EQUAL(p("tr\nue"), pec::unexpected_newline);
-  CAF_CHECK_EQUAL(p("trues"), pec::trailing_character);
+  CHECK_EQ(p(""), res_t{pec::unexpected_eof});
+  CHECK_EQ(p("t"), res_t{pec::unexpected_eof});
+  CHECK_EQ(p("tr"), res_t{pec::unexpected_eof});
+  CHECK_EQ(p("tru"), res_t{pec::unexpected_eof});
+  CHECK_EQ(p(" true"), res_t{pec::unexpected_character});
+  CHECK_EQ(p("f"), res_t{pec::unexpected_eof});
+  CHECK_EQ(p("fa"), res_t{pec::unexpected_eof});
+  CHECK_EQ(p("fal"), res_t{pec::unexpected_eof});
+  CHECK_EQ(p("fals"), res_t{pec::unexpected_eof});
+  CHECK_EQ(p(" false"), res_t{pec::unexpected_character});
+  CHECK_EQ(p("tr\nue"), res_t{pec::unexpected_newline});
+  CHECK_EQ(p("trues"), res_t{pec::trailing_character});
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

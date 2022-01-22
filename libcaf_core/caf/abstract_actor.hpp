@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -30,7 +16,6 @@
 #include "caf/abstract_channel.hpp"
 #include "caf/attachable.hpp"
 #include "caf/detail/core_export.hpp"
-#include "caf/detail/disposer.hpp"
 #include "caf/detail/functor_attachable.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/execution_unit.hpp"
@@ -53,14 +38,12 @@ constexpr actor_id invalid_actor_id = 0;
 /// Base class for all actor implementations.
 class CAF_CORE_EXPORT abstract_actor : public abstract_channel {
 public:
-  // allow placement new (only)
-  inline void* operator new(std::size_t, void* ptr) {
-    return ptr;
-  }
-
   actor_control_block* ctrl() const;
 
   ~abstract_actor() override;
+
+  abstract_actor(const abstract_actor&) = delete;
+  abstract_actor& operator=(const abstract_actor&) = delete;
 
   /// Cleans up any remaining state before the destructor is called.
   /// This function makes sure it is safe to call virtual functions
@@ -69,12 +52,20 @@ public:
   /// implementation is required to call `super::destroy()` at the end.
   virtual void on_destroy();
 
-  void enqueue(strong_actor_ptr sender, message_id mid, message msg,
+  bool enqueue(strong_actor_ptr sender, message_id mid, message msg,
                execution_unit* host) override;
 
   /// Enqueues a new message wrapped in a `mailbox_element` to the actor.
   /// This `enqueue` variant allows to define forwarding chains.
-  virtual void enqueue(mailbox_element_ptr what, execution_unit* host) = 0;
+  /// @returns `true` if the message has added to the mailbox, `false`
+  ///          otherwise. In the latter case, the actor terminated and the
+  ///          message has been dropped. Once this function returns `false`, it
+  ///          returns `false` for all future invocations.
+  /// @note The returned value is purely informational and may be used to
+  ///       discard actor handles early. Messages may still get dropped later
+  ///       even if this function returns `true`. In particular when dealing
+  ///       with remote actors.
+  virtual bool enqueue(mailbox_element_ptr what, execution_unit* host) = 0;
 
   /// Attaches `ptr` to this actor. The actor will call `ptr->detach(...)` on
   /// exit, or immediately if it already finished execution.
@@ -88,7 +79,7 @@ public:
   }
 
   /// Returns the logical actor address.
-  actor_addr address() const;
+  actor_addr address() const noexcept;
 
   /// Detaches the first attached object that matches `what`.
   virtual size_t detach(const attachable::token& what) = 0;
@@ -120,19 +111,19 @@ public:
   virtual mailbox_element* peek_at_next_mailbox_element();
 
   template <class... Ts>
-  void eq_impl(message_id mid, strong_actor_ptr sender, execution_unit* ctx,
+  bool eq_impl(message_id mid, strong_actor_ptr sender, execution_unit* ctx,
                Ts&&... xs) {
-    enqueue(make_mailbox_element(std::move(sender), mid, {},
-                                 std::forward<Ts>(xs)...),
-            ctx);
+    return enqueue(make_mailbox_element(std::move(sender), mid, {},
+                                        std::forward<Ts>(xs)...),
+                   ctx);
   }
 
   // flags storing runtime information                      used by ...
-  static constexpr int has_timeout_flag = 0x0004;      // single_timeout
   static constexpr int is_registered_flag = 0x0008;    // (several actors)
   static constexpr int is_initialized_flag = 0x0010;   // event-based actors
   static constexpr int is_blocking_flag = 0x0020;      // blocking_actor
   static constexpr int is_detached_flag = 0x0040;      // local_actor
+  static constexpr int collects_metrics_flag = 0x0080; // local_actor
   static constexpr int is_serializable_flag = 0x0100;  // local_actor
   static constexpr int is_migrated_from_flag = 0x0200; // local_actor
   static constexpr int has_used_aout_flag = 0x0400;    // local_actor
@@ -140,17 +131,17 @@ public:
   static constexpr int is_cleaned_up_flag = 0x1000;    // monitorable_actor
   static constexpr int is_shutting_down_flag = 0x2000; // scheduled_actor
 
-  inline void setf(int flag) {
+  void setf(int flag) {
     auto x = flags();
     flags(x | flag);
   }
 
-  inline void unsetf(int flag) {
+  void unsetf(int flag) {
     auto x = flags();
     flags(x & ~flag);
   }
 
-  inline bool getf(int flag) const {
+  bool getf(int flag) const {
     return (flags() & flag) != 0;
   }
 
@@ -213,19 +204,11 @@ public:
   /// @endcond
 
 protected:
-  /// Creates a new actor instance.
   explicit abstract_actor(actor_config& cfg);
 
   // Guards potentially concurrent access to the state. For example,
   // `exit_state_`, `attachables_`, and `links_` in a `monitorable_actor`.
   mutable std::mutex mtx_;
-
-private:
-  // prohibit copies, assignments, and heap allocations
-  void* operator new(size_t);
-  void* operator new[](size_t);
-  abstract_actor(const abstract_actor&) = delete;
-  abstract_actor& operator=(const abstract_actor&) = delete;
 };
 
 } // namespace caf

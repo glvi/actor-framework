@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE io.network.ip_endpoint
 
 #include "caf/io/network/ip_endpoint.hpp"
 
-#include "caf/test/dsl.hpp"
+#include "io-test.hpp"
 
 #include <vector>
 
@@ -45,56 +31,56 @@ public:
 };
 
 struct fixture : test_coordinator_fixture<> {
-  template <class T, class... Ts>
-  auto serialize(T& x, Ts&... xs) {
+  template <class... Ts>
+  auto serialize(Ts&... xs) {
     byte_buffer buf;
     binary_serializer sink{sys, buf};
-    if (auto err = sink(x, xs...))
-      CAF_FAIL("serialization failed: " << sys.render(err));
+    if (!(sink.apply(xs) && ...))
+      CAF_FAIL("serialization failed: " << sink.get_error());
     return buf;
   }
 
-  template <class Buffer, class T, class... Ts>
-  void deserialize(const Buffer& buf, T& x, Ts&... xs) {
+  template <class Buffer, class... Ts>
+  void deserialize(const Buffer& buf, Ts&... xs) {
     binary_deserializer source{sys, buf};
-    if (auto err = source(x, xs...))
-      CAF_FAIL("serialization failed: " << sys.render(err));
+    if (!(source.apply(xs) && ...))
+      CAF_FAIL("serialization failed: " << source.get_error());
   }
 };
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(ep_endpoint_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST_DISABLED(ip_endpoint) {
   // create an empty endpoint
   network::ip_endpoint ep;
   ep.clear();
-  CAF_CHECK_EQUAL("", network::host(ep));
-  CAF_CHECK_EQUAL(uint16_t{0}, network::port(ep));
-  CAF_CHECK_EQUAL(size_t{0}, *ep.length());
+  CHECK_EQ("", network::host(ep));
+  CHECK_EQ(uint16_t{0}, network::port(ep));
+  CHECK_EQ(size_t{0}, *ep.length());
   // fill it with data from a local endpoint
   network::interfaces::get_endpoint("localhost", 12345, ep);
   // save the data
   auto h = network::host(ep);
   auto p = network::port(ep);
   auto l = *ep.length();
-  CAF_CHECK("localhost" == h || "127.0.0.1" == h || "::1" == h);
-  CAF_CHECK_EQUAL(12345, p);
-  CAF_CHECK(0 < l);
+  CHECK("localhost" == h || "127.0.0.1" == h || "::1" == h);
+  CHECK_EQ(12345, p);
+  CHECK(0 < l);
   // serialize the endpoint and clear it
   auto buf = serialize(ep);
   auto save = ep;
   ep.clear();
-  CAF_CHECK_EQUAL("", network::host(ep));
-  CAF_CHECK_EQUAL(uint16_t{0}, network::port(ep));
-  CAF_CHECK_EQUAL(size_t{0}, *ep.length());
+  CHECK_EQ("", network::host(ep));
+  CHECK_EQ(uint16_t{0}, network::port(ep));
+  CHECK_EQ(size_t{0}, *ep.length());
   // deserialize the data and check if it was load successfully
   deserialize(buf, ep);
-  CAF_CHECK_EQUAL(h, network::host(ep));
-  CAF_CHECK_EQUAL(uint16_t{p}, network::port(ep));
-  CAF_CHECK_EQUAL(size_t{l}, *ep.length());
-  CAF_CHECK_EQUAL(save, ep);
+  CHECK_EQ(h, network::host(ep));
+  CHECK_EQ(uint16_t{p}, network::port(ep));
+  CHECK_EQ(size_t{l}, *ep.length());
+  CHECK_EQ(save, ep);
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

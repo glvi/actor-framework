@@ -1,26 +1,16 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/detail/pretty_type_name.hpp"
 
 #include "caf/config.hpp"
 
-#if defined(CAF_LINUX) || defined(CAF_MACOS)
+#if defined(CAF_LINUX) || defined(CAF_MACOS) || defined(CAF_NET_BSD)
+#  define CAF_HAS_CXX_ABI
+#endif
+
+#ifdef CAF_HAS_CXX_ABI
 #  include <cxxabi.h>
 #  include <sys/types.h>
 #  include <unistd.h>
@@ -57,7 +47,7 @@ void prettify_type_name(std::string& class_name) {
 }
 
 void prettify_type_name(std::string& class_name, const char* c_class_name) {
-#if defined(CAF_LINUX) || defined(CAF_MACOS)
+#ifdef CAF_HAS_CXX_ABI
   int stat = 0;
   std::unique_ptr<char, decltype(free)*> real_class_name{nullptr, free};
   auto tmp = abi::__cxa_demangle(c_class_name, nullptr, nullptr, &stat);

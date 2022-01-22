@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -42,19 +28,34 @@ namespace caf::detail::parser {
 
 /// Reads a number or a duration, i.e., on success produces an `int64_t`, a
 /// `double`, or a `timespan`.
-template <class State, class Consumer>
-void read_number_or_timespan(State& ps, Consumer& consumer) {
+template <class State, class Consumer, class EnableRange = std::false_type>
+void read_number_or_timespan(State& ps, Consumer& consumer,
+                             EnableRange enable_range = {}) {
   using namespace std::chrono;
   struct interim_consumer {
+    size_t invocations = 0;
+    Consumer* outer = nullptr;
     variant<none_t, int64_t, double> interim;
     void value(int64_t x) {
-      interim = x;
+      switch (++invocations) {
+        case 1:
+          interim = x;
+          break;
+        case 2:
+          CAF_ASSERT(holds_alternative<int64_t>(interim));
+          outer->value(get<int64_t>(interim));
+          interim = none;
+          [[fallthrough]];
+        default:
+          outer->value(x);
+      }
     }
     void value(double x) {
       interim = x;
     }
   };
   interim_consumer ic;
+  ic.outer = &consumer;
   auto has_int = [&] { return holds_alternative<int64_t>(ic.interim); };
   auto has_dbl = [&] { return holds_alternative<double>(ic.interim); };
   auto get_int = [&] { return get<int64_t>(ic.interim); };
@@ -66,10 +67,11 @@ void read_number_or_timespan(State& ps, Consumer& consumer) {
         consumer.value(get_int());
     }
   });
+  static constexpr std::true_type enable_float = std::true_type{};
   // clang-format off
   start();
   state(init) {
-    fsm_epsilon(read_number(ps, ic), has_number)
+    fsm_epsilon(read_number(ps, ic, enable_float, enable_range), has_number)
   }
   term_state(has_number) {
     epsilon_if(has_int(), has_integer)

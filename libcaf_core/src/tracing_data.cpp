@@ -1,26 +1,14 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/tracing_data.hpp"
 
 #include <cstdint>
 
 #include "caf/actor_system.hpp"
+#include "caf/binary_deserializer.hpp"
+#include "caf/binary_serializer.hpp"
 #include "caf/deserializer.hpp"
 #include "caf/error.hpp"
 #include "caf/logger.hpp"
@@ -37,52 +25,61 @@ tracing_data::~tracing_data() {
 namespace {
 
 template <class Serializer>
-auto inspect_impl(Serializer& sink, const tracing_data_ptr& x) {
-  if (x == nullptr) {
-    uint8_t dummy = 0;
-    return sink(dummy);
+bool serialize_impl(Serializer& sink, const tracing_data_ptr& x) {
+  if (!x) {
+    return sink.begin_object(invalid_type_id, "tracing_data") //
+           && sink.begin_field("value", false)                //
+           && sink.end_field()                                //
+           && sink.end_object();
   }
-  uint8_t dummy = 1;
-  if (auto err = sink(dummy))
-    return err;
-  return x->serialize(sink);
+  return sink.begin_object(invalid_type_id, "tracing_data") //
+         && sink.begin_field("value", true)                 //
+         && x->serialize(sink)                              //
+         && sink.end_field()                                //
+         && sink.end_object();
 }
 
 template <class Deserializer>
-typename Deserializer::result_type
-inspect_impl(Deserializer& source, tracing_data_ptr& x) {
-  uint8_t dummy = 0;
-  if (auto err = source(dummy))
-    return err;
-  if (dummy == 0) {
-    x.reset();
-    return {};
-  }
+bool deserialize_impl(Deserializer& source, tracing_data_ptr& x) {
+  bool is_present = false;
+  if (!source.begin_object(invalid_type_id, "tracing_data")
+      || !source.begin_field("value", is_present))
+    return false;
+  if (!is_present)
+    return source.end_field() && source.end_object();
   auto ctx = source.context();
-  if (ctx == nullptr)
-    return sec::no_context;
+  if (ctx == nullptr) {
+    source.emplace_error(sec::no_context,
+                         "cannot deserialize tracing data without context");
+    return false;
+  }
   auto tc = ctx->system().tracing_context();
-  if (tc == nullptr)
-    return sec::no_tracing_context;
-  return tc->deserialize(source, x);
+  if (tc == nullptr) {
+    source.emplace_error(sec::no_tracing_context,
+                         "cannot deserialize tracing data without context");
+    return false;
+  }
+  return tc->deserialize(source, x) //
+         && source.end_field()      //
+         && source.end_object();
 }
 
 } // namespace
 
-error inspect(serializer& sink, const tracing_data_ptr& x) {
-  return inspect_impl(sink, x);
+bool inspect(serializer& sink, const tracing_data_ptr& x) {
+  return serialize_impl(sink, x);
 }
 
-error_code<sec> inspect(binary_serializer& sink, const tracing_data_ptr& x) {
-  return inspect_impl(sink, x);
+bool inspect(binary_serializer& sink, const tracing_data_ptr& x) {
+  return serialize_impl(sink, x);
 }
 
-error inspect(deserializer& source, tracing_data_ptr& x) {
-  return inspect_impl(source, x);
+bool inspect(deserializer& source, tracing_data_ptr& x) {
+  return deserialize_impl(source, x);
 }
 
-error_code<sec> inspect(binary_deserializer& source, tracing_data_ptr& x) {
-  return inspect_impl(source, x);
+bool inspect(binary_deserializer& source, tracing_data_ptr& x) {
+  return deserialize_impl(source, x);
 }
 
 } // namespace caf

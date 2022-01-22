@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENCE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -25,41 +11,31 @@
 
 namespace caf::detail {
 
-template <class F,
-          int Args = tl_size<typename get_callable_trait<F>::arg_types>::value>
-struct functor_attachable : attachable {
-  static_assert(Args == 1 || Args == 2,
-                "Only 0, 1 or 2 arguments for F are supported");
-  F functor_;
-  functor_attachable(F arg) : functor_(std::move(arg)) {
+template <class F>
+class functor_attachable : public attachable {
+public:
+  static constexpr size_t num_args
+    = tl_size<typename get_callable_trait<F>::arg_types>::value;
+
+  static_assert(num_args < 3, "Only 0, 1 or 2 arguments for F are supported");
+
+  explicit functor_attachable(F fn) : fn_(std::move(fn)) {
     // nop
   }
-  void actor_exited(const error& fail_state, execution_unit*) override {
-    functor_(fail_state);
+
+  void actor_exited(const error& fail_state, execution_unit* host) override {
+    if constexpr (num_args == 0)
+      fn_();
+    else if constexpr (num_args == 1)
+      fn_(fail_state);
+    else
+      fn_(fail_state, host);
   }
+
   static constexpr size_t token_type = attachable::token::anonymous;
-};
 
-template <class F>
-struct functor_attachable<F, 2> : attachable {
-  F functor_;
-  functor_attachable(F arg) : functor_(std::move(arg)) {
-    // nop
-  }
-  void actor_exited(const error& x, execution_unit* y) override {
-    functor_(x, y);
-  }
-};
-
-template <class F>
-struct functor_attachable<F, 0> : attachable {
-  F functor_;
-  functor_attachable(F arg) : functor_(std::move(arg)) {
-    // nop
-  }
-  void actor_exited(const error&, execution_unit*) override {
-    functor_();
-  }
+private:
+  F fn_;
 };
 
 } // namespace caf::detail

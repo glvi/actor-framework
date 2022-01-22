@@ -1,12 +1,8 @@
-// This file is partially included in the manual, do not modify
-// without updating the references in the *.tex files!
-// Manual references: lines 86-98 (MessagePassing.tex)
-
 #include <cassert>
 #include <chrono>
-#include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <vector>
 
 #include "caf/actor_system.hpp"
@@ -14,37 +10,42 @@
 #include "caf/event_based_actor.hpp"
 #include "caf/exec_main.hpp"
 #include "caf/function_view.hpp"
-#include "caf/policy/fan_in_responses.hpp"
+#include "caf/init_global_meta_objects.hpp"
+#include "caf/policy/select_all.hpp"
 #include "caf/scoped_actor.hpp"
-#include "caf/stateful_actor.hpp"
 #include "caf/typed_actor.hpp"
 #include "caf/typed_event_based_actor.hpp"
+
+CAF_BEGIN_TYPE_ID_BLOCK(fan_out_request, first_custom_type_id)
+
+  CAF_ADD_ATOM(fan_out_request, row_atom)
+  CAF_ADD_ATOM(fan_out_request, column_atom)
+  CAF_ADD_ATOM(fan_out_request, average_atom)
+
+CAF_END_TYPE_ID_BLOCK(fan_out_request)
 
 using std::endl;
 using std::chrono::seconds;
 using namespace caf;
 
-using row_atom = atom_constant<atom("row")>;
-using column_atom = atom_constant<atom("column")>;
-using average_atom = atom_constant<atom("average")>;
 
 /// A simple actor for storing an integer value.
 using cell = typed_actor<
   // Writes a new value.
-  reacts_to<put_atom, int>,
+  result<void>(put_atom, int),
   // Reads the value.
-  replies_to<get_atom>::with<int>>;
+  result<int>(get_atom)>;
 
 /// An for storing a 2-dimensional matrix of integers.
 using matrix = typed_actor<
   // Writes a new value to given cell (x-coordinate, y-coordinate, new-value).
-  reacts_to<put_atom, int, int, int>,
+  result<void>(put_atom, int, int, int),
   // Reads from given cell.
-  replies_to<get_atom, int, int>::with<int>,
+  result<int>(get_atom, int, int),
   // Computes the average for given row.
-  replies_to<get_atom, average_atom, row_atom, int>::with<double>,
+  result<double>(get_atom, average_atom, row_atom, int),
   // Computes the average for given column.
-  replies_to<get_atom, average_atom, column_atom, int>::with<double>>;
+  result<double>(get_atom, average_atom, column_atom, int)>;
 
 struct cell_state {
   int value = 0;
@@ -87,7 +88,7 @@ matrix::behavior_type matrix_actor(matrix::stateful_pointer<matrix_state> self,
       assert(row < rows);
       auto rp = self->make_response_promise<double>();
       auto& row_vec = self->state.rows[row];
-      self->fan_out_request<policy::fan_in_responses>(row_vec, infinite, get)
+      self->fan_out_request<policy::select_all>(row_vec, infinite, get)
         .then(
           [=](std::vector<int> xs) mutable {
             assert(xs.size() == static_cast<size_t>(columns));
@@ -96,6 +97,7 @@ matrix::behavior_type matrix_actor(matrix::stateful_pointer<matrix_state> self,
           [=](error& err) mutable { rp.deliver(std::move(err)); });
       return rp;
     },
+    // --(rst-fan-out-begin)--
     [=](get_atom get, average_atom, column_atom, int column) {
       assert(column < columns);
       std::vector<cell> columns;
@@ -104,7 +106,7 @@ matrix::behavior_type matrix_actor(matrix::stateful_pointer<matrix_state> self,
       for (int row = 0; row < rows; ++row)
         columns.emplace_back(rows_vec[row][column]);
       auto rp = self->make_response_promise<double>();
-      self->fan_out_request<policy::fan_in_responses>(columns, infinite, get)
+      self->fan_out_request<policy::select_all>(columns, infinite, get)
         .then(
           [=](std::vector<int> xs) mutable {
             assert(xs.size() == static_cast<size_t>(rows));
@@ -113,6 +115,7 @@ matrix::behavior_type matrix_actor(matrix::stateful_pointer<matrix_state> self,
           [=](error& err) mutable { rp.deliver(std::move(err)); });
       return rp;
     },
+    // --(rst-fan-out-end)--
   };
 }
 
@@ -134,23 +137,22 @@ void caf_main(actor_system& sys) {
   //      4    16    64   256  1024  4096
   for (int row = 0; row < rows; ++row)
     for (int column = 0; column < columns; ++column)
-      f(put_atom::value, row, column, (int) pow(row + 2, column + 1));
+      f(put_atom_v, row, column, (int) pow(row + 2, column + 1));
   // Print out matrix.
   for (int row = 0; row < rows; ++row) {
     for (int column = 0; column < columns; ++column)
-      std::cout << std::setw(4) << f(get_atom::value, row, column) << ' ';
+      std::cout << std::setw(4) << f(get_atom_v, row, column) << ' ';
     std::cout << '\n';
   }
   // Print out AVG for each row and column.
   for (int row = 0; row < rows; ++row)
-    std::cout << "AVG(row " << row << ") = "
-              << f(get_atom::value, average_atom::value, row_atom::value, row)
+    std::cout << "AVG(row " << row
+              << ") = " << f(get_atom_v, average_atom_v, row_atom_v, row)
               << '\n';
   for (int column = 0; column < columns; ++column)
-    std::cout << "AVG(column " << column << ") = "
-              << f(get_atom::value, average_atom::value, column_atom::value,
-                   column)
+    std::cout << "AVG(column " << column
+              << ") = " << f(get_atom_v, average_atom_v, column_atom_v, column)
               << '\n';
 }
 
-CAF_MAIN()
+CAF_MAIN(id_block::fan_out_request)

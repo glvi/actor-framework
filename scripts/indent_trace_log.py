@@ -6,7 +6,7 @@
 # usage (read file): indent_trace_log.py FILENAME
 #      (read stdin): indent_trace_log.py -
 
-import argparse, sys, os, fileinput, re
+import argparse, sys, os, re
 
 def is_entry(line):
     return 'TRACE' in line and 'ENTRY' in line
@@ -42,7 +42,7 @@ def main():
     args = parser.parse_args()
     filepath = args.log
     if filepath == '-':
-        read_lines(fileinput.input(), args.ids)
+        read_lines(sys.stdin, args.ids)
     else:
         if not os.path.isfile(filepath):
             sys.exit()

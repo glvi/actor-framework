@@ -1,43 +1,37 @@
-#include <iostream>
 #include "caf/all.hpp"
 
-// This file is partially included in the manual, do not modify
-// without updating the references in the *.tex files!
-// Manual references: lines 15-42 (MessagePassing.tex)
-
-using std::endl;
 using namespace caf;
 
-// using add_atom = atom_constant<atom("add")>; (defined in atom.hpp)
+// --(rst-delegate-begin)--
+using adder_actor = typed_actor<result<int32_t>(add_atom, int32_t, int32_t)>;
 
-using calc = typed_actor<replies_to<add_atom, int, int>::with<int>>;
-
-void actor_a(event_based_actor* self, const calc& worker) {
-  self->request(worker, std::chrono::seconds(10), add_atom::value, 1, 2).then(
-    [=](int result) {
-      aout(self) << "1 + 2 = " << result << endl;
-    }
-  );
-}
-
-calc::behavior_type actor_b(calc::pointer self, const calc& worker) {
+adder_actor::behavior_type worker_impl() {
   return {
-    [=](add_atom add, int x, int y) {
+    [](add_atom, int32_t x, int32_t y) { return x + y; },
+  };
+}
+adder_actor::behavior_type server_impl(adder_actor::pointer self,
+                                       adder_actor worker) {
+  return {
+    [=](add_atom add, int32_t x, int32_t y) {
       return self->delegate(worker, add, x, y);
-    }
+    },
   };
 }
 
-calc::behavior_type actor_c() {
-  return {
-    [](add_atom, int x, int y) {
-      return x + y;
-    }
-  };
+void client_impl(event_based_actor* self, adder_actor adder, int32_t x,
+                 int32_t y) {
+  using namespace std::literals::chrono_literals;
+  self->request(adder, 10s, add_atom_v, x, y).then([=](int32_t result) {
+    aout(self) << x << " + " << y << " = " << result << std::endl;
+  });
 }
 
-void caf_main(actor_system& system) {
-  system.spawn(actor_a, system.spawn(actor_b, system.spawn(actor_c)));
+void caf_main(actor_system& sys) {
+  auto worker = sys.spawn(worker_impl);
+  auto server = sys.spawn(server_impl, sys.spawn(worker_impl));
+  sys.spawn(client_impl, server, 1, 2);
 }
+// --(rst-delegate-end)--
 
 CAF_MAIN()

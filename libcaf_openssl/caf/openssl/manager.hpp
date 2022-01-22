@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -44,17 +30,17 @@ public:
   void* subtype_ptr() override;
 
   /// Returns an SSL-aware implementation of the middleman actor interface.
-  inline const io::middleman_actor& actor_handle() const {
+  const io::middleman_actor& actor_handle() const {
     return manager_;
   }
 
   /// Returns the enclosing actor system.
-  inline actor_system& system() {
+  actor_system& system() {
     return system_;
   }
 
   /// Returns the system-wide configuration.
-  inline const actor_system_config& config() const {
+  const actor_system_config& config() const {
     return system_.config();
   }
 
@@ -62,12 +48,18 @@ public:
   /// of peers.
   bool authentication_enabled();
 
+  /// Adds module-specific options to the config before loading the module.
+  static void add_module_options(actor_system_config& cfg);
+
   /// Returns an OpenSSL manager using the default network backend.
   /// @warning Creating an OpenSSL manager will fail when using
   //           a custom implementation.
   /// @throws `logic_error` if the middleman is not loaded or is not using the
   ///         default network backend.
   static actor_system::module* make(actor_system&, detail::type_list<>);
+
+  /// Adds message types of the OpenSSL module to the global meta object table.
+  static void init_global_meta_objects();
 
 private:
   /// Private since instantiation is only allowed via `make`.

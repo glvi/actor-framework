@@ -1,29 +1,17 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <type_traits>
 
+#include "caf/default_enum_inspect.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
+#include "caf/is_error_code_enum.hpp"
 
 namespace caf {
 
@@ -45,7 +33,7 @@ enum class pec : uint8_t {
   /// Too many characters for an atom.
   too_many_characters,
   /// Unrecognized character after escaping `\`.
-  illegal_escape_sequence,
+  invalid_escape_sequence,
   /// Misplaced newline, e.g., inside a string.
   unexpected_newline,
   /// Parsed positive integer exceeds the number of available bits.
@@ -61,32 +49,40 @@ enum class pec : uint8_t {
   /// Stopped at an unrecognized option name.
   not_an_option,
   /// Stopped at an unparsable argument.
-  illegal_argument = 15,
+  invalid_argument = 15,
   /// Stopped because an argument was omitted.
   missing_argument,
   /// Stopped because the key of a category was taken.
-  illegal_category,
+  invalid_category,
   /// Stopped at an unexpected field name while reading a user-defined type.
   invalid_field_name,
   /// Stopped at a repeated field name while reading a user-defined type.
   repeated_field_name,
   /// Stopped while reading a user-defined type with one or more missing
   /// mandatory fields.
-  missing_field,
+  missing_field = 20,
+  /// Parsing a range statement ('n..m' or 'n..m..step') failed.
+  invalid_range_expression,
+  /// Stopped after running into an invalid parser state. Should never happen
+  /// and most likely indicates a bug in the implementation.
+  invalid_state,
 };
 
 /// @relates pec
 CAF_CORE_EXPORT std::string to_string(pec);
 
-/// Returns an error object from given error code.
-CAF_CORE_EXPORT error make_error(pec code);
+/// @relates pec
+CAF_CORE_EXPORT bool from_string(string_view, pec&);
 
-/// Returns an error object from given error code with additional context
-/// information for where the parser stopped in the input.
-CAF_CORE_EXPORT error make_error(pec code, int32_t line, int32_t column);
+/// @relates pec
+CAF_CORE_EXPORT bool from_integer(std::underlying_type_t<pec>, pec&);
 
-/// Returns an error object from given error code with additional context
-/// information for where the parser stopped in the argument.
-CAF_CORE_EXPORT error make_error(pec code, string_view argument);
+/// @relates pec
+template <class Inspector>
+bool inspect(Inspector& f, pec& x) {
+  return default_enum_inspect(f, x);
+}
 
 } // namespace caf
+
+CAF_ERROR_CODE_ENUM(pec)

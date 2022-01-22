@@ -1,41 +1,16 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
-
-#include "caf/config.hpp"
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE expected
-#include "caf/test/unit_test.hpp"
 
-#include "caf/sec.hpp"
 #include "caf/expected.hpp"
 
-using namespace std;
+#include "core-test.hpp"
+
+#include "caf/sec.hpp"
+
 using namespace caf;
-
-#define CHECK(x) CAF_CHECK(x);
-
-#define CHECK_EQ(x, y)                                                         \
-  CAF_CHECK(x == y);                                                           \
-  CAF_CHECK(y == x);
-
-#define CHECK_NEQ(x, y)                                                        \
-  CAF_CHECK(x != y);                                                           \
-  CAF_CHECK(y != x);
 
 namespace {
 
@@ -59,9 +34,9 @@ CAF_TEST(both_engaged_not_equal) {
   e_int y{24};
   CHECK(x);
   CHECK(y);
-  CHECK_NEQ(x, y);
-  CHECK_NEQ(x, sec::unexpected_message);
-  CHECK_NEQ(y, sec::unexpected_message);
+  CHECK_NE(x, y);
+  CHECK_NE(x, sec::unexpected_message);
+  CHECK_NE(y, sec::unexpected_message);
   CHECK_EQ(x, 42);
   CHECK_EQ(y, 24);
 }
@@ -73,10 +48,10 @@ CAF_TEST(engaged_plus_not_engaged) {
   CHECK(!y);
   CHECK_EQ(x, 42);
   CHECK_EQ(y, sec::unexpected_message);
-  CHECK_NEQ(x, sec::unexpected_message);
-  CHECK_NEQ(x, y);
-  CHECK_NEQ(y, 42);
-  CHECK_NEQ(y, sec::unsupported_sys_key);
+  CHECK_NE(x, sec::unexpected_message);
+  CHECK_NE(x, y);
+  CHECK_NE(y, 42);
+  CHECK_NE(y, sec::unsupported_sys_key);
 }
 
 CAF_TEST(both_not_engaged) {
@@ -88,15 +63,15 @@ CAF_TEST(both_not_engaged) {
   CHECK_EQ(x, sec::unexpected_message);
   CHECK_EQ(y, sec::unexpected_message);
   CHECK_EQ(x.error(), y.error());
-  CHECK_NEQ(x, sec::unsupported_sys_key);
-  CHECK_NEQ(y, sec::unsupported_sys_key);
+  CHECK_NE(x, sec::unsupported_sys_key);
+  CHECK_NE(y, sec::unsupported_sys_key);
 }
 
 CAF_TEST(move_and_copy) {
   e_str x{sec::unexpected_message};
   e_str y{"hello"};
   x = "hello";
-  CHECK_NEQ(x, sec::unexpected_message);
+  CHECK_NE(x, sec::unexpected_message);
   CHECK_EQ(x, "hello");
   CHECK_EQ(x, y);
   y = "world";
@@ -108,7 +83,7 @@ CAF_TEST(move_and_copy) {
   CHECK_EQ(z_cpy, "world");
   CHECK_EQ(z, z_cpy);
   z = e_str{sec::unsupported_sys_key};
-  CHECK_NEQ(z, z_cpy);
+  CHECK_NE(z, z_cpy);
   CHECK_EQ(z, sec::unsupported_sys_key);
 }
 
@@ -116,14 +91,4 @@ CAF_TEST(construction_with_none) {
   e_int x{none};
   CHECK(!x);
   CHECK(!x.error());
-}
-
-CAF_TEST(construction_with_no_error) {
-  e_int x{no_error};
-  CHECK(!x);
-  CHECK(!x.error());
-  auto f = []() -> e_int {
-    return no_error;
-  };
-  CHECK_EQ(f(), x);
 }

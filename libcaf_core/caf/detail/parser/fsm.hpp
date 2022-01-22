@@ -1,26 +1,25 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 // This header intentionally has no `#pragma once`. Any parser that uses this
 // DSL is supposed to clean up all defines made in this header via
 // `include "caf/detail/parser/fsm_undef.hpp"` at the end.
 
+#include <type_traits>
+
 #include "caf/detail/pp.hpp"
+
+#define CAF_FSM_EVAL_ACTION(action)                                            \
+  auto action_impl = [&]() -> decltype(auto) { return action; };               \
+  if constexpr (std::is_same<pec, decltype(action_impl())>::value) {           \
+    if (auto code = action_impl(); code != pec::success) {                     \
+      ps.code = code;                                                          \
+      return;                                                                  \
+    }                                                                          \
+  } else {                                                                     \
+    action_impl();                                                             \
+  }
 
 #define CAF_FSM_EVAL_MISMATCH_EC                                               \
   if (mismatch_ec == caf::pec::unexpected_character)                           \
@@ -107,7 +106,7 @@
 
 #define CAF_TRANSITION_IMPL3(target, whitelist, action)                        \
   if (::caf::detail::parser::in_whitelist(whitelist, ch)) {                    \
-    action;                                                                    \
+    CAF_FSM_EVAL_ACTION(action)                                                \
     CAF_TRANSITION_IMPL1(target)                                               \
   }
 
@@ -139,7 +138,7 @@
 
 #define CAF_EPSILON_IMPL3(target, whitelist, action)                           \
   if (::caf::detail::parser::in_whitelist(whitelist, ch)) {                    \
-    action;                                                                    \
+    CAF_FSM_EVAL_ACTION(action)                                                \
     CAF_EPSILON_IMPL1(target)                                                  \
   }
 
@@ -167,7 +166,7 @@
 
 #define CAF_FSM_TRANSITION_IMPL4(fsm_call, target, whitelist, action)          \
   if (::caf::detail::parser::in_whitelist(whitelist, ch)) {                    \
-    action;                                                                    \
+    CAF_FSM_EVAL_ACTION(action)                                                \
     CAF_FSM_TRANSITION_IMPL2(fsm_call, target)                                 \
   }
 
@@ -195,7 +194,7 @@
 
 #define CAF_FSM_EPSILON_IMPL4(fsm_call, target, whitelist, action)             \
   if (::caf::detail::parser::in_whitelist(whitelist, ch)) {                    \
-    action;                                                                    \
+    CAF_FSM_EVAL_ACTION(action)                                                \
     CAF_FSM_EPSILON_IMPL2(fsm_call, target)                                    \
   }
 
@@ -273,15 +272,27 @@
 
 #endif // CAF_MSVC
 
-/// Makes a transition into another state if the `statement` is true.
+/// Enables a transition into another state if the `statement` is true.
 #define transition_if(statement, ...)                                          \
   if (statement) {                                                             \
     transition(__VA_ARGS__)                                                    \
   }
 
-/// Makes an epsiolon transition into another state if the `statement` is true.
+/// Enables a transition if the constexpr `statement` is true.
+#define transition_static_if(statement, ...)                                   \
+  if constexpr (statement) {                                                   \
+    transition(__VA_ARGS__)                                                    \
+  }
+
+/// Enables an epsiolon transition if the `statement` is true.
 #define epsilon_if(statement, ...)                                             \
   if (statement) {                                                             \
+    epsilon(__VA_ARGS__)                                                       \
+  }
+
+/// Enables an epsiolon transition if the constexpr `statement` is true.
+#define epsilon_static_if(statement, ...)                                      \
+  if constexpr (statement) {                                                   \
     epsilon(__VA_ARGS__)                                                       \
   }
 
@@ -292,9 +303,23 @@
     fsm_transition(__VA_ARGS__)                                                \
   }
 
+/// Makes an transition transition into another FSM if `statement` is true,
+/// resuming at state `target`.
+#define fsm_transition_static_if(statement, ...)                               \
+  if constexpr (statement) {                                                   \
+    fsm_transition(__VA_ARGS__)                                                \
+  }
+
 /// Makes an epsilon transition into another FSM if `statement` is true,
 /// resuming at state `target`.
 #define fsm_epsilon_if(statement, ...)                                         \
   if (statement) {                                                             \
+    fsm_epsilon(__VA_ARGS__)                                                   \
+  }
+
+/// Makes an epsilon transition into another FSM if `statement` is true,
+/// resuming at state `target`.
+#define fsm_epsilon_static_if(statement, ...)                                  \
+  if constexpr (statement) {                                                   \
     fsm_epsilon(__VA_ARGS__)                                                   \
   }

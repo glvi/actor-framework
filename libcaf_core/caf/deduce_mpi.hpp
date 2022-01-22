@@ -1,100 +1,75 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <type_traits>
 
-#include "caf/fwd.hpp"
-#include "caf/param.hpp"
+#include "caf/detail/implicit_conversions.hpp"
 #include "caf/expected.hpp"
+#include "caf/fwd.hpp"
 #include "caf/optional.hpp"
 #include "caf/replies_to.hpp"
 
-#include "caf/detail/implicit_conversions.hpp"
-
-namespace caf {
-
-namespace detail {
+namespace caf::detail {
 
 // dmi = deduce_mpi_implementation
 template <class T>
 struct dmi;
 
 // case #1: function returning a single value
-template <class Y, class... Xs>
-struct dmi<Y (Xs...)> {
-  using type = typed_mpi<type_list<typename param_decay<Xs>::type...>,
-                         output_tuple<implicit_conversions_t<Y>>>;
+template <class Out, class... In>
+struct dmi<Out(In...)> {
+  using type = result<implicit_conversions_t<Out>>(std::decay_t<In>...);
 };
 
-// case #2a: function returning a result<...>
-template <class... Ys, class... Xs>
-struct dmi<result<Ys...> (Xs...)> {
-  using type = typed_mpi<type_list<typename param_decay<Xs>::type...>,
-                         output_tuple<implicit_conversions_t<Ys>...>>;
+// case #2: function returning a result<...>
+template <class... Out, class... In>
+struct dmi<result<Out...>(In...)> {
+  using type = result<Out...>(std::decay_t<In>...);
 };
 
-// case #2b: function returning a std::tuple<...>
-template <class... Ys, class... Xs>
-struct dmi<std::tuple<Ys...> (Xs...)> {
-  using type = typed_mpi<type_list<typename param_decay<Xs>::type...>,
-                         output_tuple<implicit_conversions_t<Ys>...>>;
+// case #3: function returning a delegated<...>
+template <class... Out, class... In>
+struct dmi<delegated<Out...>(In...)> {
+  using type = result<Out...>(std::decay_t<In>...);
 };
 
-// case #2c: function returning a std::tuple<...>
-template <class... Ys, class... Xs>
-struct dmi<delegated<Ys...> (Xs...)> {
-  using type = typed_mpi<type_list<typename param_decay<Xs>::type...>,
-                         output_tuple<implicit_conversions_t<Ys>...>>;
+// case #4: function returning a typed_response_promise<...>
+template <class... Out, class... In>
+struct dmi<typed_response_promise<Out...>(In...)> {
+  using type = result<Out...>(std::decay_t<In>...);
 };
-
-// case #2d: function returning a typed_response_promise<...>
-template <class... Ys, class... Xs>
-struct dmi<typed_response_promise<Ys...> (Xs...)> {
-  using type = typed_mpi<type_list<typename param_decay<Xs>::type...>,
-                         output_tuple<implicit_conversions_t<Ys>...>>;
-};
-
-// case #3: function returning an optional<>
-template <class Y, class... Xs>
-struct dmi<optional<Y> (Xs...)> : dmi<Y (Xs...)> {};
-
-// case #4: function returning an expected<>
-template <class Y, class... Xs>
-struct dmi<expected<Y> (Xs...)> : dmi<Y (Xs...)> {};
 
 // -- dmfou = deduce_mpi_function_object_unboxing
 
 template <class T, bool isClass = std::is_class<T>::value>
 struct dmfou;
 
-// case #1: const member function pointer
-template <class C, class Result, class... Ts>
-struct dmfou<Result (C::*)(Ts...) const, false> : dmi<Result (Ts...)> {};
+// case #1a: const member function pointer
+template <class C, class Out, class... In>
+struct dmfou<Out (C::*)(In...) const, false> : dmi<Out(In...)> {};
 
-// case #2: member function pointer
-template <class C, class Result, class... Ts>
-struct dmfou<Result (C::*)(Ts...), false> : dmi<Result (Ts...)> {};
+// case #1b: const member function pointer with noexcept
+template <class C, class Out, class... In>
+struct dmfou<Out (C::*)(In...) const noexcept, false> : dmi<Out(In...)> {};
 
-// case #3: good ol' function
-template <class Result, class... Ts>
-struct dmfou<Result(Ts...), false> : dmi<Result (Ts...)> {};
+// case #2a: member function pointer
+template <class C, class Out, class... In>
+struct dmfou<Out (C::*)(In...), false> : dmi<Out(In...)> {};
+
+// case #2b: member function pointer with noexcept
+template <class C, class Out, class... In>
+struct dmfou<Out (C::*)(In...) noexcept, false> : dmi<Out(In...)> {};
+
+// case #3a: good ol' function
+template <class Out, class... In>
+struct dmfou<Out(In...), false> : dmi<Out(In...)> {};
+
+// case #3a: good ol' function with noexcept
+template <class Out, class... In>
+struct dmfou<Out(In...) noexcept, false> : dmi<Out(In...)> {};
 
 template <class T>
 struct dmfou<T, true> : dmfou<decltype(&T::operator()), false> {};
@@ -106,14 +81,12 @@ struct dmfou<timeout_definition<T>, true> {
   using type = timeout_definition<T>;
 };
 
-template <class T>
-struct dmfou<trivial_match_case<T>, true> : dmfou<T> {};
+} // namespace caf::detail
 
-} // namespace detail
+namespace caf {
 
 /// Deduces the message passing interface from a function object.
 template <class T>
-using deduce_mpi_t = typename detail::dmfou<typename param_decay<T>::type>::type;
+using deduce_mpi_t = typename detail::dmfou<std::decay_t<T>>::type;
 
 } // namespace caf
-

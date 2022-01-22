@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -39,7 +25,7 @@ public:
   ~work_sharing() override;
 
   struct coordinator_data {
-    inline explicit coordinator_data(scheduler::abstract_coordinator*) {
+    explicit coordinator_data(scheduler::abstract_coordinator*) {
       // nop
     }
 
@@ -49,18 +35,19 @@ public:
   };
 
   struct worker_data {
-    inline explicit worker_data(scheduler::abstract_coordinator*) {
+    explicit worker_data(scheduler::abstract_coordinator*) {
       // nop
     }
   };
 
   template <class Coordinator>
-  void enqueue(Coordinator* self, resumable* job) {
+  bool enqueue(Coordinator* self, resumable* job) {
     queue_type l;
     l.push_back(job);
     std::unique_lock<std::mutex> guard(d(self).lock);
     d(self).queue.splice(d(self).queue.end(), l);
     d(self).cv.notify_one();
+    return true;
   }
 
   template <class Coordinator>

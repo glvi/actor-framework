@@ -2,20 +2,10 @@
 
 @Library('caf-continuous-integration') _
 
-// Default CMake flags for release builds.
-defaultReleaseBuildFlags = [
-    'CAF_ENABLE_RUNTIME_CHECKS:BOOL=yes',
-]
-
-// Default CMake flags for debug builds.
-defaultDebugBuildFlags = defaultReleaseBuildFlags + [
-    'CAF_SANITIZERS:STRING=address,undefined',
-    'CAF_LOG_LEVEL:STRING=TRACE',
-    'CAF_ENABLE_ACTOR_PROFILER:BOOL=yes',
-]
-
 // Configures the behavior of our stages.
 config = [
+    // Version dependency for the caf-continuous-integration library.
+    ciLibVersion: 1.0,
     // GitHub path to repository.
     repository: 'actor-framework/actor-framework',
     // List of enabled checks for email notifications.
@@ -23,102 +13,139 @@ config = [
         'build',
         'style',
         'tests',
-        'coverage',
+        // 'coverage', TODO: fix kcov setup
+    ],
+    // Default CMake flags by build type.
+    buildFlags: [
+        'CAF_ENABLE_ACTOR_PROFILER:BOOL=ON',
+        'CAF_ENABLE_EXAMPLES:BOOL=ON',
+        'CAF_ENABLE_RUNTIME_CHECKS:BOOL=ON',
+    ],
+    extraDebugFlags: [
+        'CAF_LOG_LEVEL:STRING=TRACE',
     ],
     // Our build matrix. Keys are the operating system labels and values are build configurations.
     buildMatrix: [
-        // Various Linux builds for debug and release.
-        ['debian-8', [
-            builds: ['debug', 'release'],
-            tools: ['clang-4'],
-        ]],
-        ['centos-6', [
-            builds: ['debug', 'release'],
-            tools: ['gcc-7'],
-        ]],
+        // Various Linux builds.
         ['centos-7', [
-            builds: ['debug', 'release'],
-            tools: ['gcc-7'],
+            numCores: 4,
+            tags: ['docker'],
+            builds: ['release'],
+        ]],
+        ['centos-8', [
+            numCores: 4,
+            tags: ['docker'],
+            builds: ['release'],
+        ]],
+        ['debian-9', [
+            numCores: 4,
+            tags: ['docker'],
+            builds: ['release'],
+        ]],
+        ['debian-10', [
+            numCores: 4,
+            tags: ['docker'],
+            builds: ['release'],
         ]],
         ['ubuntu-16.04', [
-            builds: ['debug', 'release'],
-            tools: ['clang-4'],
+            numCores: 4,
+            tags: ['docker'],
+            builds: ['release'],
         ]],
         ['ubuntu-18.04', [
-            builds: ['debug', 'release'],
-            tools: ['gcc-7'],
-        ]],
-        // On Fedora 28, our debug build also produces the coverage report.
-        ['fedora-28', [
-            builds: ['debug'],
-            tools: ['gcc-8'],
-            extraSteps: ['coverageReport'],
-            extraFlags: ['BUILD_SHARED_LIBS:BOOL=OFF'],
-        ]],
-        ['fedora-28', [
+            numCores: 4,
+            tags: ['docker'],
             builds: ['release'],
-            tools: ['gcc-8'],
         ]],
-        // Other UNIX systems.
+        ['ubuntu-20.04', [
+            numCores: 4,
+            tags: ['docker'],
+            builds: ['release'],
+        ]],
+        ['fedora-33', [
+            numCores: 4,
+            tags: ['docker'],
+            builds: ['release'],
+        ]],
+        ['fedora-34', [
+            numCores: 4,
+            tags: ['docker'],
+            builds: ['release'],
+        ]],
+        // One extra debug build with exceptions disabled.
+        ['centos-7', [
+            numCores: 4,
+            tags: ['docker'],
+            builds: ['debug'],
+            extraBuildFlags: [
+                'CAF_ENABLE_EXCEPTIONS:BOOL=OFF',
+                'CMAKE_CXX_FLAGS:STRING=-fno-exceptions',
+            ],
+        ]],
+        // One extra debug build for leak checking.
+        ['fedora-34', [
+            numCores: 4,
+            tags: ['docker', 'LeakSanitizer'],
+            builds: ['debug'],
+            extraBuildFlags: [
+                'CAF_SANITIZERS:STRING=address',
+            ],
+            extraBuildEnv: [
+                'ASAN_OPTIONS=detect_leaks=1',
+            ],
+        ]],
+        // One extra debug build with static libs, UBSan and hardening flags.
+        ['fedora-34', [
+            numCores: 4,
+            tags: ['docker', 'UBSanitizer'],
+            builds: ['debug'],
+            extraBuildFlags: [
+                'BUILD_SHARED_LIBS:BOOL=OFF',
+                'CAF_SANITIZERS:STRING=address,undefined',
+            ],
+            extraBuildEnv: [
+                'CXXFLAGS=-fno-sanitize-recover=undefined -D_GLIBCXX_DEBUG',
+                'LDFLAGS=-fno-sanitize-recover=undefined',
+            ],
+        ]],
+        // Other UNIX systems. On macOS, we also build *all* examples.
         ['macOS', [
+            numCores: 4,
             builds: ['debug', 'release'],
-            tools: ['clang'],
+            extraBuildFlags: [
+                'CAF_ENABLE_CURL_EXAMPLES:BOOL=ON',
+                'CAF_ENABLE_PROTOBUF_EXAMPLES:BOOL=ON',
+                'CAF_ENABLE_QT6_EXAMPLES:BOOL=ON',
+                'OPENSSL_ROOT_DIR:PATH=/usr/local/opt/openssl',
+                'Qt6_DIR:PATH=/usr/local/opt/qt/lib/cmake/Qt6',
+            ],
+            extraDebugBuildFlags: [
+                'CAF_SANITIZERS:STRING=address',
+            ],
         ]],
         ['FreeBSD', [
+            numCores: 4,
             builds: ['debug', 'release'],
-            tools: ['clang'],
+            extraBuildFlags: [
+                'CAF_SANITIZERS:STRING=address',
+            ],
         ]],
         // Non-UNIX systems.
         ['Windows', [
+            numCores: 4,
             // TODO: debug build currently broken
             //builds: ['debug', 'release'],
             builds: ['release'],
-            tools: ['msvc'],
+            extraBuildFlags: [
+                'OPENSSL_ROOT_DIR:PATH=C:\\Program Files\\OpenSSL-Win64',
+            ],
         ]],
-    ],
-    // Platform-specific environment settings.
-    buildEnvironments: [
-        nop: [], // Dummy value for getting the proper types.
-    ],
-    // Default CMake flags by build type.
-    defaultBuildFlags: [
-        debug: defaultDebugBuildFlags,
-        release: defaultReleaseBuildFlags,
-    ],
-    // CMake flags by OS and build type to override defaults for individual builds.
-    buildFlags: [
-        macOS: [
-            debug: defaultDebugBuildFlags + [
-                'OPENSSL_ROOT_DIR=/usr/local/opt/openssl',
-                'OPENSSL_INCLUDE_DIR=/usr/local/opt/openssl/include',
-            ],
-            release: defaultReleaseBuildFlags + [
-                'OPENSSL_ROOT_DIR=/usr/local/opt/openssl',
-                'OPENSSL_INCLUDE_DIR=/usr/local/opt/openssl/include',
-            ],
-        ],
-    ],
-    // Configures what binary the coverage report uses and what paths to exclude.
-    coverage: [
-        binaries: [
-          'build/bin/caf-core-test',
-          'build/bin/caf-io-test',
-        ],
-        relativeExcludePaths: [
-            'examples',
-            'tools',
-            'libcaf_test',
-            'libcaf_core/test',
-            'libcaf_io/test',
-            'libcaf_openssl/test',
-        ],
     ],
 ]
 
 // Declarative pipeline for triggering all stages.
 pipeline {
     options {
-        // Store no more than 50 logs and 10 artifacts.
         buildDiscarder(logRotator(numToKeepStr: '50', artifactNumToKeepStr: '3'))
     }
     agent {
@@ -127,7 +154,6 @@ pipeline {
     environment {
         PrettyJobBaseName = env.JOB_BASE_NAME.replace('%2F', '/')
         PrettyJobName = "CAF/$PrettyJobBaseName #${env.BUILD_NUMBER}"
-        ASAN_OPTIONS = 'detect_leaks=0'
     }
     stages {
         stage('Checkout') {
@@ -143,55 +169,7 @@ pipeline {
         }
         stage('Build') {
             steps {
-                buildParallel(config, PrettyJobBaseName)
-            }
-        }
-        stage('Documentation') {
-            agent { label 'pandoc' }
-            steps {
-                deleteDir()
-                unstash('sources')
-                dir('sources') {
-                    // Configure and build.
-                    cmakeBuild([
-                        buildDir: 'build',
-                        installation: 'cmake in search path',
-                        sourceDir: '.',
-                        cmakeArgs: '-DCAF_BUILD_TEX_MANUAL=yes',
-                        steps: [[
-                            args: '--target doc',
-                            withCmake: true,
-                        ]],
-                    ])
-                    sshagent(['84d71a75-cbb6-489a-8f4c-d0e2793201e9']) {
-                        sh """
-                            if [ "${env.GIT_BRANCH}" = "master" ]; then
-                                rsync -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" -r -z --delete build/doc/html/ www.inet.haw-hamburg.de:/users/www/www.actor-framework.org/html/doc
-                                scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null build/doc/manual.pdf www.inet.haw-hamburg.de:/users/www/www.actor-framework.org/html/pdf/manual.pdf
-                            fi
-                        """
-                    }
-                }
-                dir('read-the-docs') {
-                    git([
-                        credentialsId: '9b054212-9bb4-41fd-ad8e-b7d47495303f',
-                        url: 'git@github.com:actor-framework/read-the-docs.git',
-                    ])
-                    sh """
-                        if [ "${env.GIT_BRANCH}" = "master" ]; then
-                            cp ../sources/build/doc/rst/* .
-                            if [ -n "\$(git status --porcelain)" ]; then
-                                git add .
-                                git commit -m "Update Manual"
-                                git push --set-upstream origin master
-                                if [ -z "\$(grep 'exp.sha' ../sources/release.txt)" ] ; then
-                                    git tag \$(cat ../sources/release.txt)
-                                    git push origin \$(cat ../sources/release.txt)
-                                fi
-                            fi
-                        fi
-                    """
-                }
+                buildParallel(config)
             }
         }
         stage('Notify') {

@@ -1,27 +1,15 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <tuple>
 
 #include "caf/broadcast_downstream_manager.hpp"
+#include "caf/check_typed_input.hpp"
 #include "caf/default_downstream_manager.hpp"
+#include "caf/detail/implicit_conversions.hpp"
 #include "caf/detail/stream_source_driver_impl.hpp"
 #include "caf/detail/stream_source_impl.hpp"
 #include "caf/detail/type_list.hpp"
@@ -40,10 +28,7 @@ namespace caf {
 /// manager with `Driver`.
 /// @param self Points to the hosting actor.
 /// @param xs User-defined arguments for the stream handshake.
-/// @param init Function object for initializing the state of the source.
-/// @param pull Function object for generating downstream messages.
-/// @param done Predicate returning `true` when generator is done.
-/// @param fin Optional cleanup handler.
+/// @param ctor_args Parameter pack for constructing the driver.
 /// @returns The allocated `stream_manager` and the output slot.
 template <class Driver, class... Ts, class... CtorArgs>
 make_source_result_t<typename Driver::downstream_manager_type, Ts...>
@@ -104,10 +89,17 @@ template <class Init, class Pull, class Done, class Finalize = unit_t,
 detail::enable_if_t<!is_actor_handle<Init>::value && Trait::valid,
                     make_source_result_t<DownstreamManager>>
 attach_stream_source(scheduled_actor* self, Init init, Pull pull, Done done,
-                     Finalize finalize = {},
+                     Finalize fin = {},
                      policy::arg<DownstreamManager> token = {}) {
-  return attach_stream_source(self, std::make_tuple(), init, pull, done,
-                              finalize, token);
+  using output_type = typename Trait::output;
+  static_assert(detail::sendable<output_type>,
+                "the output type of the source has has no type ID, "
+                "did you forgot to announce it via CAF_ADD_TYPE_ID?");
+  static_assert(detail::sendable<stream<output_type>>,
+                "stream<T> for the output type has has no type ID, "
+                "did you forgot to announce it via CAF_ADD_TYPE_ID?");
+  return attach_stream_source(self, std::make_tuple(), init, pull, done, fin,
+                              token);
 }
 
 /// Attaches a new stream source to `self` by creating a default stream source

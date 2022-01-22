@@ -1,29 +1,17 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include "caf/config_value.hpp"
 #include "caf/detail/core_export.hpp"
+#include "caf/detail/move_if_not_ptr.hpp"
 #include "caf/dictionary.hpp"
 #include "caf/optional.hpp"
 #include "caf/raise_error.hpp"
 #include "caf/string_view.hpp"
+#include "caf/sum_type.hpp"
 
 namespace caf {
 
@@ -31,59 +19,70 @@ namespace caf {
 /// @relates config_value
 using settings = dictionary<config_value>;
 
+/// @relates config_value
+CAF_CORE_EXPORT std::string to_string(const settings& xs);
+
 /// Tries to retrieve the value associated to `name` from `xs`.
 /// @relates config_value
-CAF_CORE_EXPORT const config_value*
-get_if(const settings* xs, string_view name);
+CAF_CORE_EXPORT const config_value* get_if(const settings* xs,
+                                           string_view name);
 
 /// Tries to retrieve the value associated to `name` from `xs`.
 /// @relates config_value
 template <class T>
-optional<T> get_if(const settings* xs, string_view name) {
-  if (auto value = get_if(xs, name))
-    if (auto ptr = get_if<T>(value))
-      return *ptr;
-  return none;
+auto get_if(const settings* xs, string_view name) {
+  auto value = get_if(xs, name);
+  using result_type = decltype(get_if<T>(value));
+  return value ? get_if<T>(value) : result_type{};
 }
 
 /// Returns whether `xs` associates a value of type `T` to `name`.
 /// @relates config_value
 template <class T>
 bool holds_alternative(const settings& xs, string_view name) {
-  using access = select_config_value_access_t<T>;
   if (auto value = get_if(&xs, name))
-    return access::is(*value);
-  return false;
+    return holds_alternative<T>(*value);
+  else
+    return false;
 }
 
+/// Retrieves the value associated to `name` from `xs`.
+/// @relates actor_system_config
 template <class T>
 T get(const settings& xs, string_view name) {
   auto result = get_if<T>(&xs, name);
-  CAF_ASSERT(result != none);
-  return std::move(*result);
+  CAF_ASSERT(result);
+  return detail::move_if_not_ptr(result);
 }
 
-template <class T, class = typename std::enable_if<
-                     !std::is_pointer<T>::value
-                     && !std::is_convertible<T, string_view>::value>::type>
-T get_or(const settings& xs, string_view name, T default_value) {
-  auto result = get_if<T>(&xs, name);
-  if (result)
-    return std::move(*result);
-  return default_value;
+/// Retrieves the value associated to `name` from `xs` or returns `fallback`.
+/// @relates actor_system_config
+template <class To = get_or_auto_deduce, class Fallback>
+auto get_or(const settings& xs, string_view name, Fallback&& fallback) {
+  if (auto ptr = get_if(&xs, name)) {
+    return get_or<To>(*ptr, std::forward<Fallback>(fallback));
+  } else if constexpr (std::is_same<To, get_or_auto_deduce>::value) {
+    using guide = get_or_deduction_guide<std::decay_t<Fallback>>;
+    return guide::convert(std::forward<Fallback>(fallback));
+  } else {
+    return To{std::forward<Fallback>(fallback)};
+  }
 }
 
-CAF_CORE_EXPORT std::string
-get_or(const settings& xs, string_view name, string_view default_value);
+/// Tries to retrieve the value associated to `name` from `xs` as an instance of
+/// type `T`.
+/// @relates actor_system_config
+template <class T>
+expected<T> get_as(const settings& xs, string_view name) {
+  if (auto ptr = get_if(&xs, name))
+    return get_as<T>(*ptr);
+  else
+    return {sec::no_such_key};
+}
 
 /// @private
-CAF_CORE_EXPORT config_value&
-put_impl(settings& dict, const std::vector<string_view>& path,
-         config_value& value);
-
-/// @private
-CAF_CORE_EXPORT config_value&
-put_impl(settings& dict, string_view key, config_value& value);
+CAF_CORE_EXPORT config_value& put_impl(settings& dict, string_view name,
+                                       config_value& value);
 
 /// Converts `value` to a `config_value` and assigns it to `key`.
 /// @param dict Dictionary of key-value pairs.
@@ -114,7 +113,7 @@ CAF_CORE_EXPORT config_value::list& put_list(settings& xs, std::string name);
 
 /// Inserts a new list named `name` into the dictionary `xs` and returns
 /// a reference to it. Overrides existing entries with the same name.
-CAF_CORE_EXPORT config_value::dictionary&
-put_dictionary(settings& xs, std::string name);
+CAF_CORE_EXPORT config_value::dictionary& put_dictionary(settings& xs,
+                                                         std::string name);
 
 } // namespace caf

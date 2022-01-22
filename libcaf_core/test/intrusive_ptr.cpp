@@ -1,35 +1,21 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
-
-#include "caf/config.hpp"
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE intrusive_ptr
-#include "caf/test/unit_test.hpp"
+
+#include "caf/intrusive_ptr.hpp"
+
+#include "core-test.hpp"
 
 // this test doesn't verify thread-safety of intrusive_ptr
 // however, it is thread safe since it uses atomic operations only
 
-#include <vector>
 #include <cstddef>
+#include <vector>
 
-#include "caf/ref_counted.hpp"
 #include "caf/make_counted.hpp"
-#include "caf/intrusive_ptr.hpp"
+#include "caf/ref_counted.hpp"
 
 using namespace caf;
 
@@ -95,34 +81,34 @@ class0ptr get_test_ptr() {
 
 struct fixture {
   ~fixture() {
-    CAF_CHECK_EQUAL(class0_instances, 0);
-    CAF_CHECK_EQUAL(class1_instances, 0);
+    CHECK_EQ(class0_instances, 0);
+    CHECK_EQ(class1_instances, 0);
   }
 };
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(atom_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(make_counted) {
   auto p = make_counted<class0>();
-  CAF_CHECK_EQUAL(class0_instances, 1);
-  CAF_CHECK(p->unique());
+  CHECK_EQ(class0_instances, 1);
+  CHECK(p->unique());
 }
 
 CAF_TEST(reset) {
   class0ptr p;
   p.reset(new class0, false);
-  CAF_CHECK_EQUAL(class0_instances, 1);
-  CAF_CHECK(p->unique());
+  CHECK_EQ(class0_instances, 1);
+  CHECK(p->unique());
 }
 
 CAF_TEST(get_test_rc) {
   class0ptr p1;
   p1 = get_test_rc();
   class0ptr p2 = p1;
-  CAF_CHECK_EQUAL(class0_instances, 1);
-  CAF_CHECK_EQUAL(p1->unique(), false);
+  CHECK_EQ(class0_instances, 1);
+  CHECK_EQ(p1->unique(), false);
 }
 
 CAF_TEST(list) {
@@ -130,27 +116,27 @@ CAF_TEST(list) {
   pl.push_back(get_test_ptr());
   pl.push_back(get_test_rc());
   pl.push_back(pl.front()->create());
-  CAF_CHECK(pl.front()->unique());
-  CAF_CHECK_EQUAL(class0_instances, 3);
+  CHECK(pl.front()->unique());
+  CHECK_EQ(class0_instances, 3);
 }
 
 CAF_TEST(full_test) {
   auto p1 = make_counted<class0>();
-  CAF_CHECK_EQUAL(p1->is_subtype(), false);
-  CAF_CHECK_EQUAL(p1->unique(), true);
-  CAF_CHECK_EQUAL(class0_instances, 1);
-  CAF_CHECK_EQUAL(class1_instances, 0);
+  CHECK_EQ(p1->is_subtype(), false);
+  CHECK_EQ(p1->unique(), true);
+  CHECK_EQ(class0_instances, 1);
+  CHECK_EQ(class1_instances, 0);
   p1.reset(new class1, false);
-  CAF_CHECK_EQUAL(p1->is_subtype(), true);
-  CAF_CHECK_EQUAL(p1->unique(), true);
-  CAF_CHECK_EQUAL(class0_instances, 0);
-  CAF_CHECK_EQUAL(class1_instances, 1);
+  CHECK_EQ(p1->is_subtype(), true);
+  CHECK_EQ(p1->unique(), true);
+  CHECK_EQ(class0_instances, 0);
+  CHECK_EQ(class1_instances, 1);
   auto p2 = make_counted<class1>();
   p1 = p2;
-  CAF_CHECK_EQUAL(p1->unique(), false);
-  CAF_CHECK_EQUAL(class0_instances, 0);
-  CAF_CHECK_EQUAL(class1_instances, 1);
-  CAF_CHECK_EQUAL(p1, static_cast<class0*>(p2.get()));
+  CHECK_EQ(p1->unique(), false);
+  CHECK_EQ(class0_instances, 0);
+  CHECK_EQ(class1_instances, 1);
+  CHECK_EQ(p1, static_cast<class0*>(p2.get()));
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

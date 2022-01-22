@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -27,7 +13,6 @@
 #include "caf/actor_cast.hpp"
 #include "caf/actor_clock.hpp"
 #include "caf/actor_system.hpp"
-#include "caf/atom.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
 #include "caf/message.hpp"
@@ -45,29 +30,29 @@ public:
   explicit abstract_coordinator(actor_system& sys);
 
   /// Returns a handle to the central printing actor.
-  inline actor printer() const {
+  actor printer() const {
     return actor_cast<actor>(utility_actors_[printer_id]);
   }
 
   /// Returns the number of utility actors.
-  inline size_t num_utility_actors() const {
+  size_t num_utility_actors() const {
     return utility_actors_.size();
   }
 
   /// Puts `what` into the queue of a randomly chosen worker.
   virtual void enqueue(resumable* what) = 0;
 
-  inline actor_system& system() {
+  actor_system& system() {
     return system_;
   }
 
   const actor_system_config& config() const;
 
-  inline size_t max_throughput() const {
+  size_t max_throughput() const {
     return max_throughput_;
   }
 
-  inline size_t num_workers() const {
+  size_t num_workers() const {
     return num_workers_;
   }
 
@@ -85,6 +70,8 @@ public:
   static void cleanup_and_release(resumable*);
 
   virtual actor_clock& clock() noexcept = 0;
+
+  static size_t default_thread_count() noexcept;
 
 protected:
   void stop_actors();

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/scheduler/test_coordinator.hpp"
 
@@ -51,8 +37,13 @@ public:
       [&](add_atom, actor_id, const std::string& str) { std::cout << str; });
   }
 
-  void enqueue(mailbox_element_ptr what, execution_unit*) override {
+  bool enqueue(mailbox_element_ptr what, execution_unit*) override {
     mh_(what->content());
+    return true;
+  }
+
+  void setup_metrics() {
+    // nop
   }
 
 private:
@@ -74,6 +65,7 @@ detail::test_actor_clock& test_coordinator::clock() noexcept {
 }
 
 void test_coordinator::start() {
+  CAF_LOG_TRACE("");
   dummy_worker worker{this};
   actor_config cfg{&worker};
   auto& sys = system();
@@ -82,6 +74,7 @@ void test_coordinator::start() {
 }
 
 void test_coordinator::stop() {
+  CAF_LOG_TRACE("");
   while (run() > 0)
     trigger_timeouts();
 }
@@ -90,6 +83,7 @@ void test_coordinator::enqueue(resumable* ptr) {
   CAF_LOG_TRACE("");
   jobs.push_back(ptr);
   if (after_next_enqueue_ != nullptr) {
+    CAF_LOG_DEBUG("inline this enqueue");
     std::function<void()> f;
     f.swap(after_next_enqueue_);
     f();
@@ -97,6 +91,7 @@ void test_coordinator::enqueue(resumable* ptr) {
 }
 
 bool test_coordinator::try_run_once() {
+  CAF_LOG_TRACE("");
   if (jobs.empty())
     return false;
   auto job = jobs.front();
@@ -117,6 +112,7 @@ bool test_coordinator::try_run_once() {
 }
 
 bool test_coordinator::try_run_once_lifo() {
+  CAF_LOG_TRACE("");
   if (jobs.empty())
     return false;
   if (jobs.size() >= 2)
@@ -125,18 +121,21 @@ bool test_coordinator::try_run_once_lifo() {
 }
 
 void test_coordinator::run_once() {
+  CAF_LOG_TRACE("");
   if (jobs.empty())
     CAF_RAISE_ERROR("No job to run available.");
   try_run_once();
 }
 
 void test_coordinator::run_once_lifo() {
+  CAF_LOG_TRACE("");
   if (jobs.empty())
     CAF_RAISE_ERROR("No job to run available.");
   try_run_once_lifo();
 }
 
 size_t test_coordinator::run(size_t max_count) {
+  CAF_LOG_TRACE(CAF_ARG(max_count));
   size_t res = 0;
   while (res < max_count && try_run_once())
     ++res;
@@ -144,16 +143,19 @@ size_t test_coordinator::run(size_t max_count) {
 }
 
 void test_coordinator::inline_next_enqueue() {
+  CAF_LOG_TRACE("");
   after_next_enqueue([=] { run_once_lifo(); });
 }
 
 void test_coordinator::inline_all_enqueues() {
+  CAF_LOG_TRACE("");
   after_next_enqueue([=] { inline_all_enqueues_helper(); });
 }
 
 void test_coordinator::inline_all_enqueues_helper() {
-  run_once_lifo();
+  CAF_LOG_TRACE("");
   after_next_enqueue([=] { inline_all_enqueues_helper(); });
+  run_once_lifo();
 }
 
 } // namespace caf::scheduler

@@ -1,58 +1,23 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/error.hpp"
 
+#include "caf/actor_system_config.hpp"
 #include "caf/config.hpp"
 #include "caf/deep_to_string.hpp"
 #include "caf/deserializer.hpp"
+#include "caf/detail/meta_object.hpp"
 #include "caf/message.hpp"
 #include "caf/serializer.hpp"
 
 namespace caf {
 
-// -- nested classes -----------------------------------------------------------
-
-struct error::data {
-  uint8_t code;
-  atom_value category;
-  message context;
-};
-
 // -- constructors, destructors, and assignment operators ----------------------
-
-error::error() noexcept : data_(nullptr) {
-  // nop
-}
 
 error::error(none_t) noexcept : data_(nullptr) {
   // nop
-}
-
-error::error(error&& x) noexcept : data_(x.data_) {
-  if (data_ != nullptr)
-    x.data_ = nullptr;
-}
-
-error& error::operator=(error&& x) noexcept {
-  if (this != &x)
-    std::swap(data_, x.data_);
-  return *this;
 }
 
 error::error(const error& x) : data_(x ? new data(*x.data_) : nullptr) {
@@ -60,119 +25,69 @@ error::error(const error& x) : data_(x ? new data(*x.data_) : nullptr) {
 }
 
 error& error::operator=(const error& x) {
-  if (this == &x)
-    return *this;
-  if (x) {
+  if (this == &x) {
+    // nop
+  } else if (x) {
     if (data_ == nullptr)
-      data_ = new data(*x.data_);
+      data_.reset(new data(*x.data_));
     else
       *data_ = *x.data_;
   } else {
-    clear();
+    data_.reset();
   }
   return *this;
 }
 
-error::error(uint8_t x, atom_value y)
-  : data_(x != 0 ? new data{x, y, none} : nullptr) {
+error::error(uint8_t code, type_id_t category)
+  : error(code, category, message{}) {
   // nop
 }
 
-error::error(uint8_t x, atom_value y, message z)
-  : data_(x != 0 ? new data{x, y, std::move(z)} : nullptr) {
+error::error(uint8_t code, type_id_t category, message context)
+  : data_(code != 0 ? new data{code, category, std::move(context)} : nullptr) {
   // nop
-}
-
-error::~error() {
-  delete data_;
 }
 
 // -- observers ----------------------------------------------------------------
 
-uint8_t error::code() const noexcept {
-  CAF_ASSERT(data_ != nullptr);
-  return data_->code;
-}
-
-atom_value error::category() const noexcept {
-  CAF_ASSERT(data_ != nullptr);
-  return data_->category;
-}
-
-const message& error::context() const noexcept {
-  CAF_ASSERT(data_ != nullptr);
-  return data_->context;
-}
-
 int error::compare(const error& x) const noexcept {
-  uint8_t x_code;
-  atom_value x_category;
-  if (x) {
-    x_code = x.data_->code;
-    x_category = x.data_->category;
-  } else {
-    x_code = 0;
-    x_category = atom("");
-  }
-  return compare(x_code, x_category);
+  return x ? compare(x.data_->code, x.data_->category) : compare(0, 0);
 }
 
-int error::compare(uint8_t x, atom_value y) const noexcept {
-  uint8_t mx;
-  atom_value my;
-  if (data_ != nullptr) {
-    mx = data_->code;
-    my = data_->category;
-  } else {
-    mx = 0;
-    my = atom("");
-  }
-  // all errors with default value are considered no error -> equal
-  if (mx == x && x == 0)
-    return 0;
-  if (my < y)
-    return -1;
-  if (my > y)
-    return 1;
-  return static_cast<int>(mx) - x;
-}
-
-// -- modifiers --------------------------------------------------------------
-
-message& error::context() noexcept {
-  CAF_ASSERT(data_ != nullptr);
-  return data_->context;
-}
-
-void error::clear() noexcept {
-  if (data_ != nullptr) {
-    delete data_;
-    data_ = nullptr;
-  }
+int error::compare(uint8_t code, type_id_t category) const noexcept {
+  int x = 0;
+  if (data_ != nullptr)
+    x = (data_->code << 16) | data_->category;
+  return x - int{(code << 16) | category};
 }
 
 // -- inspection support -----------------------------------------------------
 
-uint8_t& error::code_ref() noexcept {
-  CAF_ASSERT(data_ != nullptr);
-  return data_->code;
-}
-
-atom_value& error::category_ref() noexcept {
-  CAF_ASSERT(data_ != nullptr);
-  return data_->category;
-}
-
-void error::init() {
-  if (data_ == nullptr)
-    data_ = new data;
-}
-
 std::string to_string(const error& x) {
+  using const_void_ptr = const void*;
+  using const_meta_ptr = const detail::meta_object*;
   if (!x)
     return "none";
-  return deep_to_string(meta::type_name("error"), x.code(), x.category(),
-                        meta::omittable_if_empty(), x.context());
+  std::string result;
+  auto append = [&result](const_void_ptr ptr,
+                          const_meta_ptr meta) -> const_void_ptr {
+    meta->stringify(result, ptr);
+    return static_cast<const byte*>(ptr) + meta->padded_size;
+  };
+  auto code = x.code();
+  append(&code, detail::global_meta_object(x.category()));
+  if (auto& ctx = x.context()) {
+    result += '(';
+    auto ptr = static_cast<const_void_ptr>(ctx.cdata().storage());
+    auto types = ctx.types();
+    ptr = append(ptr, detail::global_meta_object(types[0]));
+    for (size_t index = 1; index < types.size(); ++index) {
+      result += ", ";
+      ptr = append(ptr, detail::global_meta_object(types[index]));
+    }
+    result += ')';
+  }
+  return result;
 }
 
 } // namespace caf

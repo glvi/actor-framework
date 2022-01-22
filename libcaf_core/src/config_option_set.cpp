@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/config_option_set.hpp"
 
@@ -58,8 +44,8 @@ config_option_set& config_option_set::add(config_option opt) {
 }
 
 std::string config_option_set::help_text(bool global_only) const {
-  //<--- argument --------> <---- description --->
-  // (-w|--write) <string> : output file
+  // <--- argument --------> <---- description --->
+  //  (-w|--write) <string> : output file
   auto build_argument = [](const config_option& x) {
     string_builder sb;
     if (x.short_names().empty()) {
@@ -137,6 +123,12 @@ auto config_option_set::parse(settings& config, argument_iterator first,
   // Parses an argument.
   using iter = string::const_iterator;
   auto consume = [&](const config_option& opt, iter arg_begin, iter arg_end) {
+    auto to_pec_code = [](const error& err) {
+      if (err.category() == type_id_v<pec>)
+        return static_cast<pec>(err.code());
+      else
+        return pec::invalid_argument;
+    };
     // Extract option name and category.
     auto opt_name = opt.long_name();
     auto opt_ctg = opt.category();
@@ -144,26 +136,31 @@ auto config_option_set::parse(settings& config, argument_iterator first,
     auto& entry = opt_ctg == "global" ? config : select_entry(config, opt_ctg);
     // Flags only consume the current element.
     if (opt.is_flag()) {
-      if (arg_begin != arg_end)
-        return pec::illegal_argument;
-      config_value cfg_true{true};
-      opt.store(cfg_true);
-      entry[opt_name] = cfg_true;
-    } else {
-      if (arg_begin == arg_end)
-        return pec::missing_argument;
-      auto slice_size = static_cast<size_t>(std::distance(arg_begin, arg_end));
-      string_view slice{&*arg_begin, slice_size};
-      auto val = opt.parse(slice);
-      if (!val) {
-        auto& err = val.error();
-        if (err.category() == atom("parser"))
-          return static_cast<pec>(err.code());
-        return pec::illegal_argument;
+      if (arg_begin == arg_end) {
+        config_value cfg_true{true};
+        if (auto err = opt.sync(cfg_true); !err) {
+          entry[opt_name] = cfg_true;
+          return pec::success;
+        } else {
+          return to_pec_code(err);
+        }
+      } else {
+        return pec::invalid_argument;
       }
-      entry[opt_name] = std::move(*val);
+    } else {
+      if (arg_begin != arg_end) {
+        auto arg_size = static_cast<size_t>(std::distance(arg_begin, arg_end));
+        config_value val{string_view{std::addressof(*arg_begin), arg_size}};
+        if (auto err = opt.sync(val); !err) {
+          entry[opt_name] = std::move(val);
+          return pec::success;
+        } else {
+          return to_pec_code(err);
+        }
+      } else {
+        return pec::missing_argument;
+      }
     }
-    return pec::success;
   };
   // We loop over the first N-1 values, because we always consider two
   // arguments at once.
@@ -235,9 +232,7 @@ config_option_set::parse(settings& config,
 }
 
 config_option_set::option_pointer
-config_option_set::cli_long_name_lookup(string_view input) const {
-  // We accept "caf#" prefixes for backward compatibility, but ignore them.
-  auto name = input.substr(input.compare(0, 4, "caf#") != 0 ? 0u : 4u);
+config_option_set::cli_long_name_lookup(string_view name) const {
   // Extract category and long name.
   string_view category;
   string_view long_name;
@@ -275,10 +270,17 @@ config_option_set::qualified_name_lookup(string_view category,
 
 config_option_set::option_pointer
 config_option_set::qualified_name_lookup(string_view name) const {
-  auto sep = name.find('.');
+  auto sep = name.rfind('.');
   if (sep == string::npos)
     return nullptr;
   return qualified_name_lookup(name.substr(0, sep), name.substr(sep + 1));
+}
+
+bool config_option_set::has_category(string_view category) const noexcept {
+  auto predicate = [category](const config_option& opt) {
+    return opt.category() == category;
+  };
+  return std::any_of(opts_.begin(), opts_.end(), predicate);
 }
 
 } // namespace caf

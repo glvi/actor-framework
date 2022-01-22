@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -36,11 +22,24 @@
 #include "caf/config_option_adder.hpp"
 #include "caf/config_option_set.hpp"
 #include "caf/config_value.hpp"
+#include "caf/detail/set_thread_name.hpp"
 #include "caf/settings.hpp"
 #include "caf/string_algorithms.hpp"
 #include "caf/test/unit_test.hpp"
 
 namespace caf::test {
+
+#ifdef CAF_ENABLE_EXCEPTIONS
+
+requirement_error::requirement_error(std::string msg) : what_(std::move(msg)) {
+  // nop
+}
+
+const char* requirement_error::what() const noexcept {
+  return what_.c_str();
+}
+
+#endif // CAF_ENABLE_EXCEPTIONS
 
 class watchdog {
 public:
@@ -50,6 +49,7 @@ public:
 private:
   watchdog(int secs) {
     thread_ = std::thread{[=] {
+      caf::detail::set_thread_name("test.watchdog");
       auto tp = std::chrono::high_resolution_clock::now()
                 + std::chrono::seconds(secs);
       std::unique_lock<std::mutex> guard{mtx_};
@@ -133,6 +133,7 @@ namespace detail {
               << term::yellow << ":" << term::cyan << engine::last_check_line()
               << term::reset << detail::fill(engine::last_check_line())
               << "had last successful check" << '\n';
+  CAF_RAISE_ERROR(requirement_error, msg.c_str());
   abort();
 }
 
@@ -162,7 +163,107 @@ bool check(test* parent, const char* file, size_t line, const char* expr,
         << term::blue << line << fill(line) << term::reset << expr << '\n';
     parent->fail(should_fail);
   }
+  engine::last_check_file(file);
+  engine::last_check_line(line);
   return result;
+}
+
+bool check_un(bool result, const char* file, size_t line, const char* expr) {
+  string_view rel_up = "../";
+  while (strncmp(file, rel_up.data(), rel_up.size()) == 0)
+    file += rel_up.size();
+  auto parent = engine::current_test();
+  auto out = logger::instance().massive();
+  if (result) {
+    out << term::green << "** " << term::blue << file << term::yellow << ":"
+        << term::blue << line << fill(line) << term::reset << "passed" << '\n';
+    parent->pass();
+  } else {
+    out << term::red << "!! " << term::blue << file << term::yellow << ":"
+        << term::blue << line << fill(line) << term::red
+        << "check failed: " << expr << term::reset << '\n';
+    parent->fail(false);
+  }
+  engine::last_check_file(file);
+  engine::last_check_line(line);
+  return result;
+}
+
+bool check_bin(bool result, const char* file, size_t line, const char* expr,
+               const std::string& lhs, const std::string& rhs) {
+  string_view rel_up = "../";
+  while (strncmp(file, rel_up.data(), rel_up.size()) == 0)
+    file += rel_up.size();
+  auto parent = engine::current_test();
+  auto out = logger::instance().massive();
+  if (result) {
+    out << term::green << "** " << term::blue << file << term::yellow << ":"
+        << term::blue << line << fill(line) << term::reset << "passed" << '\n';
+    parent->pass();
+  } else {
+    out << term::red << "!! " << term::blue << file << term::yellow << ":"
+        << term::blue << line << fill(line) << term::red
+        << "check failed: " << expr << term::reset << '\n'
+        << "  lhs: " << lhs << '\n'
+        << "  rhs: " << rhs << '\n';
+    parent->fail(false);
+  }
+  engine::last_check_file(file);
+  engine::last_check_line(line);
+  return result;
+}
+
+void require_un(bool result, const char* file, size_t line, const char* expr) {
+  string_view rel_up = "../";
+  while (strncmp(file, rel_up.data(), rel_up.size()) == 0)
+    file += rel_up.size();
+  auto parent = engine::current_test();
+  auto out = logger::instance().massive();
+  if (result) {
+    out << term::green << "** " << term::blue << file << term::yellow << ":"
+        << term::blue << line << fill(line) << term::reset << "passed" << '\n';
+    parent->pass();
+    engine::last_check_file(file);
+    engine::last_check_line(line);
+  } else {
+    out << term::red << "!! " << term::blue << file << term::yellow << ":"
+        << term::blue << line << fill(line) << term::red
+        << "requirement failed: " << expr << term::reset << '\n';
+    parent->fail(false);
+    std::string msg = "requirement failed in ";
+    msg += file;
+    msg += " line ";
+    msg += std::to_string(line);
+    requirement_failed(std::move(msg));
+  }
+}
+
+void require_bin(bool result, const char* file, size_t line, const char* expr,
+                 const std::string& lhs, const std::string& rhs) {
+  string_view rel_up = "../";
+  while (strncmp(file, rel_up.data(), rel_up.size()) == 0)
+    file += rel_up.size();
+  auto parent = engine::current_test();
+  auto out = logger::instance().massive();
+  if (result) {
+    out << term::green << "** " << term::blue << file << term::yellow << ":"
+        << term::blue << line << fill(line) << term::reset << "passed" << '\n';
+    parent->pass();
+    engine::last_check_file(file);
+    engine::last_check_line(line);
+  } else {
+    out << term::red << "!! " << term::blue << file << term::yellow << ":"
+        << term::blue << line << fill(line) << term::red
+        << "requirement failed: " << expr << term::reset << '\n'
+        << "  lhs: " << lhs << '\n'
+        << "  rhs: " << rhs << '\n';
+    parent->fail(false);
+    std::string msg = "requirement failed in ";
+    msg += file;
+    msg += " line ";
+    msg += std::to_string(line);
+    requirement_failed(std::move(msg));
+  }
 }
 
 } // namespace detail
@@ -284,36 +385,6 @@ bool engine::run(bool colorize, const std::string& log_file,
   size_t total_bad = 0;
   size_t total_bad_expected = 0;
   auto bar = '+' + std::string(70, '-') + '+';
-#if (!defined(__clang__) && defined(__GNUC__) && __GNUC__ == 4                 \
-     && __GNUC_MINOR__ < 9)                                                    \
-  || (defined(__clang__) && !defined(_LIBCPP_VERSION))
-  // regex implementation is broken prior to 4.9
-  using strvec = std::vector<std::string>;
-  using whitelist_type = strvec;
-  using blacklist_type = strvec;
-  auto from_psv = [](const std::string& psv) -> strvec {
-    // psv == pipe-separated-values
-    strvec result;
-    if (psv != ".*") {
-      split(result, psv, "|", token_compress_on);
-      std::sort(result.begin(), result.end());
-    }
-    return result;
-  };
-  auto suites = from_psv(suites_str);
-  auto not_suites = from_psv(not_suites_str);
-  auto tests = from_psv(tests_str);
-  auto not_tests = from_psv(not_tests_str);
-  auto enabled = [](const strvec& whitelist, const strvec& blacklist,
-                    const std::string& x) {
-    // an empty whitelist means original input was ".*", i.e., enable all
-    return !std::binary_search(blacklist.begin(), blacklist.end(), x)
-           && (whitelist.empty()
-               || std::binary_search(whitelist.begin(), whitelist.end(), x));
-  };
-#else
-  using whitelist_type = std::regex;
-  using blacklist_type = std::regex;
   std::regex suites{suites_str};
   std::regex tests{tests_str};
   std::regex not_suites;
@@ -323,18 +394,16 @@ bool engine::run(bool colorize, const std::string& log_file,
     not_suites.assign(not_suites_str);
   if (!not_tests_str.empty())
     not_tests.assign(not_tests_str);
-  auto enabled = [](const std::regex& whitelist, const std::regex& blacklist,
+  auto enabled = [](const std::regex& selected, const std::regex& blocked,
                     const std::string& x) {
-    // an empty whitelist means original input was "*", i.e., enable all
-    return std::regex_search(x, whitelist) && !std::regex_search(x, blacklist);
+    return std::regex_search(x, selected) && !std::regex_search(x, blocked);
   };
-#endif
-  auto test_enabled = [&](const whitelist_type& whitelist,
-                          const blacklist_type& blacklist, const test& x) {
+  auto test_enabled = [&](const std::regex& selected, const std::regex& blocked,
+                          const test& x) {
     // Disabled tests run if explicitly requested by the user, i.e.,
     // tests_str is not the ".*" catch-all default.
     return (!x.disabled() || tests_str != ".*")
-           && enabled(whitelist, blacklist, x.name());
+           && enabled(selected, blocked, x.name());
   };
   std::vector<std::string> failed_tests;
   for (auto& p : instance().suites_) {
@@ -358,7 +427,23 @@ bool engine::run(bool colorize, const std::string& log_file,
       log.verbose() << term::yellow << "- " << term::reset << t->name() << '\n';
       auto start = std::chrono::high_resolution_clock::now();
       watchdog::start(max_runtime());
+#ifdef CAF_ENABLE_EXCEPTIONS
+      try {
+        t->run_test_impl();
+      } catch (requirement_error&) {
+        // nop
+      } catch (std::exception& ex) {
+        t->fail(false);
+        log.error() << term::red << "!! uncaught exception, what: " << ex.what()
+                    << term::reset_endl;
+      } catch (...) {
+        t->fail(false);
+        log.error() << term::red << "!! uncaught exception of unknown type"
+                    << term::reset_endl;
+      }
+#else
       t->run_test_impl();
+#endif // CAF_ENABLE_EXCEPTIONS
       watchdog::stop();
       auto stop = std::chrono::high_resolution_clock::now();
       auto elapsed
@@ -480,8 +565,8 @@ std::string engine::render(std::chrono::microseconds t) {
   return t.count() > 1000000
            ? (std::to_string(t.count() / 1000000) + '.'
               + std::to_string((t.count() % 1000000) / 10000) + " s")
-           : t.count() > 1000 ? (std::to_string(t.count() / 1000) + " ms")
-                              : (std::to_string(t.count()) + " us");
+         : t.count() > 1000 ? (std::to_string(t.count() / 1000) + " ms")
+                            : (std::to_string(t.count()) + " us");
 }
 
 int main(int argc, char** argv) {
@@ -572,6 +657,7 @@ int main(int argc, char** argv) {
 
 #ifndef CAF_TEST_NO_MAIN
 int main(int argc, char** argv) {
+  caf::core::init_global_meta_objects();
   return caf::test::main(argc, argv);
 }
 #endif // CAF_TEST_UNIT_TEST_IMPL_HPP

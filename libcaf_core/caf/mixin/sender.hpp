@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -61,15 +47,20 @@ public:
   template <message_priority P = message_priority::normal, class... Ts>
   void send(const group& dest, Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
+    static_assert((detail::sendable<Ts> && ...),
+                  "at least one type has no ID, "
+                  "did you forgot to announce it via CAF_ADD_TYPE_ID?");
     static_assert(!statically_typed<Subtype>(),
                   "statically typed actors can only send() to other "
                   "statically typed actors; use anon_send() when "
                   "communicating to groups");
+    auto self = dptr();
     // TODO: consider whether it's feasible to track messages to groups
     if (dest) {
-      auto self = dptr();
       dest->eq_impl(make_message_id(P), self->ctrl(), self->context(),
                     std::forward<Ts>(xs)...);
+    } else {
+      self->home_system().base_metrics().rejected_messages->inc();
     }
   }
 
@@ -79,6 +70,9 @@ public:
   detail::enable_if_t<!std::is_same<group, Dest>::value>
   send(const Dest& dest, Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
+    static_assert((detail::sendable<Ts> && ...),
+                  "at least one type has no ID, "
+                  "did you forgot to announce it via CAF_ADD_TYPE_ID?");
     detail::type_list<detail::strip_and_convert_t<Ts>...> args_token;
     type_check(dest, args_token);
     auto self = dptr();
@@ -90,11 +84,14 @@ public:
             class... Ts>
   void anon_send(const Dest& dest, Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
+    static_assert((detail::sendable<Ts> && ...),
+                  "at least one type has no ID, "
+                  "did you forgot to announce it via CAF_ADD_TYPE_ID?");
     using token = detail::type_list<detail::strip_and_convert_t<Ts>...>;
     static_assert(response_type_unbox<signatures_of_t<Dest>, token>::valid,
                   "receiver does not accept given message");
     auto self = dptr();
-    detail::profiled_send(self, self->ctrl(), dest, make_message_id(P), {},
+    detail::profiled_send(self, nullptr, dest, make_message_id(P), {},
                           self->context(), std::forward<Ts>(xs)...);
   }
 
@@ -106,6 +103,9 @@ public:
   scheduled_send(const Dest& dest, actor_clock::time_point timeout,
                  Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
+    static_assert((detail::sendable<Ts> && ...),
+                  "at least one type has no ID, "
+                  "did you forgot to announce it via CAF_ADD_TYPE_ID?");
     detail::type_list<detail::strip_and_convert_t<Ts>...> args_token;
     type_check(dest, args_token);
     auto self = dptr();
@@ -119,14 +119,19 @@ public:
   void scheduled_send(const group& dest, actor_clock::time_point timeout,
                       Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
+    static_assert((detail::sendable<Ts> && ...),
+                  "at least one type has no ID, "
+                  "did you forgot to announce it via CAF_ADD_TYPE_ID?");
     static_assert(!statically_typed<Subtype>(),
                   "statically typed actors are not allowed to send to groups");
     // TODO: consider whether it's feasible to track messages to groups
+    auto self = dptr();
     if (dest) {
-      auto self = dptr();
       auto& clock = self->system().clock();
       clock.schedule_message(timeout, dest, self->ctrl(),
                              make_message(std::forward<Ts>(xs)...));
+    } else {
+      self->home_system().base_metrics().rejected_messages->inc();
     }
   }
 
@@ -137,6 +142,9 @@ public:
   delayed_send(const Dest& dest, std::chrono::duration<Rep, Period> rel_timeout,
                Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
+    static_assert((detail::sendable<Ts> && ...),
+                  "at least one type has no ID, "
+                  "did you forgot to announce it via CAF_ADD_TYPE_ID?");
     detail::type_list<detail::strip_and_convert_t<Ts>...> args_token;
     type_check(dest, args_token);
     auto self = dptr();
@@ -152,6 +160,9 @@ public:
   void delayed_send(const group& dest, std::chrono::duration<Rep, Period> rtime,
                     Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
+    static_assert((detail::sendable<Ts> && ...),
+                  "at least one type has no ID, "
+                  "did you forgot to announce it via CAF_ADD_TYPE_ID?");
     static_assert(!statically_typed<Subtype>(),
                   "statically typed actors are not allowed to send to groups");
     // TODO: consider whether it's feasible to track messages to groups
@@ -169,11 +180,14 @@ public:
   void scheduled_anon_send(const Dest& dest, actor_clock::time_point timeout,
                            Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
+    static_assert((detail::sendable<Ts> && ...),
+                  "at least one type has no ID, "
+                  "did you forgot to announce it via CAF_ADD_TYPE_ID?");
     detail::type_list<detail::strip_and_convert_t<Ts>...> args_token;
     type_check(dest, args_token);
     auto self = dptr();
-    detail::profiled_send(self, self->ctrl(), dest, self->system().clock(),
-                          timeout, make_message_id(P), std::forward<Ts>(xs)...);
+    detail::profiled_send(self, nullptr, dest, self->system().clock(), timeout,
+                          make_message_id(P), std::forward<Ts>(xs)...);
   }
 
   template <message_priority P = message_priority::normal, class Dest = actor,
@@ -182,45 +196,19 @@ public:
                          std::chrono::duration<Rep, Period> rel_timeout,
                          Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
+    static_assert((detail::sendable<Ts> && ...),
+                  "at least one type has no ID, "
+                  "did you forgot to announce it via CAF_ADD_TYPE_ID?");
     detail::type_list<detail::strip_and_convert_t<Ts>...> args_token;
     type_check(dest, args_token);
     auto self = dptr();
     auto& clock = self->system().clock();
     auto timeout = clock.now() + rel_timeout;
-    detail::profiled_send(self, self->ctrl(), dest, clock, timeout,
+    detail::profiled_send(self, nullptr, dest, clock, timeout,
                           make_message_id(P), std::forward<Ts>(xs)...);
   }
 
-  template <class Rep = int, class Period = std::ratio<1>, class... Ts>
-  void delayed_anon_send(const group& dest,
-                         std::chrono::duration<Rep, Period> rtime, Ts&&... xs) {
-    delayed_anon_send_impl(dest, rtime, std::forward<Ts>(xs)...);
-  }
-
 private:
-  template <class Dest, class... Ts>
-  void scheduled_send_impl(message_id mid, const Dest& dest, actor_clock& clock,
-                           actor_clock::time_point timeout, Ts&&... xs) {
-    static_assert(sizeof...(Ts) > 0, "no message to send");
-    detail::type_list<detail::strip_and_convert_t<Ts>...> args_token;
-    type_check(dest, args_token);
-    auto self = dptr();
-    detail::profiled_send(self, self->ctrl(), dest, clock, timeout, mid,
-                          std::forward<Ts>(xs)...);
-  }
-
-  template <class Dest, class... Ts>
-  void
-  scheduled_anon_send_impl(message_id mid, const Dest& dest, actor_clock& clock,
-                           actor_clock::time_point timeout, Ts&&... xs) {
-    static_assert(sizeof...(Ts) > 0, "no message to send");
-    detail::type_list<detail::strip_and_convert_t<Ts>...> args_token;
-    type_check(dest, args_token);
-    auto self = dptr();
-    detail::profiled_send(self, nullptr, dest, clock, timeout, mid,
-                          std::forward<Ts>(xs)...);
-  }
-
   template <class Dest, class ArgTypes>
   static void type_check(const Dest&, ArgTypes) {
     static_assert(!statically_typed<Subtype>() || statically_typed<Dest>(),

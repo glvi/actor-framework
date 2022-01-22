@@ -1,42 +1,48 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
+#include <algorithm>
+#include <map>
+
+#include "caf/action.hpp"
+#include "caf/actor_clock.hpp"
 #include "caf/detail/core_export.hpp"
-#include "caf/detail/simple_actor_clock.hpp"
 
 namespace caf::detail {
 
-class CAF_CORE_EXPORT test_actor_clock : public simple_actor_clock {
+class CAF_CORE_EXPORT test_actor_clock : public actor_clock {
 public:
-  time_point current_time;
+  // -- member types -----------------------------------------------------------
+
+  struct schedule_entry {
+    action f;
+    duration_type period;
+  };
+
+  using schedule_map = std::multimap<time_point, schedule_entry>;
+
+  // -- constructors, destructors, and assignment operators --------------------
 
   test_actor_clock();
 
+  // -- overrides --------------------------------------------------------------
+
   time_point now() const noexcept override;
 
-  duration_type difference(atom_value measurement, long units, time_point t0,
-                           time_point t1) const noexcept override;
+  disposable schedule_periodically(time_point first_run, action f,
+                                   duration_type period) override;
+
+  // -- testing DSL API --------------------------------------------------------
 
   /// Returns whether the actor clock has at least one pending timeout.
   bool has_pending_timeout() const {
-    return !schedule_.empty();
+    auto not_disposed = [](const auto& kvp) {
+      return !kvp.second.f.disposed();
+    };
+    return std::any_of(schedule.begin(), schedule.end(), not_disposed);
   }
 
   /// Triggers the next pending timeout regardless of its timestamp. Sets
@@ -55,11 +61,14 @@ public:
   /// @returns The number of triggered timeouts.
   size_t advance_time(duration_type x);
 
-  /// Configures the returned value for `difference`. For example, inserting
-  /// `('foo', 120ns)` causes the clock to return `units * 120ns` for any call
-  /// to `difference` with `measurement == 'foo'` regardless of the time points
-  /// passed to the function.
-  std::map<atom_value, duration_type> time_per_unit;
+  // -- member variables -------------------------------------------------------
+
+  time_point current_time;
+
+  schedule_map schedule;
+
+private:
+  bool try_trigger_once();
 };
 
 } // namespace caf::detail

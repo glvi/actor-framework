@@ -1,25 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
-
-#include "caf/config.hpp"
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE logger
-#include "caf/test/unit_test.hpp"
+
+#include "caf/logger.hpp"
+
+#include "core-test.hpp"
 
 #include <ctime>
 #include <string>
@@ -42,7 +29,7 @@ using std::string;
                                            << prefix << " instead of "         \
                                            << PrefixName);                     \
     else                                                                       \
-      CAF_CHECK_EQUAL(prefix, PrefixName);                                     \
+      CHECK_EQ(prefix, PrefixName);                                            \
   } while (false)
 
 void global_fun() {
@@ -60,7 +47,9 @@ namespace {
 
 struct fixture {
   fixture() {
-    cfg.set("scheduler.policy", atom("testing"));
+    cfg.set("caf.scheduler.policy", "testing");
+    cfg.set("caf.logger.file.verbosity", "debug");
+    cfg.set("caf.logger.file.path", "");
   }
 
   void add(logger::field_type kind) {
@@ -133,7 +122,7 @@ constexpr const char* file_format = "%r %c %p %a %t %C %M %F:%L %m%n";
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(logger_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 // copy construction, copy assign, move construction, move assign
 // and finally serialization round-trip
@@ -159,47 +148,41 @@ CAF_TEST(parse_default_format_strings) {
   add(logger::plain_text_field, " ");
   add(logger::message_field);
   add(logger::newline_field);
-  CAF_CHECK_EQUAL(logger::parse_format(file_format), lf);
-#if CAF_LOG_LEVEL >= 0
-  // Not parsed when compiling without logging enabled.
-  CAF_CHECK_EQUAL(sys.logger().file_format(), lf);
-#endif
+  CHECK_EQ(logger::parse_format(file_format), lf);
+  CHECK_EQ(sys.logger().file_format(), lf);
 }
 
 CAF_TEST(rendering) {
   // Rendering of time points.
   timestamp t0;
-  timestamp t1{timestamp::duration{5000000}}; // epoch + 5000000ns (5ms)
-  CAF_CHECK_EQUAL(render(logger::render_time_diff, t0, t1), "5");
   time_t t0_t = 0;
   char t0_buf[50];
-  CAF_REQUIRE(strftime(t0_buf, sizeof(t0_buf),
-                       "%Y-%m-%dT%H:%M:%S.000", localtime(&t0_t)));
-  CAF_CHECK_EQUAL(render(logger::render_date, t0), t0_buf);
+  CAF_REQUIRE(strftime(t0_buf, sizeof(t0_buf), "%Y-%m-%dT%H:%M:%S.000",
+                       localtime(&t0_t)));
+  CHECK_EQ(render(logger::render_date, t0), t0_buf);
   // Rendering of events.
   logger::event e{
     CAF_LOG_LEVEL_WARNING,
     42,
-    atom("unit_test"),
+    "unit_test",
     "void ns::foo::bar()",
     "bar",
     "foo.cpp",
     "hello world",
     std::this_thread::get_id(),
     0,
-    t0
+    t0,
   };
-  CAF_CHECK_EQUAL(render(logger::render_fun_name, e), string_view{"bar"});
-  CAF_CHECK_EQUAL(render(logger::render_fun_prefix, e),
-                  string_view{"ns.foo"});
+  CHECK_EQ(render(logger::render_fun_name, e), string_view{"bar"});
+  CHECK_EQ(render(logger::render_fun_prefix, e), string_view{"ns.foo"});
   // Exclude %r and %t from rendering test because they are nondeterministic.
   actor_system sys{cfg};
   auto lf = logger::parse_format("%c %p %a %C %M %F:%L %m");
   auto& lg = sys.logger();
   using namespace std::placeholders;
   auto render_event = bind(&logger::render, &lg, _1, _2, _3);
-  CAF_CHECK_EQUAL(render(render_event, lf, e),
-                  "unit_test WARN actor0 ns.foo bar foo.cpp:42 hello world");
+  CHECK_EQ(render(render_event, lf, e),
+           "unit_test WARN actor0 ns.foo bar foo.cpp:42 hello world");
 }
 
 CAF_TEST(render_fun_prefix) {
@@ -215,4 +198,4 @@ CAF_TEST(render_fun_prefix) {
   foo::tpl<T>::run();
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

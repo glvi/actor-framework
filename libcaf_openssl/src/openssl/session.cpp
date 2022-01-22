@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/openssl/session.hpp"
 
@@ -108,10 +94,7 @@ rw_state session::do_some(int (*f)(SSL*, void*, int), size_t& result, void* buf,
         return rw_state::failure;
       case SSL_ERROR_WANT_READ:
         CAF_LOG_DEBUG("SSL_ERROR_WANT_READ reported");
-        // Report success to poll on this socket.
-        if (len == 0 && strcmp(debug_name, "write_some") == 0)
-          return rw_state::indeterminate;
-        return rw_state::success;
+        return rw_state::want_read;
       case SSL_ERROR_WANT_WRITE:
         CAF_LOG_DEBUG("SSL_ERROR_WANT_WRITE reported");
         // Report success to poll on this socket.
@@ -156,8 +139,8 @@ rw_state session::do_some(int (*f)(SSL*, void*, int), size_t& result, void* buf,
   return handle_ssl_result(ret) ? rw_state::success : rw_state::failure;
 }
 
-rw_state
-session::read_some(size_t& result, native_socket, void* buf, size_t len) {
+rw_state session::read_some(size_t& result, native_socket, void* buf,
+                            size_t len) {
   CAF_LOG_TRACE(CAF_ARG(len));
   return do_some(SSL_read, result, buf, len, "read_some");
 }
@@ -215,25 +198,25 @@ SSL_CTX* session::create_ssl_context() {
   if (sys_.openssl_manager().authentication_enabled()) {
     // Require valid certificates on both sides.
     auto& cfg = sys_.config();
-    if (cfg.openssl_certificate.size() > 0
+    if (!cfg.openssl_certificate.empty()
         && SSL_CTX_use_certificate_chain_file(ctx,
                                               cfg.openssl_certificate.c_str())
              != 1)
       CAF_RAISE_ERROR("cannot load certificate");
-    if (cfg.openssl_passphrase.size() > 0) {
+    if (!cfg.openssl_passphrase.empty()) {
       openssl_passphrase_ = cfg.openssl_passphrase;
       SSL_CTX_set_default_passwd_cb(ctx, pem_passwd_cb);
       SSL_CTX_set_default_passwd_cb_userdata(ctx, this);
     }
-    if (cfg.openssl_key.size() > 0
+    if (!cfg.openssl_key.empty()
         && SSL_CTX_use_PrivateKey_file(ctx, cfg.openssl_key.c_str(),
                                        SSL_FILETYPE_PEM)
              != 1)
       CAF_RAISE_ERROR("cannot load private key");
-    auto cafile
-      = (cfg.openssl_cafile.size() > 0 ? cfg.openssl_cafile.c_str() : nullptr);
-    auto capath
-      = (cfg.openssl_capath.size() > 0 ? cfg.openssl_capath.c_str() : nullptr);
+    auto cafile = (!cfg.openssl_cafile.empty() ? cfg.openssl_cafile.c_str()
+                                               : nullptr);
+    auto capath = (!cfg.openssl_capath.empty() ? cfg.openssl_capath.c_str()
+                                               : nullptr);
     if (cafile || capath) {
       if (SSL_CTX_load_verify_locations(ctx, cafile, capath) != 1)
         CAF_RAISE_ERROR("cannot load trusted CA certificates");
@@ -248,6 +231,7 @@ SSL_CTX* session::create_ssl_context() {
 #if defined(CAF_SSL_HAS_ECDH_AUTO) && (OPENSSL_VERSION_NUMBER < 0x10100000L)
     SSL_CTX_set_ecdh_auto(ctx, 1);
 #else
+#  if OPENSSL_VERSION_NUMBER < 0x10101000L
     auto ecdh = EC_KEY_new_by_curve_name(NID_secp384r1);
     if (!ecdh)
       CAF_RAISE_ERROR("cannot get ECDH curve");
@@ -255,6 +239,9 @@ SSL_CTX* session::create_ssl_context() {
     SSL_CTX_set_tmp_ecdh(ctx, ecdh);
     EC_KEY_free(ecdh);
     CAF_POP_WARNINGS
+#  else  /* OPENSSL_VERSION_NUMBER < 0x10101000L */
+    SSL_CTX_set1_groups_list(ctx, "P-384");
+#  endif /* OPENSSL_VERSION_NUMBER < 0x10101000L */
 #endif
 #ifdef CAF_SSL_HAS_SECURITY_LEVEL
     const char* cipher = "AECDH-AES256-SHA@SECLEVEL=0";
@@ -270,7 +257,7 @@ SSL_CTX* session::create_ssl_context() {
 std::string session::get_ssl_error() {
   std::string msg = "";
   while (auto err = ERR_get_error()) {
-    if (msg.size() > 0)
+    if (!msg.empty())
       msg += " ";
     char buf[256];
     ERR_error_string_n(err, buf, sizeof(buf));
@@ -297,8 +284,8 @@ bool session::handle_ssl_result(int ret) {
   }
 }
 
-session_ptr
-make_session(actor_system& sys, native_socket fd, bool from_accepted_socket) {
+session_ptr make_session(actor_system& sys, native_socket fd,
+                         bool from_accepted_socket) {
   session_ptr ptr{new session(sys)};
   if (!ptr->init())
     return nullptr;

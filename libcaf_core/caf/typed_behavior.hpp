@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -24,21 +10,28 @@
 #include "caf/message_handler.hpp"
 #include "caf/system_messages.hpp"
 #include "caf/timespan.hpp"
+#include "caf/unsafe_behavior_init.hpp"
 
 #include "caf/detail/typed_actor_util.hpp"
 
-namespace caf {
+namespace caf ::detail {
 
-namespace detail {
+template <class Signature>
+struct input_args;
 
-// converts a list of replies_to<...>::with<...> elements to a list of
-// lists containing the replies_to<...> half only
+template <class R, class... Ts>
+struct input_args<R(Ts...)> {
+  using type = type_list<Ts...>;
+};
+
+// Converts a list of function signatures to lists of inputs (dropping the
+// return type).
 template <class List>
 struct input_only;
 
 template <class... Ts>
-struct input_only<detail::type_list<Ts...>> {
-  using type = detail::type_list<typename Ts::input_types...>;
+struct input_only<type_list<Ts...>> {
+  using type = type_list<typename input_args<Ts>::type...>;
 };
 
 using skip_list = detail::type_list<skip_t>;
@@ -127,15 +120,24 @@ void static_check_typed_behavior_input() {
                           "typed behavior (exact match needed)");
 }
 
-} // namespace detail
+} // namespace caf::detail
 
-template <class... Sigs>
-class typed_actor;
+namespace caf::mixin {
 
-namespace mixin {
 template <class, class, class>
 class behavior_stack_based_impl;
-}
+
+} // namespace caf::mixin
+
+namespace caf {
+
+/// Tag type for constructing a `typed_behavior` with an incomplete list of
+/// message handlers, delegating to the default handler for all unmatched
+/// inputs.
+struct partial_behavior_init_t {};
+
+constexpr partial_behavior_init_t partial_behavior_init
+  = partial_behavior_init_t{};
 
 template <class... Sigs>
 class typed_behavior {
@@ -155,9 +157,6 @@ public:
 
   /// Stores the template parameter pack in a type list.
   using signatures = detail::type_list<Sigs...>;
-
-  /// Empty struct tag for constructing from an untyped behavior.
-  struct unsafe_init {};
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -182,11 +181,18 @@ public:
     set(detail::make_behavior(std::move(x), std::move(xs)...));
   }
 
-  typed_behavior(unsafe_init, behavior x) : bhvr_(std::move(x)) {
+  template <class... Ts>
+  typed_behavior(partial_behavior_init_t, Ts... xs)
+    : typed_behavior(unsafe_behavior_init, behavior{std::move(xs)...}) {
+    // TODO: implement type checking.
+  }
+
+  typed_behavior(unsafe_behavior_init_t, behavior x) : bhvr_(std::move(x)) {
     // nop
   }
 
-  typed_behavior(unsafe_init, message_handler x) : bhvr_(std::move(x)) {
+  typed_behavior(unsafe_behavior_init_t, message_handler x)
+    : bhvr_(std::move(x)) {
     // nop
   }
 
@@ -230,8 +236,10 @@ public:
 private:
   typed_behavior() = default;
 
-  template <class... Ts>
-  void set(intrusive_ptr<detail::default_behavior_impl<std::tuple<Ts...>>> bp) {
+  template <class... Ts, class TimeoutDefinition>
+  void set(intrusive_ptr<
+           detail::default_behavior_impl<std::tuple<Ts...>, TimeoutDefinition>>
+             bp) {
     using found_signatures = detail::type_list<deduce_mpi_t<Ts>...>;
     using m = interface_mismatch_t<found_signatures, signatures>;
     // trigger static assert on mismatch
@@ -252,5 +260,11 @@ struct is_typed_behavior : std::false_type {};
 
 template <class... Sigs>
 struct is_typed_behavior<typed_behavior<Sigs...>> : std::true_type {};
+
+/// Creates a typed behavior from given function objects.
+template <class... Fs>
+typed_behavior<deduce_mpi_t<Fs>...> make_typed_behavior(Fs... fs) {
+  return {std::move(fs)...};
+}
 
 } // namespace caf

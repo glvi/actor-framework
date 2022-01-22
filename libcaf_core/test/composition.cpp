@@ -1,64 +1,36 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE composition
-#include "caf/test/dsl.hpp"
 
-using namespace std;
+#include "caf/actor.hpp"
+
+#include "core-test.hpp"
+
 using namespace caf;
 
 namespace {
 
 behavior multiplier(int x) {
-  return {
-    [=](int y) {
-      return x * y;
-    },
-    [=](int y1, int y2) {
-      return x * y1 * y2;
-    }
-  };
+  return {[=](int y) { return x * y; },
+          [=](int y1, int y2) { return x * y1 * y2; }};
 }
 
 behavior adder(int x) {
-  return {
-    [=](int y) {
-      return x + y;
-    },
-    [=](int y1, int y2) {
-      return x + y1 + y2;
-    }
-  };
+  return {[=](int y) { return x + y; },
+          [=](int y1, int y2) { return x + y1 + y2; }};
 }
 
 behavior float_adder(float x) {
-  return {
-    [=](float y) {
-      return x + y;
-    }
-  };
+  return {[=](float y) { return x + y; }};
 }
 
 using fixture = test_coordinator_fixture<>;
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(composition_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(depth2) {
   auto stage1 = sys.spawn(multiplier, 4);
@@ -91,4 +63,4 @@ CAF_TEST(depth2_type_mismatch) {
   expect((error), from(stage2).to(self).with(sec::unexpected_message));
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensink.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -23,11 +9,10 @@
 #include <typeinfo>
 
 #include "caf/detail/type_traits.hpp"
+#include "caf/downstream_manager.hpp"
 #include "caf/inbound_path.hpp"
 #include "caf/intrusive_ptr.hpp"
-#include "caf/rtti_pair.hpp"
 #include "caf/stream_manager.hpp"
-#include "caf/type_nr.hpp"
 
 namespace caf {
 
@@ -63,9 +48,8 @@ public:
   // -- properties -------------------------------------------------------------
 
   /// Creates a new input path to the current sender.
-  inbound_stream_slot<input_type> add_inbound_path(const stream<input_type>&) {
-    auto rtti = make_rtti_pair<input_type>();
-    return {this->add_unchecked_inbound_path_impl(rtti)};
+  inbound_stream_slot<input_type> add_inbound_path(stream<input_type> in) {
+    return {this->add_unchecked_inbound_path(in)};
   }
 
 private:

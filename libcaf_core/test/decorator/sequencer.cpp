@@ -1,30 +1,16 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE decorator.sequencer
 
 #include "caf/decorator/sequencer.hpp"
 
-#include "caf/test/unit_test.hpp"
+#include "core-test.hpp"
 
 #include "caf/all.hpp"
 
-#define ERROR_HANDLER [&](error& err) { CAF_FAIL(system.render(err)); }
+#define ERROR_HANDLER [&](error& err) { CAF_FAIL(err); }
 
 using namespace caf;
 
@@ -42,7 +28,9 @@ using second_stage = typed_actor<replies_to<double, double>::with<double>>;
 
 first_stage::behavior_type typed_first_stage() {
   return {
-    [](int i) { return std::make_tuple(i * 2.0, i * 4.0); },
+    [](int i) -> result<double, double> {
+      return {i * 2.0, i * 4.0};
+    },
   };
 }
 
@@ -72,7 +60,7 @@ struct fixture {
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(sequencer_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(identity) {
   actor_system_config cfg_g;
@@ -81,14 +69,14 @@ CAF_TEST(identity) {
   actor_system system_of_f{cfg_f};
   auto g = system_of_g.spawn(typed_first_stage);
   auto f = system_of_f.spawn(typed_second_stage);
-  CAF_CHECK_EQUAL(system_of_g.registry().running(), 1u);
+  CHECK_EQ(system_of_g.registry().running(), 1u);
   auto h = f * g;
-  CAF_CHECK_EQUAL(system_of_g.registry().running(), 1u);
-  CAF_CHECK_EQUAL(&h->home_system(), &g->home_system());
-  CAF_CHECK_EQUAL(h->node(), g->node());
-  CAF_CHECK_NOT_EQUAL(h->id(), g->id());
-  CAF_CHECK_NOT_EQUAL(h.address(), g.address());
-  CAF_CHECK_EQUAL(h->message_types(), g->home_system().message_types(h));
+  CHECK_EQ(system_of_g.registry().running(), 1u);
+  CHECK_EQ(&h->home_system(), &g->home_system());
+  CHECK_EQ(h->node(), g->node());
+  CHECK_NE(h->id(), g->id());
+  CHECK_NE(h.address(), g.address());
+  CHECK_EQ(h->message_types(), g->home_system().message_types(h));
 }
 
 // spawned dead if `g` is already dead upon spawning
@@ -98,7 +86,7 @@ CAF_TEST(lifetime_1a) {
   anon_send_exit(g, exit_reason::kill);
   self->wait_for(g);
   auto h = f * g;
-  CAF_CHECK(exited(h));
+  CHECK(exited(h));
 }
 
 // spawned dead if `f` is already dead upon spawning
@@ -108,7 +96,7 @@ CAF_TEST(lifetime_1b) {
   anon_send_exit(f, exit_reason::kill);
   self->wait_for(f);
   auto h = f * g;
-  CAF_CHECK(exited(h));
+  CHECK(exited(h));
 }
 
 // `f.g` exits when `g` exits
@@ -134,12 +122,12 @@ CAF_TEST(request_response_promise) {
   auto f = system.spawn(testee);
   auto h = f * g;
   anon_send_exit(h, exit_reason::kill);
-  CAF_CHECK(exited(h));
+  CHECK(exited(h));
   self->request(h, infinite, 1)
-    .receive([](int) { CAF_CHECK(false); },
+    .receive([](int) { CHECK(false); },
              [](error err) {
-               CAF_CHECK_EQUAL(err.code(), static_cast<uint8_t>(
-                                             sec::request_receiver_down));
+               CHECK_EQ(err.code(),
+                        static_cast<uint8_t>(sec::request_receiver_down));
              });
 }
 
@@ -149,7 +137,7 @@ CAF_TEST(dot_composition_1) {
   auto second = system.spawn(typed_second_stage);
   auto first_then_second = second * first;
   self->request(first_then_second, infinite, 42)
-    .receive([](double res) { CAF_CHECK_EQUAL(res, (42 * 2.0) * (42 * 4.0)); },
+    .receive([](double res) { CHECK_EQ(res, (42 * 2.0) * (42 * 4.0)); },
              ERROR_HANDLER);
 }
 
@@ -158,7 +146,7 @@ CAF_TEST(dot_composition_2) {
   auto dbl_actor = system.spawn(testee);
   auto dbl_x4_actor = dbl_actor * dbl_actor * dbl_actor * dbl_actor;
   self->request(dbl_x4_actor, infinite, 1)
-    .receive([](int v) { CAF_CHECK_EQUAL(v, 16); }, ERROR_HANDLER);
+    .receive([](int v) { CHECK_EQ(v, 16); }, ERROR_HANDLER);
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

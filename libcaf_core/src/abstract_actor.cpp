@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/config.hpp"
 
@@ -23,23 +9,20 @@
 #include <atomic>
 #include <stdexcept>
 
-#include "caf/atom.hpp"
-#include "caf/config.hpp"
-#include "caf/logger.hpp"
-#include "caf/message.hpp"
+#include "caf/abstract_actor.hpp"
 #include "caf/actor_addr.hpp"
 #include "caf/actor_cast.hpp"
-#include "caf/actor_system.hpp"
-#include "caf/abstract_actor.hpp"
-#include "caf/actor_registry.hpp"
-#include "caf/execution_unit.hpp"
-#include "caf/mailbox_element.hpp"
-#include "caf/system_messages.hpp"
-#include "caf/default_attachable.hpp"
 #include "caf/actor_control_block.hpp"
-
-#include "caf/detail/disposer.hpp"
+#include "caf/actor_registry.hpp"
+#include "caf/actor_system.hpp"
+#include "caf/config.hpp"
+#include "caf/default_attachable.hpp"
 #include "caf/detail/shared_spinlock.hpp"
+#include "caf/execution_unit.hpp"
+#include "caf/logger.hpp"
+#include "caf/mailbox_element.hpp"
+#include "caf/message.hpp"
+#include "caf/system_messages.hpp"
 
 namespace caf {
 
@@ -58,9 +41,9 @@ void abstract_actor::on_destroy() {
   // nop
 }
 
-void abstract_actor::enqueue(strong_actor_ptr sender, message_id mid,
+bool abstract_actor::enqueue(strong_actor_ptr sender, message_id mid,
                              message msg, execution_unit* host) {
-  enqueue(make_mailbox_element(sender, mid, {}, std::move(msg)), host);
+  return enqueue(make_mailbox_element(sender, mid, {}, std::move(msg)), host);
 }
 
 abstract_actor::abstract_actor(actor_config& cfg)
@@ -68,7 +51,7 @@ abstract_actor::abstract_actor(actor_config& cfg)
   // nop
 }
 
-actor_addr abstract_actor::address() const {
+actor_addr abstract_actor::address() const noexcept {
   return actor_addr{actor_control_block::from(this)};
 }
 
@@ -97,14 +80,16 @@ void abstract_actor::register_at_system() {
   if (getf(is_registered_flag))
     return;
   setf(is_registered_flag);
-  home_system().registry().inc_running();
+  [[maybe_unused]] auto count = home_system().registry().inc_running();
+  CAF_LOG_DEBUG("actor" << id() << "increased running count to" << count);
 }
 
 void abstract_actor::unregister_from_system() {
   if (!getf(is_registered_flag))
     return;
   unsetf(is_registered_flag);
-  home_system().registry().dec_running();
+  [[maybe_unused]] auto count = home_system().registry().dec_running();
+  CAF_LOG_DEBUG("actor" << id() << "decreased running count to" << count);
 }
 
 } // namespace caf

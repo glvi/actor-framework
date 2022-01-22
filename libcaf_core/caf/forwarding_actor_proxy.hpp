@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -34,7 +20,7 @@ public:
 
   ~forwarding_actor_proxy() override;
 
-  void enqueue(mailbox_element_ptr what, execution_unit* context) override;
+  bool enqueue(mailbox_element_ptr what, execution_unit* context) override;
 
   bool add_backlink(abstract_actor* x) override;
 
@@ -43,7 +29,7 @@ public:
   void kill_proxy(execution_unit* ctx, error rsn) override;
 
 private:
-  void forward_msg(strong_actor_ptr sender, message_id mid, message msg,
+  bool forward_msg(strong_actor_ptr sender, message_id mid, message msg,
                    const forwarding_stack* fwd = nullptr);
 
   mutable detail::shared_spinlock broker_mtx_;

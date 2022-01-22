@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -46,15 +32,12 @@ public:
   }
 
   behavior make_behavior() override {
-    auto f = [=](scheduled_actor*, message_view& xs) -> result<message> {
-      auto msg = xs.move_content_to_message();
+    auto f = [=](scheduled_actor*, message& msg) -> result<message> {
       auto rp = this->make_response_promise();
       split_(workset_, msg);
       for (auto& x : workset_)
         this->send(x.first, std::move(x.second));
-      auto g
-        = [=](scheduled_actor*, message_view& ys) mutable -> result<message> {
-        auto res = ys.move_content_to_message();
+      auto g = [=](scheduled_actor*, message& res) mutable -> result<message> {
         join_(value_, res);
         if (--awaited_results_ == 0) {
           rp.deliver(value_);
@@ -80,7 +63,7 @@ private:
 };
 
 struct nop_split {
-  inline void operator()(actor_msg_vec& xs, message& y) const {
+  void operator()(actor_msg_vec& xs, message& y) const {
     for (auto& x : xs) {
       x.second = y;
     }

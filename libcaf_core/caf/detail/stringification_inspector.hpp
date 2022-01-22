@@ -1,56 +1,32 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <chrono>
-#include <functional>
+#include <cstring>
 #include <string>
 #include <type_traits>
 #include <vector>
 
-#include "caf/detail/append_hex.hpp"
-#include "caf/detail/apply_args.hpp"
 #include "caf/detail/core_export.hpp"
-#include "caf/detail/inspect.hpp"
-#include "caf/detail/type_traits.hpp"
 #include "caf/fwd.hpp"
-#include "caf/meta/annotation.hpp"
-#include "caf/meta/hex_formatted.hpp"
-#include "caf/meta/omittable.hpp"
-#include "caf/meta/omittable_if_empty.hpp"
-#include "caf/meta/omittable_if_none.hpp"
-#include "caf/meta/type_name.hpp"
-#include "caf/none.hpp"
+#include "caf/inspector_access.hpp"
+#include "caf/save_inspector_base.hpp"
 #include "caf/string_view.hpp"
 #include "caf/timespan.hpp"
 #include "caf/timestamp.hpp"
+#include "caf/variant.hpp"
 
 namespace caf::detail {
 
-class CAF_CORE_EXPORT stringification_inspector {
+class CAF_CORE_EXPORT stringification_inspector
+  : public save_inspector_base<stringification_inspector> {
 public:
-  // -- member types required by Inspector concept -----------------------------
+  // -- member types -----------------------------------------------------------
 
-  using result_type = void;
-
-  static constexpr bool reads_state = true;
-  static constexpr bool writes_state = false;
+  using super = save_inspector_base<stringification_inspector>;
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -58,243 +34,233 @@ public:
     // nop
   }
 
-  // -- operator() -------------------------------------------------------------
+  // -- properties -------------------------------------------------------------
 
-  template <class... Ts>
-  void operator()(Ts&&... xs) {
-    traverse(xs...);
+  constexpr bool has_human_readable_format() const noexcept {
+    return true;
   }
 
-  /// Prints a separator to the result string.
-  void sep();
+  bool always_quote_strings = true;
 
-  void consume(atom_value x);
+  // -- serializer interface ---------------------------------------------------
 
-  void consume(string_view str);
+  bool begin_object(type_id_t, string_view name);
 
-  void consume(timespan x);
+  bool end_object();
 
-  void consume(timestamp x);
+  bool begin_field(string_view);
 
-  void consume(bool x);
+  bool begin_field(string_view name, bool is_present);
 
-  void consume(const void* ptr);
+  bool begin_field(string_view name, span<const type_id_t>, size_t);
 
-  void consume(const char* cstr);
+  bool begin_field(string_view name, bool, span<const type_id_t>, size_t);
 
-  void consume(const std::vector<bool>& xs);
+  bool end_field();
 
-  template <class T>
-  enable_if_t<std::is_floating_point<T>::value> consume(T x) {
-    result_ += std::to_string(x);
+  bool begin_tuple(size_t size) {
+    return begin_sequence(size);
   }
 
-  template <class T>
-  enable_if_t<std::is_integral<T>::value && std::is_signed<T>::value>
-  consume(T x) {
-    consume_int(static_cast<int64_t>(x));
+  bool end_tuple() {
+    return end_sequence();
   }
 
-  template <class T>
-  enable_if_t<std::is_integral<T>::value && std::is_unsigned<T>::value>
-  consume(T x) {
-    consume_int(static_cast<uint64_t>(x));
+  bool begin_key_value_pair() {
+    return begin_tuple(2);
   }
 
-  template <class Clock, class Duration>
-  void consume(std::chrono::time_point<Clock, Duration> x) {
-    timestamp tmp{std::chrono::duration_cast<timespan>(x.time_since_epoch())};
-    consume(tmp);
+  bool end_key_value_pair() {
+    return end_tuple();
   }
+
+  bool begin_sequence(size_t size);
+
+  bool end_sequence();
+
+  bool begin_associative_array(size_t size) {
+    return begin_sequence(size);
+  }
+
+  bool end_associative_array() {
+    return end_sequence();
+  }
+
+  bool value(byte x);
+
+  bool value(bool x);
+
+  template <class Integral>
+  std::enable_if_t<std::is_integral<Integral>::value, bool> value(Integral x) {
+    if constexpr (std::is_signed<Integral>::value)
+      return int_value(static_cast<int64_t>(x));
+    else
+      return int_value(static_cast<uint64_t>(x));
+  }
+
+  bool value(float x);
+
+  bool value(double x);
+
+  bool value(long double x);
+
+  bool value(timespan x);
+
+  bool value(timestamp x);
+
+  bool value(string_view x);
+
+  bool value(const std::u16string& x);
+
+  bool value(const std::u32string& x);
+
+  bool value(span<const byte> x);
+
+  using super::list;
+
+  bool list(const std::vector<bool>& xs);
+
+  // -- builtin inspection to pick up to_string or provide nicer formatting ----
 
   template <class Rep, class Period>
-  void consume(std::chrono::duration<Rep, Period> x) {
-    auto tmp = std::chrono::duration_cast<timespan>(x);
-    consume(tmp);
-  }
-
-  // Unwrap std::ref.
-  template <class T>
-  void consume(std::reference_wrapper<T> x) {
-    return consume(x.get());
-  }
-
-  /// Picks up user-defined `to_string` functions.
-  template <class T>
-  enable_if_t<!std::is_pointer<T>::value && has_to_string<T>::value>
-  consume(const T& x) {
-    result_ += to_string(x);
-  }
-
-  /// Delegates to `inspect(*this, x)` if available and `T` does not provide
-  /// a `to_string` overload.
-  template <class T>
-  enable_if_t<is_inspectable<stringification_inspector, T>::value
-              && !has_to_string<T>::value>
-  consume(const T& x) {
-    inspect(*this, const_cast<T&>(x));
-  }
-
-  template <class F, class S>
-  void consume(const std::pair<F, S>& x) {
-    result_ += '(';
-    traverse(x.first, x.second);
-    result_ += ')';
-  }
-
-  template <class... Ts>
-  void consume(const std::tuple<Ts...>& x) {
-    result_ += '(';
-    apply_args(*this, get_indices(x), x);
-    result_ += ')';
+  bool builtin_inspect(const std::chrono::duration<Rep, Period> x) {
+    return value(std::chrono::duration_cast<timespan>(x));
   }
 
   template <class T>
-  enable_if_t<is_map_like<T>::value
-              && !is_inspectable<stringification_inspector, T>::value
-              && !has_to_string<T>::value>
-  consume(const T& xs) {
+  std::enable_if_t<detail::is_map_like_v<T>, bool>
+  builtin_inspect(const T& xs) {
+    sep();
+    auto i = xs.begin();
+    auto last = xs.end();
+    if (i == last) {
+      result_ += "{}";
+      return true;
+    }
     result_ += '{';
-    for (const auto& kvp : xs) {
+    save(*this, i->first);
+    result_ += " = ";
+    save(*this, i->second);
+    while (++i != last) {
       sep();
-      consume(kvp.first);
+      save(*this, i->first);
       result_ += " = ";
-      consume(kvp.second);
+      save(*this, i->second);
     }
     result_ += '}';
+    return true;
   }
 
-  template <class Iterator>
-  void consume_range(Iterator first, Iterator last) {
-    result_ += '[';
-    while (first != last) {
+  template <class T>
+  std::enable_if_t<has_to_string<T>::value
+                     && !std::is_convertible<T, string_view>::value,
+                   bool>
+  builtin_inspect(const T& x) {
+    auto str = to_string(x);
+    if constexpr (std::is_convertible<decltype(str), const char*>::value) {
+      const char* cstr = str;
       sep();
-      consume(*first++);
-    }
-    result_ += ']';
-  }
-
-  template <class T>
-  enable_if_t<is_iterable<T>::value && !is_map_like<T>::value
-              && !std::is_convertible<T, string_view>::value
-              && !is_inspectable<stringification_inspector, T>::value
-              && !has_to_string<T>::value>
-  consume(const T& xs) {
-    consume_range(xs.begin(), xs.end());
-  }
-
-  template <class T, size_t S>
-  void consume(const T (&xs)[S]) {
-    return consume_range(xs, xs + S);
-  }
-
-  template <class T>
-  enable_if_t<has_peek_all<T>::value
-              && !is_iterable<T>::value // pick begin()/end() over peek_all
-              && !is_inspectable<stringification_inspector, T>::value
-              && !has_to_string<T>::value>
-  consume(const T& xs) {
-    result_ += '[';
-    xs.peek_all(*this);
-    result_ += ']';
-  }
-
-  template <class T>
-  enable_if_t<
-    std::is_pointer<T>::value
-    && !std::is_same<void, typename std::remove_pointer<T>::type>::value>
-  consume(const T ptr) {
-    if (ptr) {
-      result_ += '*';
-      consume(*ptr);
+      result_ += cstr;
     } else {
-      result_ += "<null>";
+      append(str);
     }
+    return true;
   }
 
-  /// Fallback printing `<unprintable>`.
   template <class T>
-  enable_if_t<!is_iterable<T>::value && !has_peek_all<T>::value
-              && !std::is_pointer<T>::value
-              && !is_inspectable<stringification_inspector, T>::value
-              && !std::is_arithmetic<T>::value
-              && !std::is_convertible<T, string_view>::value
-              && !has_to_string<T>::value>
-  consume(const T&) {
-    result_ += "<unprintable>";
-  }
-
-  void traverse() {
-    // end of recursion
-  }
-
-  template <class T, class... Ts>
-  void traverse(const meta::hex_formatted_t&, const T& x, const Ts&... xs) {
-    sep();
-    append_hex(result_, x);
-    traverse(xs...);
-  }
-
-  template <class T, class... Ts>
-  void traverse(const meta::omittable_if_none_t&, const T& x, const Ts&... xs) {
-    if (x != none) {
+  bool builtin_inspect(const T* x) {
+    if (x == nullptr) {
       sep();
-      consume(x);
-    }
-    traverse(xs...);
-  }
-
-  template <class T, class... Ts>
-  void
-  traverse(const meta::omittable_if_empty_t&, const T& x, const Ts&... xs) {
-    if (!x.empty()) {
+      result_ += "null";
+      return true;
+    } else if constexpr (std::is_same<T, char>::value) {
+      return value(string_view{x, strlen(x)});
+    } else if constexpr (std::is_same<T, void>::value) {
       sep();
-      consume(x);
+      result_ += "*<";
+      auto addr = reinterpret_cast<intptr_t>(x);
+      result_ += std::to_string(addr);
+      result_ += '>';
+      return true;
+    } else {
+      sep();
+      result_ += '*';
+      save(*this, detail::as_mutable_ref(*x));
+      return true;
     }
-    traverse(xs...);
   }
 
-  template <class T, class... Ts>
-  void traverse(const meta::omittable_t&, const T&, const Ts&... xs) {
-    traverse(xs...);
-  }
-
-  template <class... Ts>
-  void traverse(const meta::type_name_t& x, const Ts&... xs) {
+  template <class T>
+  bool builtin_inspect(const optional<T>& x) {
     sep();
-    result_ += x.value;
-    result_ += '(';
-    traverse(xs...);
-    result_ += ')';
+    if (!x) {
+      result_ += "null";
+    } else {
+      result_ += '*';
+      save(*this, detail::as_mutable_ref(*x));
+    }
+    return true;
   }
 
-  template <class... Ts>
-  void traverse(const meta::annotation&, const Ts&... xs) {
-    traverse(xs...);
+  // -- fallbacks --------------------------------------------------------------
+
+  template <class T>
+  bool opaque_value(T& val) {
+    if constexpr (detail::is_iterable<T>::value) {
+      print_list(val.begin(), val.end());
+    } else {
+      sep();
+      result_ += "<unprintable>";
+    }
+    return true;
   }
 
-  template <class T, class... Ts>
-  enable_if_t<!meta::is_annotation<T>::value && !is_callable<T>::value>
-  traverse(const T& x, const Ts&... xs) {
-    sep();
-    consume(x);
-    traverse(xs...);
-  }
+  // -- convenience API --------------------------------------------------------
 
-  template <class T, class... Ts>
-  enable_if_t<!meta::is_annotation<T>::value && is_callable<T>::value>
-  traverse(const T&, const Ts&... xs) {
-    sep();
-    result_ += "<fun>";
-    traverse(xs...);
+  template <class T>
+  static std::string render(const T& x) {
+    if constexpr (std::is_same<std::nullptr_t, T>::value) {
+      return "null";
+    } else if constexpr (std::is_constructible<string_view, T>::value) {
+      if constexpr (std::is_pointer<T>::value) {
+        if (x == nullptr)
+          return "null";
+      }
+      auto str = string_view{x};
+      return std::string{str.begin(), str.end()};
+    } else {
+      std::string result;
+      stringification_inspector f{result};
+      save(f, detail::as_mutable_ref(x));
+      return result;
+    }
   }
 
 private:
-  void consume_int(int64_t x);
+  template <class T>
+  void append(T&& str) {
+    sep();
+    result_.insert(result_.end(), str.begin(), str.end());
+  }
 
-  void consume_int(uint64_t x);
+  template <class Iterator, class Sentinel>
+  void print_list(Iterator first, Sentinel sentinel) {
+    sep();
+    result_ += '[';
+    while (first != sentinel)
+      save(*this, *first++);
+    result_ += ']';
+  }
+
+  bool int_value(int64_t x);
+
+  bool int_value(uint64_t x);
+
+  void sep();
 
   std::string& result_;
+
+  bool in_string_object_ = false;
 };
 
 } // namespace caf::detail

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -27,18 +13,11 @@
 
 #include "caf/deep_to_string.hpp"
 #include "caf/error.hpp"
+#include "caf/is_error_code_enum.hpp"
 #include "caf/unifyn.hpp"
 #include "caf/unit.hpp"
 
 namespace caf {
-
-/// Helper class to construct an `expected<T>` that represents no error.
-/// @relates expected
-struct no_error_t {};
-
-/// The only instance of ::no_error_t.
-/// @relates expected
-constexpr no_error_t no_error = no_error_t{};
 
 /// Represents the result of a computation which can either complete
 /// successfully with an instance of type `T` or fail with an `error`.
@@ -84,17 +63,13 @@ public:
     new (std::addressof(error_)) caf::error{std::move(e)};
   }
 
-  expected(no_error_t) noexcept : engaged_(false) {
-    new (std::addressof(error_)) caf::error{};
-  }
-
   expected(const expected& other) noexcept(nothrow_copy) {
     construct(other);
   }
 
-  template <class Code, class E = enable_if_has_make_error_t<Code>>
-  expected(Code code) : engaged_(false) {
-    new (std::addressof(error_)) caf::error(make_error(code));
+  template <class Enum, class = std::enable_if_t<is_error_code_enum_v<Enum>>>
+  expected(Enum code) : engaged_(false) {
+    new (std::addressof(error_)) caf::error(code);
   }
 
   expected(expected&& other) noexcept(nothrow_move) {
@@ -168,8 +143,8 @@ public:
     return *this;
   }
 
-  template <class Code>
-  enable_if_has_make_error_t<Code, expected&> operator=(Code code) {
+  template <class Enum, class = std::enable_if_t<is_error_code_enum_v<Enum>>>
+  expected& operator=(Enum code) {
     return *this = make_error(code);
   }
 
@@ -309,14 +284,16 @@ bool operator==(const error& x, const expected<T>& y) {
 }
 
 /// @relates expected
-template <class T, class E>
-enable_if_has_make_error_t<E, bool> operator==(const expected<T>& x, E y) {
+template <class T, class Enum>
+std::enable_if_t<is_error_code_enum_v<Enum>, bool>
+operator==(const expected<T>& x, Enum y) {
   return x == make_error(y);
 }
 
 /// @relates expected
-template <class T, class E>
-enable_if_has_make_error_t<E, bool> operator==(E x, const expected<T>& y) {
+template <class T, class Enum>
+std::enable_if_t<is_error_code_enum_v<Enum>, bool>
+operator==(Enum x, const expected<T>& y) {
   return y == make_error(x);
 }
 
@@ -352,14 +329,16 @@ bool operator!=(const error& x, const expected<T>& y) {
 }
 
 /// @relates expected
-template <class T, class E>
-enable_if_has_make_error_t<E, bool> operator!=(const expected<T>& x, E y) {
+template <class T, class Enum>
+std::enable_if_t<is_error_code_enum_v<Enum>, bool>
+operator!=(const expected<T>& x, Enum y) {
   return !(x == y);
 }
 
 /// @relates expected
-template <class T, class E>
-enable_if_has_make_error_t<E, bool> operator!=(E x, const expected<T>& y) {
+template <class T, class Enum>
+std::enable_if_t<is_error_code_enum_v<Enum>, bool>
+operator!=(Enum x, const expected<T>& y) {
   return !(x == y);
 }
 
@@ -371,10 +350,6 @@ public:
   expected() = default;
 
   expected(unit_t) noexcept {
-    // nop
-  }
-
-  expected(no_error_t) noexcept {
     // nop
   }
 
@@ -390,8 +365,8 @@ public:
     // nop
   }
 
-  template <class Code, class E = enable_if_has_make_error_t<Code>>
-  expected(Code code) : error_(make_error(code)) {
+  template <class Enum, class = std::enable_if_t<is_error_code_enum_v<Enum>>>
+  expected(Enum code) : error_(code) {
     // nop
   }
 

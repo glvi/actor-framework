@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -69,15 +55,15 @@ public:
   using iterator_bool_pair = std::pair<iterator, bool>;
 
   struct mapped_type_less {
-    inline bool operator()(const value_type& x, string_view y) const {
+    bool operator()(const value_type& x, string_view y) const {
       return x.first < y;
     }
 
-    inline bool operator()(const value_type& x, const value_type& y) const {
+    bool operator()(const value_type& x, const value_type& y) const {
       return x.first < y.first;
     }
 
-    inline bool operator()(string_view x, const value_type& y) const {
+    bool operator()(string_view x, const value_type& y) const {
       return x < y.first;
     }
   };
@@ -313,30 +299,22 @@ private:
   }
 
   template <size_t N>
-  static inline std::string copy(const char (&str)[N]) {
+  static std::string copy(const char (&str)[N]) {
     return std::string{str};
   }
 
   // Copies the content of `str` into a new string.
-  static inline std::string copy(string_view str) {
+  static std::string copy(string_view str) {
     return std::string{str.begin(), str.end()};
   }
 
   // Moves the content of `str` into a new string.
-  static inline std::string copy(std::string str) {
+  static std::string copy(std::string str) {
     return str;
   }
 
   map_type xs_;
 };
-
-// -- free functions -----------------------------------------------------------
-
-// @relates dictionary
-template <class T>
-std::string to_string(const dictionary<T>& xs) {
-  return deep_to_string(xs.container());
-}
 
 // -- operators ----------------------------------------------------------------
 
@@ -374,12 +352,6 @@ bool operator>(const dictionary<T>& xs, const dictionary<T>& ys) {
 template <class T>
 bool operator>=(const dictionary<T>& xs, const dictionary<T>& ys) {
   return xs.container() >= ys.container();
-}
-
-// @relates dictionary
-template <class T>
-std::ostream& operator<<(std::ostream& out, const dictionary<T>& xs) {
-  return out << to_string(xs);
 }
 
 } // namespace caf

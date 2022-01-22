@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE detail.parse
 
 #include "caf/detail/parse.hpp"
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
 
 #include "caf/expected.hpp"
 #include "caf/ipv4_address.hpp"
@@ -70,13 +56,12 @@ expected<T> read(string_view str) {
 
 } // namespace
 
-#define CHECK_NUMBER(type, value)                                              \
-  CAF_CHECK_EQUAL(read<type>(#value), type(value))
+#define CHECK_NUMBER(type, value) CHECK_EQ(read<type>(#value), type(value))
 
 #define CHECK_NUMBER_3(type, value, cpp_value)                                 \
-  CAF_CHECK_EQUAL(read<type>(#value), type(cpp_value))
+  CHECK_EQ(read<type>(#value), type(cpp_value))
 
-#define CHECK_INVALID(type, str, code) CAF_CHECK_EQUAL(read<type>(str), code)
+#define CHECK_INVALID(type, str, code) CHECK_EQ(read<type>(str), code)
 
 CAF_TEST(valid signed integers) {
   CHECK_NUMBER(int8_t, -128);
@@ -151,122 +136,76 @@ CAF_TEST(invalid floating point numbers) {
 }
 
 CAF_TEST(valid timespans) {
-  CAF_CHECK_EQUAL(read<timespan>("12ns"), 12_ns);
-  CAF_CHECK_EQUAL(read<timespan>("34us"), 34_us);
-  CAF_CHECK_EQUAL(read<timespan>("56ms"), 56_ms);
-  CAF_CHECK_EQUAL(read<timespan>("78s"), 78_s);
-  CAF_CHECK_EQUAL(read<timespan>("60min"), 1_h);
-  CAF_CHECK_EQUAL(read<timespan>("90h"), 90_h);
+  CHECK_EQ(read<timespan>("12ns"), 12_ns);
+  CHECK_EQ(read<timespan>("34us"), 34_us);
+  CHECK_EQ(read<timespan>("56ms"), 56_ms);
+  CHECK_EQ(read<timespan>("78s"), 78_s);
+  CHECK_EQ(read<timespan>("60min"), 1_h);
+  CHECK_EQ(read<timespan>("90h"), 90_h);
 }
 
 CAF_TEST(invalid timespans) {
-  CAF_CHECK_EQUAL(read<timespan>("12"), pec::unexpected_eof);
-  CAF_CHECK_EQUAL(read<timespan>("12nas"), pec::unexpected_character);
-  CAF_CHECK_EQUAL(read<timespan>("34usec"), pec::trailing_character);
-  CAF_CHECK_EQUAL(read<timespan>("56m"), pec::unexpected_eof);
-}
-
-CAF_TEST(valid atom values) {
-  CAF_CHECK_EQUAL(read<atom_value>("foo"), atom("foo"));
-  CAF_CHECK_EQUAL(read<atom_value>("'foo'"), atom("foo"));
-  CAF_CHECK_EQUAL(read<atom_value>("foooooooooo"), pec::too_many_characters);
-  CAF_CHECK_EQUAL(read<atom_value>("foo,bar"), pec::trailing_character);
-  CAF_CHECK_EQUAL(read<atom_value>("$"), pec::unexpected_character);
+  CHECK_EQ(read<timespan>("12"), pec::unexpected_eof);
+  CHECK_EQ(read<timespan>("12nas"), pec::unexpected_character);
+  CHECK_EQ(read<timespan>("34usec"), pec::trailing_character);
+  CHECK_EQ(read<timespan>("56m"), pec::unexpected_eof);
 }
 
 CAF_TEST(strings) {
-  CAF_CHECK_EQUAL(read<std::string>("    foo\t  "), "foo");
-  CAF_CHECK_EQUAL(read<std::string>("  \"  foo\t\"  "), "  foo\t");
-}
-
-CAF_TEST(lists) {
-  using int_list = std::vector<int>;
-  using atom_list = std::vector<atom_value>;
-  using string_list = std::vector<std::string>;
-  CAF_CHECK_EQUAL(read<int_list>("1"), int_list({1}));
-  CAF_CHECK_EQUAL(read<int_list>("1, 2, 3"), int_list({1, 2, 3}));
-  CAF_CHECK_EQUAL(read<int_list>("[1, 2, 3]"), int_list({1, 2, 3}));
-  CAF_CHECK_EQUAL(read<atom_list>("foo, bar, baz"),
-                  atom_list({atom("foo"), atom("bar"), atom("baz")}));
-  CAF_CHECK_EQUAL(read<atom_list>("'foo', bar, 'baz'"),
-                  atom_list({atom("foo"), atom("bar"), atom("baz")}));
-  CAF_CHECK_EQUAL(read<atom_list>("[ foo , 'bar', 'baz']    "),
-                  atom_list({atom("foo"), atom("bar"), atom("baz")}));
-  CAF_CHECK_EQUAL(read<string_list>("a, b , \" c \""),
-                  string_list({"a", "b", " c "}));
-}
-
-CAF_TEST(maps) {
-  using int_map = std::map<atom_value, int>;
-  CAF_CHECK_EQUAL(read<int_map>("a=1, 'b' = 42"),
-                  int_map({{atom("a"), 1}, {atom("b"), 42}}));
-  CAF_CHECK_EQUAL(read<int_map>("{   a  = 1  , 'b'   =    42   ,} \t "),
-                  int_map({{atom("a"), 1}, {atom("b"), 42}}));
+  CHECK_EQ(read<std::string>("    foo\t  "), "foo");
+  CHECK_EQ(read<std::string>("  \"  foo\t\"  "), "  foo\t");
 }
 
 CAF_TEST(uris) {
-  using uri_list = std::vector<uri>;
-  auto x_res = read<uri>("foo:bar");
-  if (x_res == none) {
+  if (auto x_res = read<uri>("foo:bar")) {
+    auto x = *x_res;
+    CHECK_EQ(x.scheme(), "foo");
+    CHECK_EQ(x.path(), "bar");
+  } else {
     CAF_ERROR("my:path not recognized as URI");
-    return;
   }
-  auto x = *x_res;
-  CAF_CHECK_EQUAL(x.scheme(), "foo");
-  CAF_CHECK_EQUAL(x.path(), "bar");
-  auto ls = unbox(read<uri_list>("foo:bar, <http://actor-framework.org/doc>"));
-  CAF_REQUIRE_EQUAL(ls.size(), 2u);
-  CAF_CHECK_EQUAL(ls[0].scheme(), "foo");
-  CAF_CHECK_EQUAL(ls[0].path(), "bar");
-  CAF_CHECK_EQUAL(ls[1].scheme(), "http");
-  CAF_CHECK_EQUAL(ls[1].authority().host, std::string{"actor-framework.org"});
-  CAF_CHECK_EQUAL(ls[1].path(), "doc");
 }
 
 CAF_TEST(IPv4 address) {
-  CAF_CHECK_EQUAL(read<ipv4_address>("1.2.3.4"), ipv4_address({1, 2, 3, 4}));
-  CAF_CHECK_EQUAL(read<ipv4_address>("127.0.0.1"),
-                  ipv4_address({127, 0, 0, 1}));
-  CAF_CHECK_EQUAL(read<ipv4_address>("256.0.0.1"), pec::integer_overflow);
+  CHECK_EQ(read<ipv4_address>("1.2.3.4"), ipv4_address({1, 2, 3, 4}));
+  CHECK_EQ(read<ipv4_address>("127.0.0.1"), ipv4_address({127, 0, 0, 1}));
+  CHECK_EQ(read<ipv4_address>("256.0.0.1"), pec::integer_overflow);
 }
 
 CAF_TEST(IPv4 subnet) {
-  CAF_CHECK_EQUAL(read<ipv4_subnet>("1.2.3.0/24"),
-                  ipv4_subnet(ipv4_address({1, 2, 3, 0}), 24));
-  CAF_CHECK_EQUAL(read<ipv4_subnet>("1.2.3.0/33"), pec::integer_overflow);
+  CHECK_EQ(read<ipv4_subnet>("1.2.3.0/24"),
+           ipv4_subnet(ipv4_address({1, 2, 3, 0}), 24));
+  CHECK_EQ(read<ipv4_subnet>("1.2.3.0/33"), pec::integer_overflow);
 }
 
 CAF_TEST(IPv4 endpoint) {
-  CAF_CHECK_EQUAL(read<ipv4_endpoint>("127.0.0.1:0"),
-                  ipv4_endpoint(ipv4_address({127, 0, 0, 1}), 0));
-  CAF_CHECK_EQUAL(read<ipv4_endpoint>("127.0.0.1:65535"),
-                  ipv4_endpoint(ipv4_address({127, 0, 0, 1}), 65535));
-  CAF_CHECK_EQUAL(read<ipv4_endpoint>("127.0.0.1:65536"),
-                  pec::integer_overflow);
+  CHECK_EQ(read<ipv4_endpoint>("127.0.0.1:0"),
+           ipv4_endpoint(ipv4_address({127, 0, 0, 1}), 0));
+  CHECK_EQ(read<ipv4_endpoint>("127.0.0.1:65535"),
+           ipv4_endpoint(ipv4_address({127, 0, 0, 1}), 65535));
+  CHECK_EQ(read<ipv4_endpoint>("127.0.0.1:65536"), pec::integer_overflow);
 }
 
 CAF_TEST(IPv6 address) {
-  CAF_CHECK_EQUAL(read<ipv6_address>("1.2.3.4"), ipv4_address({1, 2, 3, 4}));
-  CAF_CHECK_EQUAL(read<ipv6_address>("1::"), ipv6_address({{1}, {}}));
-  CAF_CHECK_EQUAL(read<ipv6_address>("::2"), ipv6_address({{}, {2}}));
-  CAF_CHECK_EQUAL(read<ipv6_address>("1::2"), ipv6_address({{1}, {2}}));
+  CHECK_EQ(read<ipv6_address>("1.2.3.4"), ipv4_address({1, 2, 3, 4}));
+  CHECK_EQ(read<ipv6_address>("1::"), ipv6_address({{1}, {}}));
+  CHECK_EQ(read<ipv6_address>("::2"), ipv6_address({{}, {2}}));
+  CHECK_EQ(read<ipv6_address>("1::2"), ipv6_address({{1}, {2}}));
 }
 
 CAF_TEST(IPv6 subnet) {
-  CAF_CHECK_EQUAL(read<ipv6_subnet>("1.2.3.0/24"),
-                  ipv6_subnet(ipv4_address({1, 2, 3, 0}), 24));
-  CAF_CHECK_EQUAL(read<ipv6_subnet>("1::/128"),
-                  ipv6_subnet(ipv6_address({1}, {}), 128));
-  CAF_CHECK_EQUAL(read<ipv6_subnet>("1::/129"), pec::integer_overflow);
+  CHECK_EQ(read<ipv6_subnet>("1.2.3.0/24"),
+           ipv6_subnet(ipv4_address({1, 2, 3, 0}), 24));
+  CHECK_EQ(read<ipv6_subnet>("1::/128"),
+           ipv6_subnet(ipv6_address({1}, {}), 128));
+  CHECK_EQ(read<ipv6_subnet>("1::/129"), pec::integer_overflow);
 }
 
 CAF_TEST(IPv6 endpoint) {
-  CAF_CHECK_EQUAL(read<ipv6_endpoint>("127.0.0.1:0"),
-                  ipv6_endpoint(ipv4_address({127, 0, 0, 1}), 0));
-  CAF_CHECK_EQUAL(read<ipv6_endpoint>("127.0.0.1:65535"),
-                  ipv6_endpoint(ipv4_address({127, 0, 0, 1}), 65535));
-  CAF_CHECK_EQUAL(read<ipv6_endpoint>("127.0.0.1:65536"),
-                  pec::integer_overflow);
-  CAF_CHECK_EQUAL(read<ipv6_endpoint>("[1::2]:8080"),
-                  ipv6_endpoint({{1}, {2}}, 8080));
+  CHECK_EQ(read<ipv6_endpoint>("127.0.0.1:0"),
+           ipv6_endpoint(ipv4_address({127, 0, 0, 1}), 0));
+  CHECK_EQ(read<ipv6_endpoint>("127.0.0.1:65535"),
+           ipv6_endpoint(ipv4_address({127, 0, 0, 1}), 65535));
+  CHECK_EQ(read<ipv6_endpoint>("127.0.0.1:65536"), pec::integer_overflow);
+  CHECK_EQ(read<ipv6_endpoint>("[1::2]:8080"), ipv6_endpoint({{1}, {2}}, 8080));
 }

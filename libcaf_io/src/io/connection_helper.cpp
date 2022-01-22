@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/io/connection_helper.hpp"
 
@@ -26,6 +12,7 @@
 #include "caf/defaults.hpp"
 #include "caf/event_based_actor.hpp"
 #include "caf/io/basp/instance.hpp"
+#include "caf/io/fwd.hpp"
 #include "caf/io/network/interfaces.hpp"
 #include "caf/stateful_actor.hpp"
 
@@ -36,8 +23,6 @@ namespace {
 auto autoconnect_timeout = std::chrono::minutes(10);
 
 } // namespace
-
-const char* connection_helper_state::name = "connection_helper";
 
 behavior
 connection_helper(stateful_actor<connection_helper_state>* self, actor b) {
@@ -54,27 +39,30 @@ connection_helper(stateful_actor<connection_helper_state>* self, actor b) {
       CAF_LOG_DEBUG("received requested config:" << CAF_ARG(msg));
       // whatever happens, we are done afterwards
       self->quit();
-      msg.apply({[&](uint16_t port, network::address_listing& addresses) {
-        if (item == "basp.default-connectivity-tcp") {
-          auto& mx = self->system().middleman().backend();
-          for (auto& kvp : addresses) {
-            for (auto& addr : kvp.second) {
-              auto hdl = mx.new_tcp_scribe(addr, port);
-              if (hdl) {
-                // gotcha! send scribe to our BASP broker
-                // to initiate handshake etc.
-                CAF_LOG_INFO("connected directly:" << CAF_ARG(addr));
-                self->send(b, connect_atom::value, *hdl, port);
-                return;
+      message_handler f{
+        [&](uint16_t port, network::address_listing& addresses) {
+          if (item == "basp.default-connectivity-tcp") {
+            auto& mx = self->system().middleman().backend();
+            for (auto& kvp : addresses) {
+              for (auto& addr : kvp.second) {
+                auto hdl = mx.new_tcp_scribe(addr, port);
+                if (hdl) {
+                  // gotcha! send scribe to our BASP broker
+                  // to initiate handshake etc.
+                  CAF_LOG_INFO("connected directly:" << CAF_ARG(addr));
+                  self->send(b, connect_atom_v, *hdl, port);
+                  return;
+                }
               }
             }
+            CAF_LOG_INFO("could not connect to node directly");
+          } else {
+            CAF_LOG_INFO("aborted direct connection attempt, unknown item: "
+                         << CAF_ARG(item));
           }
-          CAF_LOG_INFO("could not connect to node directly");
-        } else {
-          CAF_LOG_INFO("aborted direct connection attempt, unknown item: "
-                       << CAF_ARG(item));
-        }
-      }});
+        },
+      };
+      f(msg);
     },
     after(autoconnect_timeout) >>
       [=] {

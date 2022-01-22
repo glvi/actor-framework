@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -22,192 +8,247 @@
 #include <tuple>
 #include <type_traits>
 
-#include "caf/atom.hpp"
-#include "caf/config.hpp"
-#include "caf/detail/apply_args.hpp"
 #include "caf/detail/comparable.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/implicit_conversions.hpp"
-#include "caf/detail/int_list.hpp"
 #include "caf/detail/message_data.hpp"
-#include "caf/detail/type_traits.hpp"
+#include "caf/detail/padded_size.hpp"
 #include "caf/fwd.hpp"
-#include "caf/index_mapping.hpp"
-#include "caf/make_counted.hpp"
-#include "caf/none.hpp"
-#include "caf/optional.hpp"
-#include "caf/skip.hpp"
-#include "caf/type_nr.hpp"
+#include "caf/intrusive_cow_ptr.hpp"
+#include "caf/raise_error.hpp"
 
 namespace caf {
-class message_handler;
 
 /// Describes a fixed-length, copy-on-write, type-erased
 /// tuple with elements of any type.
-class CAF_CORE_EXPORT message : public type_erased_tuple {
+class CAF_CORE_EXPORT message {
 public:
   // -- member types -----------------------------------------------------------
 
-  /// Raw pointer to content.
-  using raw_ptr = detail::message_data*;
-
-  /// Copy-on-write pointer to content.
-  using data_ptr = detail::message_data::cow_ptr;
+  using data_ptr = intrusive_cow_ptr<detail::message_data>;
 
   // -- constructors, destructors, and assignment operators --------------------
 
+  explicit message(data_ptr data) noexcept : data_(std::move(data)) {
+    // nop
+  }
+
   message() noexcept = default;
-  message(none_t) noexcept;
+
+  message(message&&) noexcept = default;
+
   message(const message&) noexcept = default;
+
+  message& operator=(message&&) noexcept = default;
+
   message& operator=(const message&) noexcept = default;
 
-  message(message&&) noexcept;
-  message& operator=(message&&) noexcept;
-  explicit message(data_ptr ptr) noexcept;
+  // -- concatenation ----------------------------------------------------------
 
-  ~message() override;
+  template <class... Ts>
+  static message concat(Ts&&... xs) {
+    static_assert(sizeof...(Ts) >= 2);
+    auto types = type_id_list::concat(types_of(xs)...);
+    auto ptr = detail::message_data::make_uninitialized(types);
+    ptr->init_from(std::forward<Ts>(xs)...);
+    return message{data_ptr{ptr.release(), false}};
+  }
 
-  // -- implementation of type_erased_tuple ------------------------------------
+  // -- properties -------------------------------------------------------------
 
-  void* get_mutable(size_t p) override;
+  auto types() const noexcept {
+    return data_ ? data_->types() : make_type_id_list();
+  }
 
-  error load(size_t pos, deserializer& source) override;
+  size_t size() const noexcept {
+    return types().size();
+  }
 
-  error_code<sec> load(size_t pos, binary_deserializer& source) override;
+  size_t empty() const noexcept {
+    return size() == 0;
+  }
 
-  size_t size() const noexcept override;
+  template <class... Ts>
+  bool match_elements() const noexcept {
+    return types() == make_type_id_list<Ts...>();
+  }
 
-  uint32_t type_token() const noexcept override;
+  /// @private
+  detail::message_data& data() {
+    return data_.unshared();
+  }
 
-  rtti_pair type(size_t pos) const noexcept override;
+  /// @private
+  const detail::message_data& data() const noexcept {
+    return *data_;
+  }
 
-  const void* get(size_t pos) const noexcept override;
+  /// @private
+  const detail::message_data& cdata() const noexcept {
+    return *data_;
+  }
 
-  std::string stringify(size_t pos) const override;
+  /// @private
+  detail::message_data* ptr() noexcept {
+    return data_.unshared_ptr();
+  }
 
-  type_erased_value_ptr copy(size_t pos) const override;
+  /// @private
+  const detail::message_data* ptr() const noexcept {
+    return data_.get();
+  }
 
-  error save(size_t pos, serializer& sink) const override;
+  /// @private
+  const detail::message_data* cptr() const noexcept {
+    return data_.get();
+  }
 
-  error_code<sec> save(size_t pos, binary_serializer& sink) const override;
+  explicit operator bool() const noexcept {
+    return static_cast<bool>(data_);
+  }
 
-  bool shared() const noexcept override;
+  bool operator!() const noexcept {
+    return !data_;
+  }
 
-  error load(deserializer& source) override;
+  /// Checks whether this messages contains the types `Ts...` with values
+  /// `values...`. Users may pass `std::ignore` as a wildcard for individual
+  /// elements. Elements are compared using `operator==`.
+  template <class... Ts>
+  bool matches(const Ts&... values) const {
+    return matches_impl(std::index_sequence_for<Ts...>{}, values...);
+  }
 
-  error_code<sec> load(binary_deserializer& source) override;
+  // -- serialization ----------------------------------------------------------
 
-  error save(serializer& sink) const override;
+  bool save(serializer& sink) const;
 
-  error_code<sec> save(binary_serializer& sink) const override;
+  bool save(binary_serializer& sink) const;
 
-  // -- factories --------------------------------------------------------------
+  bool load(deserializer& source);
 
-  /// Creates a new message by copying all elements in a type-erased tuple.
-  static message copy(const type_erased_tuple& xs);
+  bool load(binary_deserializer& source);
+
+  // -- element access ---------------------------------------------------------
+
+  /// Returns the type ID of the element at `index`.
+  /// @pre `index < size()`
+  type_id_t type_at(size_t index) const noexcept {
+    auto xs = types();
+    return xs[index];
+  }
+
+  /// Returns whether the element at `index` is of type `T`.
+  /// @pre `index < size()`
+  template <class T>
+  bool match_element(size_t index) const noexcept {
+    return type_at(index) == type_id_v<T>;
+  }
+
+  /// @pre `index < size()`
+  /// @pre `match_element<T>(index)`
+  template <class T>
+  const T& get_as(size_t index) const noexcept {
+    CAF_ASSERT(type_at(index) == type_id_v<T>);
+    return *reinterpret_cast<const T*>(data_->at(index));
+  }
+
+  /// @pre `index < size()`
+  /// @pre `match_element<T>(index)`
+  template <class T>
+  T& get_mutable_as(size_t index) noexcept {
+    CAF_ASSERT(type_at(index) == type_id_v<T>);
+    return *reinterpret_cast<T*>(data_.unshared().at(index));
+  }
 
   // -- modifiers --------------------------------------------------------------
 
-  /// Returns `handler(*this)`.
-  optional<message> apply(message_handler handler);
-
-  /// Forces the message to copy its content if there are more than
-  /// one references to the content.
-  inline void force_unshare() {
-    vals_.unshare();
+  void swap(message& other) noexcept {
+    data_.swap(other.data_);
   }
 
-  /// Returns a mutable reference to the content. Callers are responsible
-  /// for unsharing content if necessary.
-  inline data_ptr& vals() {
-    return vals_;
+  void reset(detail::message_data* new_ptr = nullptr,
+             bool add_ref = true) noexcept {
+    data_.reset(new_ptr, add_ref);
   }
 
-  /// Exchanges content of `this` and `other`.
-  void swap(message& other) noexcept;
-
-  /// Assigns new content.
-  void reset(raw_ptr new_ptr = nullptr, bool add_ref = true) noexcept;
-
-  // -- inline observers -------------------------------------------------------
-
-  /// Returns a const pointer to the element at position `p`.
-  inline const void* at(size_t p) const noexcept {
-    CAF_ASSERT(vals_ != nullptr);
-    return vals_->get(p);
+  /// Forces the message to copy its content if more than one reference to the
+  /// content exists.
+  void force_unshare() {
+    data_.unshare();
   }
-
-  /// Returns a reference to the content.
-  inline const data_ptr& vals() const noexcept {
-    return vals_;
-  }
-
-  /// Returns a reference to the content.
-  inline const data_ptr& cvals() const noexcept {
-    return vals_;
-  }
-
-  /// @cond PRIVATE
-
-  /// @pre `!empty()`
-  inline type_erased_tuple& content() {
-    CAF_ASSERT(vals_ != nullptr);
-    return vals_.unshared();
-  }
-
-  inline const type_erased_tuple& content() const {
-    CAF_ASSERT(vals_ != nullptr);
-    return *vals_;
-  }
-
-  /// Serializes the content of `x` as if `x` was an instance of `message`. The
-  /// resulting output of `sink` can then be used to deserialize a `message`
-  /// even if the serialized object had a different type.
-  static error save(serializer& sink, const type_erased_tuple& x);
-
-  static error_code<sec>
-  save(binary_serializer& sink, const type_erased_tuple& x);
-
-  /// @endcond
 
 private:
-  // -- private helpers --------------------------------------------------------
-
-  template <size_t P>
-  static bool match_elements_impl(std::integral_constant<size_t, P>,
-                                  detail::type_list<>) noexcept {
-    return true; // end of recursion
+  template <size_t Pos, class T>
+  bool matches_at(const T& value) const {
+    if constexpr (std::is_same<T, decltype(std::ignore)>::value)
+      return true;
+    else
+      return match_element<T>(Pos) && get_as<T>(Pos) == value;
   }
 
-  template <size_t P, class T, class... Ts>
-  bool match_elements_impl(std::integral_constant<size_t, P>,
-                           detail::type_list<T, Ts...>) const noexcept {
-    std::integral_constant<size_t, P + 1> next_p;
-    detail::type_list<Ts...> next_list;
-    return match_element<T>(P) && match_elements_impl(next_p, next_list);
+  template <size_t... Is, class... Ts>
+  bool matches_impl(std::index_sequence<Is...>, const Ts&... values) const {
+    return (matches_at<Is>(values) && ...);
   }
 
-  // -- member functions -------------------------------------------------------
-
-  data_ptr vals_;
+  data_ptr data_;
 };
 
 // -- related non-members ------------------------------------------------------
 
 /// @relates message
-CAF_CORE_EXPORT error inspect(serializer& sink, message& msg);
+inline message make_message() {
+  return {};
+}
 
 /// @relates message
-CAF_CORE_EXPORT error_code<sec> inspect(binary_serializer& sink, message& msg);
+template <class... Ts>
+message make_message(Ts&&... xs) {
+  using namespace detail;
+  static_assert((!std::is_pointer<strip_and_convert_t<Ts>>::value && ...));
+  static_assert((is_complete<type_id<strip_and_convert_t<Ts>>> && ...));
+  static constexpr size_t data_size
+    = sizeof(message_data) + (padded_size_v<strip_and_convert_t<Ts>> + ...);
+  auto types = make_type_id_list<strip_and_convert_t<Ts>...>();
+  auto vptr = malloc(data_size);
+  if (vptr == nullptr)
+    CAF_RAISE_ERROR(std::bad_alloc, "bad_alloc");
+  auto raw_ptr = new (vptr) message_data(types);
+  intrusive_cow_ptr<message_data> ptr{raw_ptr, false};
+  raw_ptr->init(std::forward<Ts>(xs)...);
+  return message{std::move(ptr)};
+}
 
 /// @relates message
-CAF_CORE_EXPORT error inspect(deserializer& source, message& msg);
+template <class Tuple, size_t... Is>
+message make_message_from_tuple(Tuple&& xs, std::index_sequence<Is...>) {
+  return make_message(std::get<Is>(std::forward<Tuple>(xs))...);
+}
 
 /// @relates message
-CAF_CORE_EXPORT error_code<sec>
-inspect(binary_deserializer& source, message& msg);
+template <class Tuple>
+message make_message_from_tuple(Tuple&& xs) {
+  using tuple_type = std::decay_t<Tuple>;
+  std::make_index_sequence<std::tuple_size<tuple_type>::value> seq;
+  return make_message_from_tuple(std::forward<Tuple>(xs), seq);
+}
 
 /// @relates message
-CAF_CORE_EXPORT std::string to_string(const message& msg);
+template <class Inspector>
+auto inspect(Inspector& f, message& x)
+  -> std::enable_if_t<Inspector::is_loading, decltype(x.load(f))> {
+  return x.load(f);
+}
+
+/// @relates message
+template <class Inspector>
+auto inspect(Inspector& f, message& x)
+  -> std::enable_if_t<!Inspector::is_loading, decltype(x.save(f))> {
+  return x.save(f);
+}
+
+/// @relates message
+CAF_CORE_EXPORT std::string to_string(const message& x);
 
 } // namespace caf

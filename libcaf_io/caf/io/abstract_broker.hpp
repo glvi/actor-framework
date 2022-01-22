@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -93,9 +79,9 @@ public:
 
   // -- overridden modifiers of abstract_actor ---------------------------------
 
-  void enqueue(mailbox_element_ptr, execution_unit*) override;
+  bool enqueue(mailbox_element_ptr, execution_unit*) override;
 
-  void enqueue(strong_actor_ptr, message_id, message, execution_unit*) override;
+  bool enqueue(strong_actor_ptr, message_id, message, execution_unit*) override;
 
   // -- overridden modifiers of local_actor ------------------------------------
 
@@ -158,6 +144,9 @@ public:
   /// Writes `data` into the buffer for a given connection.
   void write(connection_handle hdl, size_t bs, const void* buf);
 
+  /// Writes `buf` into the buffer for a given connection.
+  void write(connection_handle hdl, span<const byte> buf);
+
   /// Sends the content of the buffer for a given connection.
   void flush(connection_handle hdl);
 
@@ -177,7 +166,7 @@ public:
   void flush(datagram_handle hdl);
 
   /// Returns the middleman instance this broker belongs to.
-  inline middleman& parent() {
+  middleman& parent() {
     return system().middleman();
   }
 
@@ -349,15 +338,22 @@ public:
   // -- observers --------------------------------------------------------------
 
   /// Returns the number of open connections.
-  inline size_t num_connections() const {
+  size_t num_connections() const noexcept {
     return scribes_.size();
+  }
+
+  /// Returns the number of attached doorman for accepting incoming connections.
+  size_t num_doormen() const noexcept {
+    return doormen_.size();
   }
 
   /// Returns all handles of all `scribe` instances attached to this broker.
   std::vector<connection_handle> connections() const;
 
   /// Returns the `multiplexer` running this broker.
-  network::multiplexer& backend();
+  network::multiplexer& backend() {
+    return *backend_;
+  }
 
 protected:
   void init_broker();
@@ -374,16 +370,16 @@ protected:
   /// @cond PRIVATE
 
   // meta programming utility
-  inline doorman_map& get_map(accept_handle) {
+  doorman_map& get_map(accept_handle) {
     return doormen_;
   }
 
   // meta programming utility
-  inline scribe_map& get_map(connection_handle) {
+  scribe_map& get_map(connection_handle) {
     return scribes_;
   }
 
-  inline datagram_servant_map& get_map(datagram_handle) {
+  datagram_servant_map& get_map(datagram_handle) {
     return datagram_servants_;
   }
   /// @endcond
@@ -399,7 +395,7 @@ protected:
   }
 
 private:
-  inline void launch_servant(scribe_ptr&) {
+  void launch_servant(scribe_ptr&) {
     // nop
   }
 
@@ -428,6 +424,7 @@ private:
     get_map(hdl).emplace(hdl, std::move(ptr));
   }
 
+  network::multiplexer* backend_ = nullptr;
   scribe_map scribes_;
   doorman_map doormen_;
   datagram_servant_map datagram_servants_;

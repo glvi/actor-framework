@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/io/network/default_multiplexer.hpp"
 
@@ -39,6 +25,7 @@
 
 #include "caf/scheduler/abstract_coordinator.hpp"
 
+// clang-format off
 #ifdef CAF_WINDOWS
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
@@ -63,11 +50,11 @@
 #  include <cerrno>
 #  include <fcntl.h>
 #  include <netdb.h>
+#  include <sys/types.h>
 #  include <netinet/in.h>
 #  include <netinet/ip.h>
 #  include <netinet/tcp.h>
 #  include <sys/socket.h>
-#  include <sys/types.h>
 #  include <unistd.h>
 #  ifdef CAF_POLL_MULTIPLEXER
 #    include <poll.h>
@@ -76,6 +63,7 @@
 #  else
 #    error "neither CAF_POLL_MULTIPLEXER nor CAF_EPOLL_MULTIPLEXER defined"
 #  endif
+// clang-format on
 
 #endif
 
@@ -587,8 +575,8 @@ void default_multiplexer::init() {
   }
 #endif
   namespace sr = defaults::scheduler;
-  max_throughput_
-    = get_or(system().config(), "scheduler.max-throughput", sr::max_throughput);
+  max_throughput_ = get_or(system().config(), "caf.scheduler.max-throughput",
+                           sr::max_throughput);
 }
 
 bool default_multiplexer::poll_once(bool block) {
@@ -601,7 +589,7 @@ bool default_multiplexer::poll_once(bool block) {
     for (auto& ptr : xs)
       resume(std::move(ptr));
     handle_internal_events();
-    // Try to swap back to internall_posted_ to re-use allocated memory.
+    // Try to swap back to internally_posted_ to re-use allocated memory.
     if (internally_posted_.empty()) {
       xs.swap(internally_posted_);
       internally_posted_.clear();

@@ -1,27 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
-
-#include "caf/config.hpp"
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE optional
-#include "caf/test/unit_test.hpp"
 
 #include "caf/optional.hpp"
+
+#include "core-test.hpp"
 
 using namespace caf;
 
@@ -44,48 +29,48 @@ bool operator==(const qwertz& lhs, const qwertz& rhs) {
 CAF_TEST(empty) {
   optional<int> x;
   optional<int> y;
-  CAF_CHECK(x == y);
-  CAF_CHECK(!(x != y));
+  CHECK(x == y);
+  CHECK(!(x != y));
 }
 
 CAF_TEST(equality) {
   optional<int> x = 42;
   optional<int> y = 7;
-  CAF_CHECK(x != y);
-  CAF_CHECK(!(x == y));
+  CHECK(x != y);
+  CHECK(!(x == y));
 }
 
 CAF_TEST(ordering) {
   optional<int> x = 42;
   optional<int> y = 7;
-  CAF_CHECK(x > y);
-  CAF_CHECK(x >= y);
-  CAF_CHECK(y < x);
-  CAF_CHECK(y <= x);
-  CAF_CHECK(!(y > x));
-  CAF_CHECK(!(y >= x));
-  CAF_CHECK(!(x < y));
-  CAF_CHECK(!(x <= y));
-  CAF_CHECK(x < 4711);
-  CAF_CHECK(4711 > x);
-  CAF_CHECK(4711 >= x);
-  CAF_CHECK(!(x > 4711));
-  CAF_CHECK(!(x >= 4711));
-  CAF_CHECK(!(4211 < x));
-  CAF_CHECK(!(4211 <= x));
+  CHECK(x > y);
+  CHECK(x >= y);
+  CHECK(y < x);
+  CHECK(y <= x);
+  CHECK(!(y > x));
+  CHECK(!(y >= x));
+  CHECK(!(x < y));
+  CHECK(!(x <= y));
+  CHECK(x < 4711);
+  CHECK(4711 > x);
+  CHECK(4711 >= x);
+  CHECK(!(x > 4711));
+  CHECK(!(x >= 4711));
+  CHECK(!(4211 < x));
+  CHECK(!(4211 <= x));
 }
 
 CAF_TEST(custom_type_none) {
   optional<qwertz> x;
-  CAF_CHECK(x == none);
+  CHECK(x == none);
 }
 
 CAF_TEST(custom_type_engaged) {
   qwertz obj{1, 2};
   optional<qwertz> x = obj;
-  CAF_CHECK(x != none);
-  CAF_CHECK(obj == x);
-  CAF_CHECK(x == obj );
-  CAF_CHECK(obj == *x);
-  CAF_CHECK(*x == obj);
+  CHECK(x != none);
+  CHECK(obj == x);
+  CHECK(x == obj);
+  CHECK(obj == *x);
+  CHECK(*x == obj);
 }

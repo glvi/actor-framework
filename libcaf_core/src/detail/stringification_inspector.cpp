@@ -1,53 +1,182 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/detail/stringification_inspector.hpp"
+
+#include "caf/detail/print.hpp"
 
 #include <algorithm>
 #include <ctime>
 
-#include "caf/atom.hpp"
+namespace caf::detail {
 
-namespace {
-
-void escape(std::string& result, char c) {
-  switch (c) {
-    default:
-      result += c;
-      break;
-    case '\n':
-      result += R"(\n)";
-      break;
-    case '\t':
-      result += R"(\t)";
-      break;
-    case '\\':
-      result += R"(\\)";
-      break;
-    case '"':
-      result += R"(\")";
-      break;
+bool stringification_inspector::begin_object(type_id_t, string_view name) {
+  sep();
+  if (name != "std::string") {
+    result_.insert(result_.end(), name.begin(), name.end());
+    result_ += '(';
+  } else {
+    in_string_object_ = true;
   }
+  return true;
 }
 
-} // namespace
+bool stringification_inspector::end_object() {
+  if (!in_string_object_)
+    result_ += ')';
+  else
+    in_string_object_ = false;
+  return true;
+}
 
-namespace caf::detail {
+bool stringification_inspector::begin_field(string_view) {
+  return true;
+}
+
+bool stringification_inspector::begin_field(string_view, bool is_present) {
+  sep();
+  if (!is_present)
+    result_ += "null";
+  else
+    result_ += '*';
+  return true;
+}
+
+bool stringification_inspector::begin_field(string_view, span<const type_id_t>,
+                                            size_t) {
+  return true;
+}
+
+bool stringification_inspector::begin_field(string_view, bool is_present,
+                                            span<const type_id_t>, size_t) {
+  sep();
+  if (!is_present)
+    result_ += "null";
+  else
+    result_ += '*';
+  return true;
+}
+
+bool stringification_inspector::end_field() {
+  return true;
+}
+
+bool stringification_inspector::begin_sequence(size_t) {
+  sep();
+  result_ += '[';
+  return true;
+}
+
+bool stringification_inspector::end_sequence() {
+  result_ += ']';
+  return true;
+}
+
+bool stringification_inspector::value(byte x) {
+  return value(span<const byte>(&x, 1));
+}
+
+bool stringification_inspector::value(bool x) {
+  sep();
+  result_ += x ? "true" : "false";
+  return true;
+}
+
+bool stringification_inspector::value(float x) {
+  sep();
+  auto str = std::to_string(x);
+  result_ += str;
+  return true;
+}
+
+bool stringification_inspector::value(double x) {
+  sep();
+  detail::print(result_, x);
+  return true;
+}
+
+bool stringification_inspector::value(long double x) {
+  sep();
+  detail::print(result_, x);
+  return true;
+}
+
+bool stringification_inspector::value(timespan x) {
+  sep();
+  detail::print(result_, x);
+  return true;
+}
+
+bool stringification_inspector::value(timestamp x) {
+  sep();
+  append_timestamp_to_string(result_, x);
+  return true;
+}
+
+bool stringification_inspector::value(string_view str) {
+  sep();
+  if (str.empty()) {
+    result_ += R"("")";
+    return true;
+  }
+  if (str[0] == '"') {
+    // Assume an already escaped string.
+    result_.insert(result_.end(), str.begin(), str.end());
+    return true;
+  }
+  // Escape the string if it contains whitespaces or characters that need
+  // escaping.
+  auto needs_escaping = [](char c) {
+    return isspace(c) || c == '\\' || c == '"';
+  };
+  if (always_quote_strings
+      || std::any_of(str.begin(), str.end(), needs_escaping)) {
+    detail::print_escaped(result_, str);
+  } else {
+    result_.insert(result_.end(), str.begin(), str.end());
+  }
+  return true;
+}
+
+bool stringification_inspector::value(const std::u16string&) {
+  sep();
+  // Convert to UTF-8 and print?
+  result_ += "<unprintable>";
+  return true;
+}
+
+bool stringification_inspector::value(const std::u32string&) {
+  sep();
+  // Convert to UTF-8 and print?
+  result_ += "<unprintable>";
+  return true;
+}
+
+bool stringification_inspector::int_value(int64_t x) {
+  sep();
+  detail::print(result_, x);
+  return true;
+}
+
+bool stringification_inspector::int_value(uint64_t x) {
+  sep();
+  detail::print(result_, x);
+  return true;
+}
+
+bool stringification_inspector::value(span<const byte> x) {
+  sep();
+  detail::append_hex(result_, x.data(), x.size());
+  return true;
+}
+
+bool stringification_inspector::list(const std::vector<bool>& xs) {
+  begin_sequence(xs.size());
+  for (bool x : xs)
+    value(x);
+  return end_sequence();
+}
 
 void stringification_inspector::sep() {
   if (!result_.empty())
@@ -55,155 +184,12 @@ void stringification_inspector::sep() {
       case '(':
       case '[':
       case '{':
+      case '*':
       case ' ': // only at back if we've printed ", " before
         break;
       default:
         result_ += ", ";
     }
-}
-
-void stringification_inspector::consume(atom_value x) {
-  result_ += '\'';
-  result_ += to_string(x);
-  result_ += '\'';
-}
-
-void stringification_inspector::consume(string_view str) {
-  if (str.empty()) {
-    result_ += R"("")";
-    return;
-  }
-  if (str[0] == '"') {
-    // Assume an already escaped string.
-    result_.insert(result_.end(), str.begin(), str.end());
-    return;
-  }
-  // Escape string.
-  result_ += '"';
-  for (char c : str)
-    escape(result_, c);
-  result_ += '"';
-}
-
-void stringification_inspector::consume(timespan x) {
-  auto ns = x.count();
-  if (ns % 1000 > 0) {
-    consume(ns);
-    result_ += "ns";
-    return;
-  }
-  auto us = ns / 1000;
-  if (us % 1000 > 0) {
-    consume(us);
-    result_ += "us";
-    return;
-  }
-  auto ms = us / 1000;
-  if (ms % 1000 > 0) {
-    consume(ms);
-    result_ += "ms";
-    return;
-  }
-  auto s = ms / 1000;
-  if (s % 60 > 0) {
-    consume(s);
-    result_ += "s";
-    return;
-  }
-  auto min = s / 60;
-  if (min % 60 > 0) {
-    consume(min);
-    result_ += "min";
-    return;
-  }
-  auto h = min / 60;
-  if (min % 24 > 0) {
-    consume(h);
-    result_ += "h";
-    return;
-  }
-  auto d = h / 24;
-  consume(d);
-  result_ += "d";
-}
-
-void stringification_inspector::consume(timestamp x) {
-  char buf[64];
-  auto y = std::chrono::time_point_cast<timestamp::clock::duration>(x);
-  auto z = timestamp::clock::to_time_t(y);
-  strftime(buf, sizeof(buf), "%FT%T", std::localtime(&z));
-  result_ += buf;
-  // time_t has no milliseconds, so we need to insert them manually.
-  auto ms = (x.time_since_epoch().count() / 1000000) % 1000;
-  result_ += '.';
-  auto frac = std::to_string(ms);
-  if (frac.size() < 3)
-    frac.insert(0, 3 - frac.size(), '0');
-  result_ += frac;
-}
-
-void stringification_inspector::consume(bool x) {
-  result_ += x ? "true" : "false";
-}
-
-void stringification_inspector::consume(const void* ptr) {
-  result_ += "0x";
-  consume(reinterpret_cast<intptr_t>(ptr));
-}
-
-void stringification_inspector::consume(const char* cstr) {
-  if (cstr == nullptr) {
-    result_ += "<null>";
-    return;
-  }
-  if (cstr[0] == '\0') {
-    result_ += R"("")";
-    return;
-  }
-  if (cstr[0] == '"') {
-    // Assume an already escaped string.
-    result_ += cstr;
-    return;
-  }
-  // Escape string.
-  result_ += '"';
-  for (char c = *cstr++; c != '\0'; c = *cstr++)
-    escape(result_, c);
-  result_ += '"';
-}
-
-void stringification_inspector::consume(const std::vector<bool>& xs) {
-  result_ += '[';
-  for (bool x : xs) {
-    sep();
-    consume(x);
-  }
-  result_ += ']';
-}
-
-void stringification_inspector::consume_int(int64_t x) {
-  if (x >= 0)
-    return consume_int(static_cast<uint64_t>(x));
-  result_ += '-';
-  auto begin = result_.size();
-  result_ += -(x % 10) + '0';
-  x /= 10;
-  while (x != 0) {
-    result_ += -(x % 10) + '0';
-    x /= 10;
-  }
-  std::reverse(result_.begin() + begin, result_.end());
-}
-
-void stringification_inspector::consume_int(uint64_t x) {
-  auto begin = result_.size();
-  result_ += (x % 10) + '0';
-  x /= 10;
-  while (x != 0) {
-    result_ += (x % 10) + '0';
-    x /= 10;
-  }
-  std::reverse(result_.begin() + begin, result_.end());
 }
 
 } // namespace caf::detail

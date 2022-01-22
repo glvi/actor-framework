@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -56,33 +42,35 @@ struct composed_type<detail::type_list<X, Xs...>, Ys, detail::type_list<>, Rs>
   : composed_type<detail::type_list<Xs...>, Ys, Ys, Rs> {};
 
 // Output type matches the input type of the next actor.
-template <class... In, class... Out, class... Xs, class Ys, class... MapsTo,
+template <class Out, class... In, class... Xs, class Ys, class MapsTo,
           class... Zs, class... Rs>
-struct composed_type<
-  detail::type_list<typed_mpi<detail::type_list<In...>, output_tuple<Out...>>,
-                    Xs...>,
-  Ys,
-  detail::type_list<
-    typed_mpi<detail::type_list<Out...>, output_tuple<MapsTo...>>, Zs...>,
-  detail::type_list<Rs...>>
-  : composed_type<
-      detail::type_list<Xs...>, Ys, Ys,
-      detail::type_list<
-        Rs..., typed_mpi<detail::type_list<In...>, output_tuple<MapsTo...>>>> {
-};
+struct composed_type<detail::type_list<Out(In...), Xs...>, Ys,
+                     detail::type_list<MapsTo(Out), Zs...>,
+                     detail::type_list<Rs...>>
+  : composed_type<detail::type_list<Xs...>, Ys, Ys,
+                  detail::type_list<Rs..., MapsTo(In...)>> {};
+
+// Output type matches the input type of the next actor.
+template <class... Out, class... In, class... Xs, class Ys, class MapsTo,
+          class... Zs, class... Rs>
+struct composed_type<detail::type_list<result<Out...>(In...), Xs...>, Ys,
+                     detail::type_list<MapsTo(Out...), Zs...>,
+                     detail::type_list<Rs...>>
+  : composed_type<detail::type_list<Xs...>, Ys, Ys,
+                  detail::type_list<Rs..., MapsTo(In...)>> {};
 
 // No match, recurse over Zs.
-template <class In, class Out, class... Xs, class Ys, class Unrelated,
-          class MapsTo, class... Zs, class Rs>
-struct composed_type<detail::type_list<typed_mpi<In, Out>, Xs...>, Ys,
-                     detail::type_list<typed_mpi<Unrelated, MapsTo>, Zs...>, Rs>
-  : composed_type<detail::type_list<typed_mpi<In, Out>, Xs...>, Ys,
+template <class Out, class... In, class... Xs, class Ys, class MapsTo,
+          class... Unrelated, class... Zs, class Rs>
+struct composed_type<detail::type_list<Out(In...), Xs...>, Ys,
+                     detail::type_list<MapsTo(Unrelated...), Zs...>, Rs>
+  : composed_type<detail::type_list<Out(In...), Xs...>, Ys,
                   detail::type_list<Zs...>, Rs> {};
 
 /// Convenience type alias.
 /// @relates composed_type
 template <class F, class G>
-using composed_type_t = typename composed_type<G, F, F,
-                                               detail::type_list<>>::type;
+using composed_type_t =
+  typename composed_type<G, F, F, detail::type_list<>>::type;
 
 } // namespace caf

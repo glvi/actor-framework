@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -22,6 +8,7 @@
 #include "caf/actor_system_config.hpp"
 #include "caf/detail/type_list.hpp"
 #include "caf/detail/type_traits.hpp"
+#include "caf/init_global_meta_objects.hpp"
 
 namespace caf {
 
@@ -33,8 +20,8 @@ struct exec_main_helper<detail::type_list<actor_system&>> {
   using config = actor_system_config;
 
   template <class F>
-  void operator()(F& fun, actor_system& sys, config&) {
-    fun(sys);
+  auto operator()(F& fun, actor_system& sys, const config&) {
+    return fun(sys);
   }
 };
 
@@ -43,14 +30,32 @@ struct exec_main_helper<detail::type_list<actor_system&, const T&>> {
   using config = T;
 
   template <class F>
-  void operator()(F& fun, actor_system& sys, config& cfg) {
-    fun(sys, cfg);
+  auto operator()(F& fun, actor_system& sys, const config& cfg) {
+    return fun(sys, cfg);
   }
 };
 
+template <class T>
+void exec_main_init_meta_objects_single() {
+  if constexpr (std::is_base_of<actor_system::module, T>::value)
+    T::init_global_meta_objects();
+  else
+    init_global_meta_objects<T>();
+}
+
+template <class... Ts>
+void exec_main_init_meta_objects() {
+  (exec_main_init_meta_objects_single<Ts>(), ...);
+}
+
+template <class T>
+void exec_main_load_module(actor_system_config& cfg) {
+  if constexpr (std::is_base_of<actor_system::module, T>::value)
+    cfg.template load<T>();
+}
+
 template <class... Ts, class F = void (*)(actor_system&)>
-int exec_main(F fun, int argc, char** argv,
-              const char* config_file_name = "caf-application.ini") {
+int exec_main(F fun, int argc, char** argv) {
   using trait = typename detail::get_callable_trait<F>::type;
   using arg_types = typename trait::arg_types;
   static_assert(detail::tl_size<arg_types>::value == 1
@@ -71,17 +76,16 @@ int exec_main(F fun, int argc, char** argv,
   using helper = exec_main_helper<typename trait::arg_types>;
   // Pass CLI options to config.
   typename helper::config cfg;
-  if (auto err = cfg.parse(argc, argv, config_file_name)) {
-    std::cerr << "error while parsing CLI and file options: "
-              << actor_system_config::render(err) << std::endl;
+  if (auto err = cfg.parse(argc, argv)) {
+    std::cerr << "error while parsing CLI and file options: " << to_string(err)
+              << std::endl;
     return EXIT_FAILURE;
   }
   // Return immediately if a help text was printed.
   if (cfg.cli_helptext_printed)
     return EXIT_SUCCESS;
   // Load modules.
-  std::initializer_list<unit_t> unused{unit_t{cfg.template load<Ts>()}...};
-  CAF_IGNORE_UNUSED(unused);
+  (exec_main_load_module<Ts>(cfg), ...);
   // Initialize the actor system.
   actor_system system{cfg};
   if (cfg.slave_mode) {
@@ -92,13 +96,20 @@ int exec_main(F fun, int argc, char** argv,
     return cfg.slave_mode_fun(system, cfg);
   }
   helper f;
-  f(fun, system, cfg);
-  return EXIT_SUCCESS;
+  using result_type = decltype(f(fun, system, cfg));
+  if constexpr (std::is_convertible<result_type, int>::value) {
+    return f(fun, system, cfg);
+  } else {
+    f(fun, system, cfg);
+    return EXIT_SUCCESS;
+  }
 }
 
 } // namespace caf
 
 #define CAF_MAIN(...)                                                          \
   int main(int argc, char** argv) {                                            \
-    return ::caf::exec_main<__VA_ARGS__>(caf_main, argc, argv);                \
+    caf::exec_main_init_meta_objects<__VA_ARGS__>();                           \
+    caf::core::init_global_meta_objects();                                     \
+    return caf::exec_main<__VA_ARGS__>(caf_main, argc, argv);                  \
   }

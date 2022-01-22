@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -24,17 +10,14 @@
 
 #include "caf/config.hpp"
 #include "caf/default_sum_type_access.hpp"
+#include "caf/detail/type_list.hpp"
+#include "caf/detail/type_traits.hpp"
+#include "caf/detail/variant_data.hpp"
 #include "caf/fwd.hpp"
 #include "caf/raise_error.hpp"
 #include "caf/static_visitor.hpp"
 #include "caf/sum_type.hpp"
 #include "caf/sum_type_access.hpp"
-
-#include "caf/meta/omittable.hpp"
-
-#include "caf/detail/type_list.hpp"
-#include "caf/detail/type_traits.hpp"
-#include "caf/detail/variant_data.hpp"
 
 #define CAF_VARIANT_CASE(n)                                                    \
   case n:                                                                      \
@@ -137,7 +120,7 @@ public:
 
   /// Stores whether all types are nothrow assignable *and* constructible. We
   /// need to check both, since assigning to a variant results in a
-  /// move-contruct unless the before and after types are the same.
+  /// move-construct unless the before and after types are the same.
   static constexpr bool nothrow_move_assign =
     nothrow_move_construct
     && detail::conjunction<
@@ -214,11 +197,11 @@ public:
 
   /// @cond PRIVATE
 
-  inline variant& get_data() {
+  variant& get_data() {
     return *this;
   }
 
-  inline const variant& get_data() const {
+  const variant& get_data() const {
     return *this;
   }
 
@@ -300,7 +283,7 @@ public:
   /// @endcond
 
 private:
-  inline void destroy_data() {
+  void destroy_data() {
     if (type_ == variant_npos) return; // nothing to do
     detail::variant_data_destructor f;
     apply<void>(f);
@@ -433,87 +416,4 @@ bool operator>=(const variant<Ts...>& x, const variant<Ts...>& y) {
   return !(x < y);
 }
 
-/// @relates variant
-template <class T>
-struct variant_reader {
-  uint8_t& type_tag;
-  T& x;
-};
-
-/// @relates variant
-template <class Inspector, class... Ts>
-typename Inspector::result_type
-inspect(Inspector& f, variant_reader<variant<Ts...>>& x) {
-  return x.x.template apply<typename Inspector::result_type>(f);
-}
-
-/// @relates variant
-template <class Inspector, class... Ts>
-typename std::enable_if<Inspector::reads_state,
-                        typename Inspector::result_type>::type
-inspect(Inspector& f, variant<Ts...>& x) {
-  // We use a single byte for the type index on the wire.
-  auto type_tag = static_cast<uint8_t>(x.index());
-  variant_reader<variant<Ts...>> helper{type_tag, x};
-  return f(meta::omittable(), type_tag, helper);
-}
-
-/// @relates variant
-template <class T>
-struct variant_writer {
-  uint8_t& type_tag;
-  T& x;
-};
-
-/// @relates variant
-template <class Inspector, class... Ts>
-typename Inspector::result_type
-inspect(Inspector& f, variant_writer<variant<Ts...>>& x) {
-  switch (x.type_tag) {
-    default: CAF_RAISE_ERROR("invalid type found");
-    CAF_VARIANT_ASSIGN_CASE(0);
-    CAF_VARIANT_ASSIGN_CASE(1);
-    CAF_VARIANT_ASSIGN_CASE(2);
-    CAF_VARIANT_ASSIGN_CASE(3);
-    CAF_VARIANT_ASSIGN_CASE(4);
-    CAF_VARIANT_ASSIGN_CASE(5);
-    CAF_VARIANT_ASSIGN_CASE(6);
-    CAF_VARIANT_ASSIGN_CASE(7);
-    CAF_VARIANT_ASSIGN_CASE(8);
-    CAF_VARIANT_ASSIGN_CASE(9);
-    CAF_VARIANT_ASSIGN_CASE(10);
-    CAF_VARIANT_ASSIGN_CASE(11);
-    CAF_VARIANT_ASSIGN_CASE(12);
-    CAF_VARIANT_ASSIGN_CASE(13);
-    CAF_VARIANT_ASSIGN_CASE(14);
-    CAF_VARIANT_ASSIGN_CASE(15);
-    CAF_VARIANT_ASSIGN_CASE(16);
-    CAF_VARIANT_ASSIGN_CASE(17);
-    CAF_VARIANT_ASSIGN_CASE(18);
-    CAF_VARIANT_ASSIGN_CASE(19);
-    CAF_VARIANT_ASSIGN_CASE(20);
-    CAF_VARIANT_ASSIGN_CASE(21);
-    CAF_VARIANT_ASSIGN_CASE(22);
-    CAF_VARIANT_ASSIGN_CASE(23);
-    CAF_VARIANT_ASSIGN_CASE(24);
-    CAF_VARIANT_ASSIGN_CASE(25);
-    CAF_VARIANT_ASSIGN_CASE(26);
-    CAF_VARIANT_ASSIGN_CASE(27);
-    CAF_VARIANT_ASSIGN_CASE(28);
-    CAF_VARIANT_ASSIGN_CASE(29);
-  }
-}
-
-/// @relates variant
-template <class Inspector, class... Ts>
-typename std::enable_if<Inspector::writes_state,
-                        typename Inspector::result_type>::type
-inspect(Inspector& f, variant<Ts...>& x) {
-  // We use a single byte for the type index on the wire.
-  uint8_t type_tag;
-  variant_writer<variant<Ts...>> helper{type_tag, x};
-  return f(meta::omittable(), type_tag, helper);
-}
-
 } // namespace caf
-

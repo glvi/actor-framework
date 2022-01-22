@@ -1,25 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <memory>
 
 #include "caf/allowed_unsafe_message_type.hpp"
@@ -64,28 +51,28 @@ public:
   receive_buffer& operator=(const receive_buffer& other);
 
   /// Returns a pointer to the underlying buffer.
-  inline pointer data() noexcept {
+  pointer data() noexcept {
     return buffer_.get();
   }
 
   /// Returns a const pointer to the data.
-  inline const_pointer data() const noexcept {
+  const_pointer data() const noexcept {
     return buffer_.get();
   }
 
   /// Returns the number of stored elements.
-  inline size_type size() const noexcept {
+  size_type size() const noexcept {
     return size_;
   }
 
   /// Returns the number of elements that the container has allocated space for.
-  inline size_type capacity() const noexcept {
+  size_type capacity() const noexcept {
     return capacity_;
   }
 
   /// Returns the maximum possible number of elements the container
   /// could theoretically hold.
-  inline size_type max_size() const noexcept {
+  size_type max_size() const noexcept {
     return std::numeric_limits<size_t>::max();
   }
 
@@ -102,7 +89,7 @@ public:
   void shrink_to_fit();
 
   /// Check if the container is empty.
-  inline bool empty() const noexcept {
+  bool empty() const noexcept {
     return size_ == 0;
   }
 
@@ -113,62 +100,62 @@ public:
   void swap(receive_buffer& other) noexcept;
 
   /// Returns an iterator to the beginning.
-  inline iterator begin() noexcept {
+  iterator begin() noexcept {
     return buffer_.get();
   }
 
   /// Returns an iterator to the end.
-  inline iterator end() noexcept {
+  iterator end() noexcept {
     return buffer_.get() + size_;
   }
 
   /// Returns an iterator to the beginning.
-  inline const_iterator begin() const noexcept {
+  const_iterator begin() const noexcept {
     return buffer_.get();
   }
 
   /// Returns an iterator to the end.
-  inline const_iterator end() const noexcept {
+  const_iterator end() const noexcept {
     return buffer_.get() + size_;
   }
 
   /// Returns an iterator to the beginning.
-  inline const_iterator cbegin() const noexcept {
+  const_iterator cbegin() const noexcept {
     return buffer_.get();
   }
 
   /// Returns an iterator to the end.
-  inline const_iterator cend() const noexcept {
+  const_iterator cend() const noexcept {
     return buffer_.get() + size_;
   }
 
   /// Returns jan iterator to the reverse beginning.
-  inline reverse_iterator rbegin() noexcept {
+  reverse_iterator rbegin() noexcept {
     return reverse_iterator{buffer_.get() + size_};
   }
 
   /// Returns an iterator to the reverse end of the data.
-  inline reverse_iterator rend() noexcept {
+  reverse_iterator rend() noexcept {
     return reverse_iterator{buffer_.get()};
   }
 
   /// Returns an iterator to the reverse beginning.
-  inline const_reverse_iterator rbegin() const noexcept {
+  const_reverse_iterator rbegin() const noexcept {
     return const_reverse_iterator{buffer_.get() + size_};
   }
 
   /// Returns an iterator to the reverse end of the data.
-  inline const_reverse_iterator rend() const noexcept {
+  const_reverse_iterator rend() const noexcept {
     return const_reverse_iterator{buffer_.get()};
   }
 
   /// Returns an iterator to the reverse beginning.
-  inline const_reverse_iterator crbegin() const noexcept {
+  const_reverse_iterator crbegin() const noexcept {
     return const_reverse_iterator{buffer_.get() + size_};
   }
 
   /// Returns an iterator to the reverse end of the data.
-  inline const_reverse_iterator crend() const noexcept {
+  const_reverse_iterator crend() const noexcept {
     return const_reverse_iterator{buffer_.get()};
   }
 
@@ -195,7 +182,7 @@ public:
   void push_back(value_type value);
 
 private:
-  // Increse the buffer capacity, maintaining its data. May invalidate
+  // Increase the buffer capacity, maintaining its data. May invalidate
   // iterators.
   void increase_by(size_t bytes);
 

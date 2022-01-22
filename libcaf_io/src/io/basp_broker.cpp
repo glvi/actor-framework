@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/io/basp_broker.hpp"
 
@@ -77,6 +63,13 @@ void basp_broker::on_exit() {
   //       that the middleman calls this in its stop() function. However,
   //       ultimately we should find a nonblocking solution here.
   instance.hub().await_workers();
+  // All nodes are offline now. We use a default-constructed error code to
+  // signal ordinary shutdown.
+  for (const auto& [node, observer_list] : node_observers)
+    for (const auto& observer : observer_list)
+      if (auto hdl = actor_cast<actor>(observer))
+        anon_send(hdl, node_down_msg{node, error{}});
+  node_observers.clear();
   // Release any obsolete state.
   ctx.clear();
   // Make sure all spawn servers are down before clearing the container.
@@ -90,7 +83,7 @@ void basp_broker::on_exit() {
 }
 
 const char* basp_broker::name() const {
-  return "basp-broker";
+  return "caf.system.basp-broker";
 }
 
 behavior basp_broker::make_behavior() {
@@ -98,7 +91,7 @@ behavior basp_broker::make_behavior() {
   set_down_handler([](local_actor* ptr, down_msg& x) {
     static_cast<basp_broker*>(ptr)->handle_down_msg(x);
   });
-  if (get_or(config(), "middleman.enable-automatic-connections", false)) {
+  if (get_or(config(), "caf.middleman.enable-automatic-connections", false)) {
     CAF_LOG_DEBUG("enable automatic connections");
     // open a random port and store a record for our peers how to
     // connect to this broker directly in the configuration server
@@ -106,18 +99,28 @@ behavior basp_broker::make_behavior() {
     if (res) {
       auto port = res->second;
       auto addrs = network::interfaces::list_addresses(false);
-      auto config_server = system().registry().get(atom("ConfigServ"));
-      send(actor_cast<actor>(config_server), put_atom::value,
+      auto config_server = system().registry().get("ConfigServ");
+      send(actor_cast<actor>(config_server), put_atom_v,
            "basp.default-connectivity-tcp",
            make_message(port, std::move(addrs)));
     }
     automatic_connections = true;
   }
-  auto heartbeat_interval = get_or(config(), "middleman.heartbeat-interval",
+  auto heartbeat_interval = get_or(config(), "caf.middleman.heartbeat-interval",
                                    defaults::middleman::heartbeat_interval);
-  if (heartbeat_interval > 0) {
-    CAF_LOG_DEBUG("enable heartbeat" << CAF_ARG(heartbeat_interval));
-    send(this, tick_atom::value, heartbeat_interval);
+  if (heartbeat_interval.count() > 0) {
+    auto now = clock().now();
+    auto first_tick = now + heartbeat_interval;
+    auto connection_timeout = get_or(config(),
+                                     "caf.middleman.connection-timeout",
+                                     defaults::middleman::connection_timeout);
+    CAF_LOG_DEBUG("enable heartbeat" << CAF_ARG(heartbeat_interval)
+                                     << CAF_ARG(connection_timeout));
+    // Note: we send the scheduled time as integer representation to avoid
+    //       having to assign a type ID to the time_point type.
+    scheduled_send(this, first_tick, tick_atom_v,
+                   first_tick.time_since_epoch().count(), heartbeat_interval,
+                   connection_timeout);
   }
   return behavior{
     // received from underlying broker implementation
@@ -127,8 +130,8 @@ behavior basp_broker::make_behavior() {
       auto& ctx = *this_context;
       auto next = instance.handle(context(), msg, ctx.hdr,
                                   ctx.cstate == basp::await_payload);
-      if (next == basp::close_connection) {
-        connection_cleanup(msg.handle);
+      if (requires_shutdown(next)) {
+        connection_cleanup(msg.handle, to_sec(next));
         close(msg.handle);
         return;
       }
@@ -161,19 +164,18 @@ behavior basp_broker::make_behavior() {
       }
     },
     // received from some system calls like whereis
-    [=](forward_atom, const node_id& dest_node, atom_value dest_name,
+    [=](forward_atom, const node_id& dest_node, uint64_t dest_id,
         const message& msg) -> result<message> {
       auto cme = current_mailbox_element();
       if (cme == nullptr || cme->sender == nullptr)
         return sec::invalid_argument;
       CAF_LOG_TRACE(CAF_ARG2("sender", cme->sender)
-                    << ", " << CAF_ARG(dest_node) << ", " << CAF_ARG(dest_name)
+                    << ", " << CAF_ARG(dest_node) << ", " << CAF_ARG(dest_id)
                     << ", " << CAF_ARG(msg));
       auto& sender = cme->sender;
       if (system().node() == sender->node())
         system().registry().put(sender->id(), sender);
-      if (!instance.dispatch(context(), sender, cme->stages, dest_node,
-                             static_cast<uint64_t>(dest_name),
+      if (!instance.dispatch(context(), sender, cme->stages, dest_node, dest_id,
                              basp::header::named_receiver_flag, cme->mid,
                              msg)) {
         detail::sync_request_bouncer srb{exit_reason::remote_link_unreachable};
@@ -201,6 +203,47 @@ behavior basp_broker::make_behavior() {
                                      proxy->id());
       flush(hdl);
     },
+    // received from the middleman whenever a node becomes observed by a local
+    // actor
+    [=](monitor_atom, const node_id& node, const actor_addr& observer) {
+      // Sanity checks.
+      if (!observer || !node)
+        return;
+      // Add to the list if a list for this node already exists.
+      auto i = node_observers.find(node);
+      if (i != node_observers.end()) {
+        i->second.emplace_back(observer);
+        return;
+      }
+      // Check whether the node is still connected at the moment and send the
+      // observer a message immediately otherwise.
+      if (instance.tbl().lookup(node) == none) {
+        if (auto hdl = actor_cast<actor>(observer)) {
+          // TODO: we might want to consider keeping the exit reason for nodes,
+          //       at least for some time. Otherwise, we'll have to send a
+          //       generic "don't know" exit reason. Probably an improvement we
+          //       should consider in caf_net.
+          anon_send(hdl, node_down_msg{node, sec::no_context});
+        }
+        return;
+      }
+      std::vector<actor_addr> xs{observer};
+      node_observers.emplace(node, std::move(xs));
+    },
+    // received from the middleman whenever a node becomes observed by a local
+    // actor
+    [=](demonitor_atom, const node_id& node, const actor_addr& observer) {
+      auto i = node_observers.find(node);
+      if (i == node_observers.end())
+        return;
+      auto& observers = i->second;
+      auto j = std::find(observers.begin(), observers.end(), observer);
+      if (j != observers.end()) {
+        observers.erase(j);
+        if (observers.empty())
+          node_observers.erase(i);
+      }
+    },
     // received from underlying broker implementation
     [=](const new_connection_msg& msg) {
       CAF_LOG_TRACE(CAF_ARG(msg.handle));
@@ -221,11 +264,13 @@ behavior basp_broker::make_behavior() {
       auto& q = instance.queue();
       auto msg_id = q.new_id();
       q.push(context(), msg_id, ctrl(),
-             make_mailbox_element(nullptr, make_message_id(), {},
-                                  delete_atom::value, msg.handle));
+             make_mailbox_element(nullptr, make_message_id(), {}, delete_atom_v,
+                                  msg.handle));
     },
     // received from the message handler above for connection_closed_msg
-    [=](delete_atom, connection_handle hdl) { connection_cleanup(hdl); },
+    [=](delete_atom, connection_handle hdl) {
+      connection_cleanup(hdl, sec::none);
+    },
     // received from underlying broker implementation
     [=](const acceptor_closed_msg& msg) {
       CAF_LOG_TRACE("");
@@ -233,8 +278,8 @@ behavior basp_broker::make_behavior() {
       auto& q = instance.queue();
       auto msg_id = q.new_id();
       q.push(context(), msg_id, ctrl(),
-             make_mailbox_element(nullptr, make_message_id(), {},
-                                  delete_atom::value, msg.handle));
+             make_mailbox_element(nullptr, make_message_id(), {}, delete_atom_v,
+                                  msg.handle));
     },
     // received from the message handler above for acceptor_closed_msg
     [=](delete_atom, accept_handle hdl) {
@@ -282,6 +327,9 @@ behavior basp_broker::make_behavior() {
       ctx.callback = rp;
       // await server handshake
       configure_read(hdl, receive_policy::exactly(basp::header_size));
+      // send client handshake
+      instance.write_client_handshake(context(), get_buffer(hdl));
+      flush(hdl);
     },
     [=](delete_atom, const node_id& nid, actor_id aid) {
       CAF_LOG_TRACE(CAF_ARG(nid) << ", " << CAF_ARG(aid));
@@ -297,7 +345,6 @@ behavior basp_broker::make_behavior() {
       CAF_LOG_TRACE(CAF_ARG(whom) << CAF_ARG(port));
       auto cb = make_callback([&](const strong_actor_ptr&, uint16_t x) {
         close(hdl_by_port(x));
-        return error_code<sec>{};
       });
       if (instance.remove_published_actor(whom, port, &cb) == 0)
         return sec::no_actor_published_at_port;
@@ -314,8 +361,7 @@ behavior basp_broker::make_behavior() {
         return unit;
       return sec::cannot_close_invalid_port;
     },
-    [=](get_atom,
-        const node_id& x) -> std::tuple<node_id, std::string, uint16_t> {
+    [=](get_atom, const node_id& x) -> result<node_id, std::string, uint16_t> {
       std::string addr;
       uint16_t port = 0;
       auto hdl = instance.tbl().lookup_direct(x);
@@ -323,12 +369,52 @@ behavior basp_broker::make_behavior() {
         addr = remote_addr(*hdl);
         port = remote_port(*hdl);
       }
-      return std::make_tuple(x, std::move(addr), port);
+      return {x, std::move(addr), port};
     },
-    [=](tick_atom, size_t interval) {
+    [=](tick_atom, actor_clock::time_point::rep scheduled_rep,
+        timespan heartbeat_interval, timespan connection_timeout) {
+      auto scheduled_tse = actor_clock::time_point::duration{scheduled_rep};
+      auto scheduled = actor_clock::time_point{scheduled_tse};
+      auto now = clock().now();
+      if (now < scheduled) {
+        CAF_LOG_WARNING("received tick before its time, reschedule");
+        scheduled_send(this, scheduled, tick_atom_v,
+                       scheduled.time_since_epoch().count(), heartbeat_interval,
+                       connection_timeout);
+        return;
+      }
+      auto next_tick = scheduled + heartbeat_interval;
+      if (now >= next_tick) {
+        CAF_LOG_ERROR("Lagging a full heartbeat interval behind! "
+                      "Interval too low or BASP actor overloaded! "
+                      "Other nodes may disconnect.");
+        while (now >= next_tick)
+          next_tick += heartbeat_interval;
+
+      } else if (now >= scheduled + (heartbeat_interval / 2)) {
+        CAF_LOG_WARNING("Lagging more than 50% of a heartbeat interval behind! "
+                        "Interval too low or BASP actor overloaded!");
+      }
+      // Send out heartbeats.
       instance.handle_heartbeat(context());
-      delayed_send(this, std::chrono::milliseconds{interval}, tick_atom::value,
-                   interval);
+      // Check whether any node reached the disconnect timeout.
+      for (auto i = ctx.begin(); i != ctx.end();) {
+        if (i->second.last_seen + connection_timeout < now) {
+          CAF_LOG_WARNING("Disconnect BASP node: reached connection timeout!");
+          auto hdl = i->second.hdl;
+          // connection_cleanup below calls ctx.erase, so we need to increase
+          // the iterator now, before it gets invalidated.
+          ++i;
+          connection_cleanup(hdl, sec::connection_timeout);
+          close(hdl);
+        } else {
+          ++i;
+        }
+      }
+      // Schedule next tick.
+      scheduled_send(this, next_tick, tick_atom_v,
+                     next_tick.time_since_epoch().count(), heartbeat_interval,
+                     connection_timeout);
     }};
 }
 
@@ -456,6 +542,16 @@ void basp_broker::handle_down_msg(down_msg& dm) {
   monitored_actors.erase(i);
 }
 
+void basp_broker::emit_node_down_msg(const node_id& node, const error& reason) {
+  auto i = node_observers.find(node);
+  if (i == node_observers.end())
+    return;
+  for (const auto& observer : i->second)
+    if (auto hdl = actor_cast<actor>(observer))
+      anon_send(hdl, node_down_msg{node, reason});
+  node_observers.erase(i);
+}
+
 void basp_broker::learned_new_node(const node_id& nid) {
   CAF_LOG_TRACE(CAF_ARG(nid));
   if (spawn_servers.count(nid) > 0) {
@@ -484,8 +580,8 @@ void basp_broker::learned_new_node(const node_id& nid) {
         tself->become([=](spawn_atom, std::string& type, message& args)
                         -> delegated<strong_actor_ptr, std::set<std::string>> {
           CAF_LOG_TRACE(CAF_ARG(type) << CAF_ARG(args));
-          tself->delegate(actor_cast<actor>(std::move(config_serv)),
-                          get_atom::value, std::move(type), std::move(args));
+          tself->delegate(actor_cast<actor>(std::move(config_serv)), get_atom_v,
+                          std::move(type), std::move(args));
           return {};
         });
       },
@@ -501,10 +597,9 @@ void basp_broker::learned_new_node(const node_id& nid) {
   system().registry().put(tmp.id(), tmp_ptr);
   std::vector<strong_actor_ptr> stages;
   if (!instance.dispatch(context(), tmp_ptr, stages, nid,
-                         static_cast<uint64_t>(atom("SpawnServ")),
+                         basp::header::spawn_server_id,
                          basp::header::named_receiver_flag, make_message_id(),
-                         make_message(sys_atom::value, get_atom::value,
-                                      "info"))) {
+                         make_message(sys_atom_v, get_atom_v, "info"))) {
     CAF_LOG_ERROR("learned_new_node called, but no route to remote node"
                   << CAF_ARG(nid));
   }
@@ -526,23 +621,23 @@ void basp_broker::learned_new_node_indirectly(const node_id& nid) {
   // connection to the routing table; hence, spawning our helper here exactly
   // once and there is no need to track in-flight connection requests.
   using namespace detail;
-  auto tmp = get_or(config(), "middleman.attach-utility-actors", false)
+  auto tmp = get_or(config(), "caf.middleman.attach-utility-actors", false)
                ? system().spawn<hidden>(connection_helper, this)
                : system().spawn<detached + hidden>(connection_helper, this);
   auto sender = actor_cast<strong_actor_ptr>(tmp);
   system().registry().put(sender->id(), sender);
   std::vector<strong_actor_ptr> fwd_stack;
-  if (!instance.dispatch(context(), sender, fwd_stack, nid,
-                         static_cast<uint64_t>(atom("ConfigServ")),
-                         basp::header::named_receiver_flag, make_message_id(),
-                         make_message(get_atom::value,
-                                      "basp.default-connectivity-tcp"))) {
+  if (!instance.dispatch(
+        context(), sender, fwd_stack, nid, basp::header::config_server_id,
+        basp::header::named_receiver_flag, make_message_id(),
+        make_message(get_atom_v, "basp.default-connectivity-tcp"))) {
     CAF_LOG_ERROR("learned_new_node_indirectly called, but no route to nid");
   }
 }
 
 void basp_broker::set_context(connection_handle hdl) {
   CAF_LOG_TRACE(CAF_ARG(hdl));
+  auto now = clock().now();
   auto i = ctx.find(hdl);
   if (i == ctx.end()) {
     CAF_LOG_DEBUG("create new BASP context:" << CAF_ARG(hdl));
@@ -554,19 +649,23 @@ void basp_broker::set_context(connection_handle hdl) {
                      invalid_actor_id};
     i = ctx
           .emplace(hdl, basp::endpoint_context{basp::await_header, hdr, hdl,
-                                               node_id{}, 0, 0, none})
+                                               node_id{}, 0, 0, none, now})
           .first;
+  } else {
+    i->second.last_seen = now;
   }
   this_context = &i->second;
   t_last_hop = &i->second.id;
 }
 
-void basp_broker::connection_cleanup(connection_handle hdl) {
-  CAF_LOG_TRACE(CAF_ARG(hdl));
-  // Remove handle from the routing table and clean up any node-specific state
-  // we might still have.
-  if (auto nid = instance.tbl().erase_direct(hdl))
+void basp_broker::connection_cleanup(connection_handle hdl, sec code) {
+  CAF_LOG_TRACE(CAF_ARG(hdl) << CAF_ARG(code));
+  // Remove handle from the routing table, notify all observers, and clean up
+  // any node-specific state we might still have.
+  if (auto nid = instance.tbl().erase_direct(hdl)) {
+    emit_node_down_msg(nid, code);
     purge_state(nid);
+  }
   // Remove the context for `hdl`, making sure clients receive an error in case
   // this connection was closed during handshake.
   auto i = ctx.find(hdl);
@@ -574,8 +673,9 @@ void basp_broker::connection_cleanup(connection_handle hdl) {
     auto& ref = i->second;
     CAF_ASSERT(i->first == ref.hdl);
     if (ref.callback) {
-      CAF_LOG_DEBUG("connection closed during handshake");
-      ref.callback->deliver(sec::disconnect_during_handshake);
+      CAF_LOG_DEBUG("connection closed during handshake:" << CAF_ARG(code));
+      auto x = code != sec::none ? code : sec::disconnect_during_handshake;
+      ref.callback->deliver(x);
     }
     ctx.erase(i);
   }

@@ -1,42 +1,23 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE behavior
 
 #include "caf/config.hpp"
 
-#include "caf/test/unit_test.hpp"
+#include "core-test.hpp"
 
 #include <functional>
 
-#include "caf/send.hpp"
-#include "caf/behavior.hpp"
 #include "caf/actor_system.hpp"
-#include "caf/message_handler.hpp"
-#include "caf/event_based_actor.hpp"
 #include "caf/actor_system_config.hpp"
-#include "caf/make_type_erased_tuple_view.hpp"
+#include "caf/behavior.hpp"
+#include "caf/event_based_actor.hpp"
+#include "caf/message_handler.hpp"
+#include "caf/send.hpp"
 
 using namespace caf;
-using namespace std;
-
-using hi_atom = atom_constant<atom("hi")>;
-using ho_atom = atom_constant<atom("ho")>;
 
 namespace {
 
@@ -52,61 +33,67 @@ public:
 
   nocopy_fun& operator=(const nocopy_fun&) = delete;
 
-  int operator()(int x, int y) {
+  int32_t operator()(int32_t x, int32_t y) {
     return x + y;
   }
 };
 
 struct fixture {
-  message m1 = make_message(1);
-  message m2 = make_message(1, 2);
-  message m3 = make_message(1, 2, 3);
+  optional<int32_t> res_of(behavior& bhvr, message& msg) {
+    auto res = bhvr(msg);
+    if (!res)
+      return none;
+    if (auto view = make_const_typed_message_view<int32_t>(*res))
+      return get<0>(view);
+    return none;
+  }
+
+  message m1 = make_message(int32_t{1});
+
+  message m2 = make_message(int32_t{1}, int32_t{2});
+
+  message m3 = make_message(int32_t{1}, int32_t{2}, int32_t{3});
 };
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(behavior_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(default_construct) {
   behavior f;
-  CAF_CHECK_EQUAL(f(m1), none);
-  CAF_CHECK_EQUAL(f(m2), none);
-  CAF_CHECK_EQUAL(f(m3), none);
+  CHECK_EQ(f(m1), none);
+  CHECK_EQ(f(m2), none);
+  CHECK_EQ(f(m3), none);
 }
 
 CAF_TEST(nocopy_function_object) {
   behavior f{nocopy_fun{}};
-  CAF_CHECK_EQUAL(f(m1), none);
-  CAF_CHECK_EQUAL(to_string(f(m2)), "*(3)");
-  CAF_CHECK_EQUAL(f(m3), none);
+  CHECK_EQ(f(m1), none);
+  CHECK_EQ(res_of(f, m2), 3);
+  CHECK_EQ(f(m3), none);
 }
 
 CAF_TEST(single_lambda_construct) {
   behavior f{[](int x) { return x + 1; }};
-  CAF_CHECK_EQUAL(to_string(f(m1)), "*(2)");
-  CAF_CHECK_EQUAL(f(m2), none);
-  CAF_CHECK_EQUAL(f(m3), none);
+  CHECK_EQ(res_of(f, m1), 2);
+  CHECK_EQ(res_of(f, m2), none);
+  CHECK_EQ(res_of(f, m3), none);
 }
 
 CAF_TEST(multiple_lambda_construct) {
-  behavior f{
-    [](int x) { return x + 1; },
-    [](int x, int y) { return x * y; }
-  };
-  CAF_CHECK_EQUAL(to_string(f(m1)), "*(2)");
-  CAF_CHECK_EQUAL(to_string(f(m2)), "*(2)");
-  CAF_CHECK_EQUAL(f(m3), none);
+  behavior f{[](int x) { return x + 1; }, [](int x, int y) { return x * y; }};
+  CHECK_EQ(res_of(f, m1), 2);
+  CHECK_EQ(res_of(f, m2), 2);
+  CHECK_EQ(res_of(f, m3), none);
 }
 
 CAF_TEST(become_empty_behavior) {
   actor_system_config cfg{};
   actor_system sys{cfg};
   auto make_bhvr = [](event_based_actor* self) -> behavior {
-    return {
-      [=](int) { self->become(behavior{}); }
-    };
+    return {[=](int) { self->become(behavior{}); }};
   };
   anon_send(sys.spawn(make_bhvr), int{5});
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

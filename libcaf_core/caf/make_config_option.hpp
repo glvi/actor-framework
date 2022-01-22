@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -22,7 +8,6 @@
 
 #include "caf/config_option.hpp"
 #include "caf/config_value.hpp"
-#include "caf/detail/parse.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/error.hpp"
 #include "caf/expected.hpp"
@@ -30,60 +15,41 @@
 #include "caf/pec.hpp"
 #include "caf/string_view.hpp"
 
-namespace caf {
-
-namespace detail {
+namespace caf::detail {
 
 template <class T>
-error check_impl(const config_value& x) {
-  if (holds_alternative<T>(x))
-    return none;
-  return make_error(pec::type_mismatch);
-}
-
-template <class T>
-void store_impl(void* ptr, const config_value& x) {
-  *static_cast<T*>(ptr) = get<T>(x);
+error sync_impl(void* ptr, config_value& x) {
+  if (auto val = get_as<T>(x)) {
+    if (auto err = x.assign(*val); !err) {
+      if (ptr)
+        *static_cast<T*>(ptr) = std::move(*val);
+      return none;
+    } else {
+      return err;
+    }
+  } else {
+    return std::move(val.error());
+  }
 }
 
 template <class T>
 config_value get_impl(const void* ptr) {
-  using trait = select_config_value_access_t<T>;
-  return config_value{trait::convert(*reinterpret_cast<const T*>(ptr))};
-}
-
-template <class T>
-expected<config_value> parse_impl(T* ptr, string_view str) {
-  if (!ptr) {
-    T tmp;
-    return parse_impl(&tmp, str);
-  }
-  using trait = select_config_value_access_t<T>;
-  string_parser_state ps{str.begin(), str.end()};
-  trait::parse_cli(ps, *ptr);
-  if (ps.code != pec::success)
-    return make_error(ps);
-  return config_value{trait::convert(*ptr)};
-}
-
-CAF_CORE_EXPORT expected<config_value>
-parse_impl(std::string* ptr, string_view str);
-
-template <class T>
-expected<config_value> parse_impl_delegate(void* ptr, string_view str) {
-  return parse_impl(reinterpret_cast<T*>(ptr), str);
+  config_value result;
+  auto err = result.assign(*static_cast<const T*>(ptr));
+  static_cast<void>(err); // Safe to discard because sync() fails otherwise.
+  return result;
 }
 
 template <class T>
 config_option::meta_state* option_meta_state_instance() {
-  using trait = select_config_value_access_t<T>;
-  static config_option::meta_state obj{check_impl<T>, store_impl<T>,
-                                       get_impl<T>, parse_impl_delegate<T>,
-                                       trait::type_name()};
+  static config_option::meta_state obj{sync_impl<T>, get_impl<T>,
+                                       config_value::mapped_type_name<T>()};
   return &obj;
 }
 
-} // namespace detail
+} // namespace caf::detail
+
+namespace caf {
 
 /// Creates a config option that synchronizes with `storage`.
 template <class T>
@@ -106,15 +72,5 @@ config_option make_config_option(T& storage, string_view category,
 CAF_CORE_EXPORT config_option
 make_negated_config_option(bool& storage, string_view category,
                            string_view name, string_view description);
-
-// Reads timespans, but stores an integer representing microsecond resolution.
-CAF_CORE_EXPORT config_option
-make_us_resolution_config_option(size_t& storage, string_view category,
-                                 string_view name, string_view description);
-
-// Reads timespans, but stores an integer representing millisecond resolution.
-CAF_CORE_EXPORT config_option
-make_ms_resolution_config_option(size_t& storage, string_view category,
-                                 string_view name, string_view description);
 
 } // namespace caf

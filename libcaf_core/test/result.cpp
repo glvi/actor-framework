@@ -1,69 +1,43 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
-
-#include "caf/config.hpp"
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE result
-#include "caf/test/unit_test.hpp"
 
-#include "caf/sec.hpp"
+#include "core-test.hpp"
+
 #include "caf/result.hpp"
+#include "caf/sec.hpp"
 
 using namespace std;
 using namespace caf;
 
 namespace {
 
-template<class T>
+template <class T>
 void test_unit_void() {
   auto x = result<T>{};
-  CAF_CHECK_EQUAL(x.flag, rt_value);
-  x = skip();
-  CAF_CHECK_EQUAL(x.flag, rt_skip);
-  x = expected<T>{};
-  CAF_CHECK_EQUAL(x.flag, rt_value);
-  x = expected<T>{sec::unexpected_message};
-  CAF_CHECK_EQUAL(x.flag, rt_error);
-  CAF_CHECK_EQUAL(x.err, make_error(sec::unexpected_message));
+  CHECK(holds_alternative<message>(x));
 }
 
-} // namespace anonymous
-
-CAF_TEST(skip) {
-  auto x = result<>{skip()};
-  CAF_CHECK_EQUAL(x.flag, rt_skip);
-  CAF_CHECK(x.value.empty());
-}
+} // namespace
 
 CAF_TEST(value) {
   auto x = result<int>{42};
-  CAF_CHECK_EQUAL(x.flag, rt_value);
-  CAF_CHECK_EQUAL(x.value.get_as<int>(0), 42);
+  CAF_REQUIRE(holds_alternative<message>(x));
+  if (auto view = make_typed_message_view<int>(get<message>(x)))
+    CHECK_EQ(get<0>(view), 42);
+  else
+    CAF_FAIL("unexpected types in result message");
 }
 
 CAF_TEST(expected) {
   auto x = result<int>{expected<int>{42}};
-  CAF_CHECK_EQUAL(x.flag, rt_value);
-  CAF_CHECK_EQUAL(x.value.get_as<int>(0), 42);
-  x = expected<int>{sec::unexpected_message};
-  CAF_CHECK_EQUAL(x.flag, rt_error);
-  CAF_CHECK_EQUAL(x.err, make_error(sec::unexpected_message));
-  CAF_CHECK(x.value.empty());
+  CAF_REQUIRE(holds_alternative<message>(x));
+  if (auto view = make_typed_message_view<int>(get<message>(x)))
+    CHECK_EQ(get<0>(view), 42);
+  else
+    CAF_FAIL("unexpected types in result message");
 }
 
 CAF_TEST(void_specialization) {

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -22,7 +8,6 @@
 
 #include "caf/abstract_actor.hpp"
 #include "caf/abstract_channel.hpp"
-#include "caf/abstract_composable_behavior.hpp"
 #include "caf/abstract_group.hpp"
 #include "caf/actor.hpp"
 #include "caf/actor_addr.hpp"
@@ -34,7 +19,6 @@
 #include "caf/actor_system_config.hpp"
 #include "caf/actor_traits.hpp"
 #include "caf/after.hpp"
-#include "caf/atom.hpp"
 #include "caf/attach_continuous_stream_source.hpp"
 #include "caf/attach_continuous_stream_stage.hpp"
 #include "caf/attach_stream_sink.hpp"
@@ -47,20 +31,17 @@
 #include "caf/binary_serializer.hpp"
 #include "caf/blocking_actor.hpp"
 #include "caf/byte_buffer.hpp"
-#include "caf/composable_behavior.hpp"
-#include "caf/composed_behavior.hpp"
+#include "caf/byte_span.hpp"
+#include "caf/caf_main.hpp"
 #include "caf/config_option.hpp"
 #include "caf/config_option_adder.hpp"
 #include "caf/config_value.hpp"
-#include "caf/config_value_adaptor.hpp"
-#include "caf/config_value_adaptor_access.hpp"
-#include "caf/config_value_adaptor_field.hpp"
-#include "caf/config_value_field.hpp"
-#include "caf/config_value_object_access.hpp"
+#include "caf/config_value_reader.hpp"
+#include "caf/config_value_writer.hpp"
+#include "caf/const_typed_message_view.hpp"
 #include "caf/deep_to_string.hpp"
 #include "caf/defaults.hpp"
 #include "caf/deserializer.hpp"
-#include "caf/detail/config_value_adaptor_field_impl.hpp"
 #include "caf/downstream_msg.hpp"
 #include "caf/error.hpp"
 #include "caf/event_based_actor.hpp"
@@ -72,21 +53,20 @@
 #include "caf/function_view.hpp"
 #include "caf/fused_downstream_manager.hpp"
 #include "caf/group.hpp"
-#include "caf/index_mapping.hpp"
+#include "caf/hash/fnv.hpp"
+#include "caf/init_global_meta_objects.hpp"
 #include "caf/local_actor.hpp"
 #include "caf/logger.hpp"
 #include "caf/make_config_option.hpp"
-#include "caf/make_config_value_field.hpp"
 #include "caf/may_have_timeout.hpp"
-#include "caf/memory_managed.hpp"
 #include "caf/message.hpp"
 #include "caf/message_builder.hpp"
 #include "caf/message_handler.hpp"
 #include "caf/message_id.hpp"
 #include "caf/message_priority.hpp"
+#include "caf/mtl.hpp"
 #include "caf/node_id.hpp"
 #include "caf/others.hpp"
-#include "caf/primitive_variant.hpp"
 #include "caf/proxy_registry.hpp"
 #include "caf/raise_error.hpp"
 #include "caf/ref_counted.hpp"
@@ -108,23 +88,21 @@
 #include "caf/term.hpp"
 #include "caf/thread_hook.hpp"
 #include "caf/timeout_definition.hpp"
-#include "caf/to_string.hpp"
+#include "caf/tracing_data.hpp"
+#include "caf/tracing_data_factory.hpp"
+#include "caf/type_id.hpp"
 #include "caf/typed_actor.hpp"
 #include "caf/typed_actor_pointer.hpp"
 #include "caf/typed_actor_view.hpp"
 #include "caf/typed_behavior.hpp"
 #include "caf/typed_event_based_actor.hpp"
+#include "caf/typed_message_view.hpp"
 #include "caf/typed_response_promise.hpp"
 #include "caf/unit.hpp"
 #include "caf/upstream_msg.hpp"
+#include "caf/uuid.hpp"
 
 #include "caf/decorator/sequencer.hpp"
-
-#include "caf/meta/annotation.hpp"
-#include "caf/meta/load_callback.hpp"
-#include "caf/meta/omittable_if_empty.hpp"
-#include "caf/meta/save_callback.hpp"
-#include "caf/meta/type_name.hpp"
 
 #include "caf/scheduler/abstract_coordinator.hpp"
 #include "caf/scheduler/test_coordinator.hpp"
@@ -134,43 +112,12 @@
 ///
 /// @section Intro Introduction
 ///
-/// This library provides an implementation of the actor model for C++.
-/// It uses a network transparent messaging system to ease development
-/// of both concurrent and distributed software.
+/// This framework provides an implementation of the actor model for C++. It
+/// uses network transparent messaging to ease development of concurrent and
+/// distributed software.
 ///
-/// `libcaf` uses a thread pool to schedule actors by default.
-/// A scheduled actor should not call blocking functions.
-/// Individual actors can be spawned (created) with a special flag to run in
-/// an own thread if one needs to make use of blocking APIs.
-///
-/// Writing applications in `libcaf` requires a minimum of gluecode and
-/// each context <i>is</i> an actor. Scoped actors allow actor interaction
-/// from the context of threads such as main.
-///
-/// @section GettingStarted Getting Started
-///
-/// To build `libcaf,` you need `GCC >= 4.8 or <tt>Clang >= 3.2</tt>,
-/// and `CMake`.
-///
-/// The usual build steps on Linux and macOS are:
-///
-///- `./configure
-///- `make
-///- `make install (as root, optionally)
-///
-/// Please run the unit tests as well to verify that `libcaf`
-/// works properly.
-///
-///- `make test
-///
-/// Please submit a bug report that includes (a) your compiler version,
-/// (b) your OS, and (c) the output of the unit tests if an error occurs:
-/// https://github.com/actor-framework/actor-framework/issues
-///
-/// Please read the <b>Manual</b> for an introduction to `libcaf`.
-/// It is available online on Read The Docs at
-/// https://actor-framework.readthedocs.io or as PDF at
-/// http://www.actor-framework.org/pdf/manual.pdf
+/// To get started with the framework, please read the
+/// [manual](https://actor-framework.readthedocs.io) first.
 ///
 /// @section IntroHelloWorld Hello World Example
 ///

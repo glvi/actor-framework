@@ -1,49 +1,34 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <cstddef>
 #include <string>
-#include <tuple>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 #include "caf/byte.hpp"
 #include "caf/byte_buffer.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/squashed_int.hpp"
-#include "caf/error_code.hpp"
 #include "caf/fwd.hpp"
-#include "caf/read_inspector.hpp"
-#include "caf/sec.hpp"
+#include "caf/save_inspector_base.hpp"
 #include "caf/span.hpp"
 
 namespace caf {
 
-/// Serializes objects into a sequence of bytes.
+/// Serializes C++ objects into a sequence of bytes.
+/// @note The binary data format may change between CAF versions and does not
+///       perform any type checking at run-time. Thus the output of this
+///       serializer is unsuitable for persistence layers.
 class CAF_CORE_EXPORT binary_serializer
-  : public read_inspector<binary_serializer> {
+  : public save_inspector_base<binary_serializer> {
 public:
   // -- member types -----------------------------------------------------------
 
-  using result_type = error_code<sec>;
+  using super = save_inspector_base<binary_serializer>;
 
   using container_type = byte_buffer;
 
@@ -81,6 +66,10 @@ public:
     return write_pos_;
   }
 
+  static constexpr bool has_human_readable_format() noexcept {
+    return false;
+  }
+
   // -- position management ----------------------------------------------------
 
   /// Sets the write position to `offset`.
@@ -95,52 +84,99 @@ public:
 
   // -- interface functions ----------------------------------------------------
 
-  error_code<sec> begin_object(uint16_t nr, string_view name);
+  constexpr bool begin_object(type_id_t, string_view) noexcept {
+    return true;
+  }
 
-  error_code<sec> end_object();
+  constexpr bool end_object() {
+    return true;
+  }
 
-  error_code<sec> begin_sequence(size_t list_size);
+  constexpr bool begin_field(string_view) noexcept {
+    return true;
+  }
 
-  error_code<sec> end_sequence();
+  bool begin_field(string_view, bool is_present);
 
-  void apply(byte x);
+  bool begin_field(string_view, span<const type_id_t> types, size_t index);
 
-  void apply(uint8_t x);
+  bool begin_field(string_view, bool is_present, span<const type_id_t> types,
+                   size_t index);
 
-  void apply(uint16_t x);
+  constexpr bool end_field() {
+    return true;
+  }
 
-  void apply(uint32_t x);
+  constexpr bool begin_tuple(size_t) {
+    return true;
+  }
 
-  void apply(uint64_t x);
+  constexpr bool end_tuple() {
+    return true;
+  }
 
-  void apply(float x);
+  constexpr bool begin_key_value_pair() {
+    return true;
+  }
 
-  void apply(double x);
+  constexpr bool end_key_value_pair() {
+    return true;
+  }
 
-  void apply(long double x);
+  bool begin_sequence(size_t list_size);
 
-  void apply(string_view x);
+  constexpr bool end_sequence() {
+    return true;
+  }
 
-  void apply(const std::u16string& x);
+  bool begin_associative_array(size_t size) {
+    return begin_sequence(size);
+  }
 
-  void apply(const std::u32string& x);
+  bool end_associative_array() {
+    return end_sequence();
+  }
 
-  void apply(span<const byte> x);
+  bool value(byte x);
+
+  bool value(bool x);
+
+  bool value(int8_t x);
+
+  bool value(uint8_t x);
+
+  bool value(int16_t x);
+
+  bool value(uint16_t x);
+
+  bool value(int32_t x);
+
+  bool value(uint32_t x);
+
+  bool value(int64_t x);
+
+  bool value(uint64_t x);
 
   template <class T>
-  std::enable_if_t<std::is_integral<T>::value && std::is_signed<T>::value>
-  apply(T x) {
-    using unsigned_type = std::make_unsigned_t<T>;
-    using squashed_unsigned_type = detail::squashed_int_t<unsigned_type>;
-    return apply(static_cast<squashed_unsigned_type>(x));
+  std::enable_if_t<std::is_integral<T>::value, bool> value(T x) {
+    return value(static_cast<detail::squashed_int_t<T>>(x));
   }
 
-  template <class Enum>
-  std::enable_if_t<std::is_enum<Enum>::value> apply(Enum x) {
-    return apply(static_cast<std::underlying_type_t<Enum>>(x));
-  }
+  bool value(float x);
 
-  void apply(const std::vector<bool>& x);
+  bool value(double x);
+
+  bool value(long double x);
+
+  bool value(string_view x);
+
+  bool value(const std::u16string& x);
+
+  bool value(const std::u32string& x);
+
+  bool value(span<const byte> x);
+
+  bool value(const std::vector<bool>& x);
 
 private:
   /// Stores the serialized output.

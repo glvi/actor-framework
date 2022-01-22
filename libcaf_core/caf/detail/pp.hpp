@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include "caf/config.hpp"
 
-/// Evaluates to nothing
+/// Evaluates to nothing.
 #define CAF_PP_EMPTY()
 
 /// Concatenates x and y into a single token.
@@ -28,6 +14,10 @@
 
 /// Evaluate x and y before concatenating into a single token.
 #define CAF_PP_PASTE(x, y) CAF_PP_CAT(x, y)
+
+/// Evaluates to __COUNTER__. Allows delaying evaluation of __COUNTER__ in some
+/// edge cases where it otherwise could increment the internal counter twice.
+#define CAF_PP_COUNTER() __COUNTER__
 
 #ifdef CAF_MSVC
 
@@ -65,3 +55,24 @@
 #define CAF_PP_OVERLOAD(PREFIX, ...)                                           \
   CAF_PP_PASTE(PREFIX, CAF_PP_SIZE(__VA_ARGS__))
 
+#define CAF_PP_EXPAND(...) __VA_ARGS__
+
+// clang-format off
+#define CAF_PP_STR_1(x1) #x1
+#define CAF_PP_STR_2(x1, x2) #x1 ", " #x2
+#define CAF_PP_STR_3(x1, x2, x3) #x1 ", " #x2 ", " #x3
+#define CAF_PP_STR_4(x1, x2, x3, x4) #x1 ", " #x2 ", " #x3 ", " #x4
+#define CAF_PP_STR_5(x1, x2, x3, x4, x5) #x1 ", " #x2 ", " #x3 ", " #x4 ", " #x5
+#define CAF_PP_STR_6(x1, x2, x3, x4, x5, x6) #x1 ", " #x2 ", " #x3 ", " #x4 ", " #x5 ", " #x6
+#define CAF_PP_STR_7(x1, x2, x3, x4, x5, x6, x7) #x1 ", " #x2 ", " #x3 ", " #x4 ", " #x5 ", " #x6 ", " #x7
+#define CAF_PP_STR_8(x1, x2, x3, x4, x5, x6, x7, x8) #x1 ", " #x2 ", " #x3 ", " #x4 ", " #x5 ", " #x6 ", " #x7 ", " #x8
+#define CAF_PP_STR_9(x1, x2, x3, x4, x5, x6, x7, x8, x9) #x1 ", " #x2 ", " #x3 ", " #x4 ", " #x5 ", " #x6 ", " #x7 ", " #x8 ", " #x9
+// clang-format on
+
+#ifdef CAF_MSVC
+#  define CAF_PP_STR(...)                                                      \
+    CAF_PP_CAT(CAF_PP_OVERLOAD(CAF_PP_STR_, __VA_ARGS__)(__VA_ARGS__),         \
+               CAF_PP_EMPTY())
+#else
+#  define CAF_PP_STR(...) CAF_PP_OVERLOAD(CAF_PP_STR_, __VA_ARGS__)(__VA_ARGS__)
+#endif

@@ -1,21 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright (C) 2011 - 2017                                                  *
- * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -179,9 +164,7 @@ public:
 
   iterator insert(const_iterator hint, value_type x) {
     auto i = find(x.first);
-    return i == end()
-             ? xs_.insert(gcc48_iterator_workaround(hint), std::move(x))
-             : i;
+    return i == end() ? xs_.insert(hint, std::move(x)) : i;
   }
 
   template <class InputIterator>
@@ -203,12 +186,11 @@ public:
   // -- removal ----------------------------------------------------------------
 
   iterator erase(const_iterator i) {
-    return xs_.erase(gcc48_iterator_workaround(i));
+    return xs_.erase(i);
   }
 
   iterator erase(const_iterator first, const_iterator last) {
-    return xs_.erase(gcc48_iterator_workaround(first),
-                     gcc48_iterator_workaround(last));
+    return xs_.erase(first, last);
   }
 
   size_type erase(const key_type& x) {
@@ -264,33 +246,6 @@ public:
   }
 
 private:
-  // GCC < 4.9 has a broken STL: vector::erase accepts iterator instead of
-  // const_iterator.
-  // TODO: remove when dropping support for GCC 4.8.
-  template <class Iter>
-  struct is_valid_erase_iter {
-    template <class U>
-    static auto sfinae(U* x)
-      -> decltype(std::declval<vector_type&>().erase(*x), std::true_type{});
-
-    template <class U>
-    static auto sfinae(...) -> std::false_type;
-
-    static constexpr bool value = decltype(sfinae<Iter>(nullptr))::value;
-  };
-
-  template <class I, class E = enable_if_t<!is_valid_erase_iter<I>::value>>
-  iterator gcc48_iterator_workaround(I i) {
-    auto j = begin();
-    std::advance(j, std::distance(cbegin(), i));
-    return j;
-  }
-
-  template <class I, class E = enable_if_t<is_valid_erase_iter<I>::value>>
-  const_iterator gcc48_iterator_workaround(I i) {
-    return i;
-  }
-
   vector_type xs_;
 };
 

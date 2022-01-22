@@ -1,28 +1,14 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include "caf/fwd.hpp"
-#include "caf/mailbox_element.hpp"
-
 #include "caf/io/abstract_broker.hpp"
+#include "caf/io/fwd.hpp"
 #include "caf/io/system_messages.hpp"
+#include "caf/mailbox_element.hpp"
 
 namespace caf::io {
 
@@ -36,7 +22,8 @@ public:
   broker_servant(handle_type x)
     : hdl_(x),
       value_(strong_actor_ptr{}, make_message_id(),
-             mailbox_element::forwarding_stack{}, SysMsgType{x, {}}) {
+             mailbox_element::forwarding_stack{},
+             make_message(SysMsgType{x, {}})) {
     // nop
   }
 
@@ -63,7 +50,7 @@ public:
     this->add_to_loop();
   }
 
-  inline optional<size_t> activity_tokens() const {
+  optional<size_t> activity_tokens() const {
     return activity_tokens_;
   }
 
@@ -96,16 +83,16 @@ protected:
         return false;
       // tell broker it entered passive mode, this can result in
       // producing, why we check the condition again afterwards
-      using passiv_t = typename std::conditional<
+      using passive_t = typename std::conditional<
         std::is_same<handle_type, connection_handle>::value,
         connection_passivated_msg,
         typename std::conditional<
           std::is_same<handle_type, accept_handle>::value,
           acceptor_passivated_msg,
           datagram_servant_passivated_msg>::type>::type;
-      using tmp_t = mailbox_element_vals<passiv_t>;
-      tmp_t tmp{strong_actor_ptr{}, make_message_id(),
-                mailbox_element::forwarding_stack{}, passiv_t{hdl()}};
+      mailbox_element tmp{strong_actor_ptr{}, make_message_id(),
+                          mailbox_element::forwarding_stack{},
+                          make_message(passive_t{hdl()})};
       invoke_mailbox_element_impl(ctx, tmp);
       return activity_tokens_ != size_t{0};
     }
@@ -113,11 +100,11 @@ protected:
   }
 
   SysMsgType& msg() {
-    return value_.template get_mutable_as<SysMsgType>(0);
+    return value_.payload.template get_mutable_as<SysMsgType>(0);
   }
 
   handle_type hdl_;
-  mailbox_element_vals<SysMsgType> value_;
+  mailbox_element value_;
   optional<size_t> activity_tokens_;
 };
 

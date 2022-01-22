@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -34,27 +20,26 @@ public:
   virtual ~tracing_data();
 
   /// Writes the content of this object to `sink`.
-  virtual error serialize(serializer& sink) const = 0;
+  virtual bool serialize(serializer& sink) const = 0;
 
   /// @copydoc serialize
-  virtual error_code<sec> serialize(binary_serializer& sink) const = 0;
+  virtual bool serialize(binary_serializer& sink) const = 0;
 };
 
 /// @relates tracing_data
 using tracing_data_ptr = std::unique_ptr<tracing_data>;
 
 /// @relates tracing_data
-CAF_CORE_EXPORT error inspect(serializer& sink, const tracing_data_ptr& x);
+CAF_CORE_EXPORT bool inspect(serializer& sink, const tracing_data_ptr& x);
 
 /// @relates tracing_data
-CAF_CORE_EXPORT error_code<sec>
-inspect(binary_serializer& sink, const tracing_data_ptr& x);
+CAF_CORE_EXPORT bool inspect(binary_serializer& sink,
+                             const tracing_data_ptr& x);
 
 /// @relates tracing_data
-CAF_CORE_EXPORT error inspect(deserializer& source, tracing_data_ptr& x);
+CAF_CORE_EXPORT bool inspect(deserializer& source, tracing_data_ptr& x);
 
 /// @relates tracing_data
-CAF_CORE_EXPORT error_code<sec>
-inspect(binary_deserializer& source, tracing_data_ptr& x);
+CAF_CORE_EXPORT bool inspect(binary_deserializer& source, tracing_data_ptr& x);
 
 } // namespace caf

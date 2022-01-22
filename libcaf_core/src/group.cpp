@@ -1,39 +1,21 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/group.hpp"
 
-#include "caf/message.hpp"
 #include "caf/actor_cast.hpp"
 #include "caf/actor_system.hpp"
+#include "caf/binary_deserializer.hpp"
+#include "caf/binary_serializer.hpp"
+#include "caf/deserializer.hpp"
 #include "caf/group_manager.hpp"
+#include "caf/message.hpp"
+#include "caf/serializer.hpp"
 
 namespace caf {
 
-group::group(abstract_group* ptr) : ptr_(ptr) {
-  // nop
-}
-
-group::group(abstract_group* ptr, bool add_ref) : ptr_(ptr, add_ref) {
-  // nop
-}
-
-group::group(const invalid_group_t&) : ptr_(nullptr) {
+group::group(invalid_group_t) : ptr_(nullptr) {
   // nop
 }
 
@@ -41,7 +23,7 @@ group::group(abstract_group_ptr gptr) : ptr_(std::move(gptr)) {
   // nop
 }
 
-group& group::operator=(const invalid_group_t&) {
+group& group::operator=(invalid_group_t) {
   ptr_.reset();
   return *this;
 }
@@ -54,67 +36,31 @@ intptr_t group::compare(const group& other) const noexcept {
   return compare(ptr_.get(), other.ptr_.get());
 }
 
-namespace {
-
-template <class Serializer>
-auto save_group(Serializer& sink, group& x) {
-  std::string mod_name;
-  auto ptr = x.get();
-  if (ptr == nullptr)
-    return sink(mod_name);
-  mod_name = ptr->module().name();
-  if (auto err = sink(mod_name))
-    return err;
-  return ptr->save(sink);
-}
-
-} // namespace
-
-error inspect(serializer& sink, group& x) {
-  return save_group(sink, x);
-}
-
-error_code<sec> inspect(binary_serializer& sink, group& x) {
-  return save_group(sink, x);
-}
-
-namespace {
-
-template <class Deserializer>
-typename Deserializer::result_type load_group(Deserializer& source, group& x) {
-  std::string module_name;
-  if (auto err = source(module_name))
-    return err;
-  if (module_name.empty()) {
-    x = invalid_group;
-    return none;
+expected<group> group::load_impl(actor_system& sys, const node_id& origin,
+                                 const std::string& mod,
+                                 const std::string& id) {
+  if (!origin || origin == sys.node()) {
+    if (mod == "remote") {
+      // Local groups on this node appear as remote groups on other nodes.
+      // Hence, serializing back and forth results in receiving a "remote"
+      // representation for a group that actually runs locally.
+      return sys.groups().get_local(id);
+    } else {
+      return sys.groups().get(mod, id);
+    }
+  } else if (auto& get_remote = sys.groups().get_remote) {
+    return get_remote(origin, mod, id);
+  } else {
+    return make_error(sec::feature_disabled,
+                      "cannot access remote group: middleman not loaded");
   }
-  if (source.context() == nullptr)
-    return sec::no_context;
-  auto& sys = source.context()->system();
-  auto mod = sys.groups().get_module(module_name);
-  if (!mod)
-    return sec::no_such_group_module;
-  return mod->load(source, x);
-}
-
-} // namespace
-
-error inspect(deserializer& source, group& x) {
-  return load_group(source, x);
-}
-
-error_code<sec> inspect(binary_deserializer& source, group& x) {
-  return load_group(source, x);
 }
 
 std::string to_string(const group& x) {
-  if (x == invalid_group)
+  if (x)
+    return x.get()->stringify();
+  else
     return "<invalid-group>";
-  std::string result = x.get()->module().name();
-  result += ":";
-  result += x.get()->identifier();
-  return result;
 }
 
 } // namespace caf

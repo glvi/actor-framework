@@ -1,39 +1,24 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/actor_system.hpp"
 
 #include <unordered_set>
 
+#include "caf/actor.hpp"
 #include "caf/actor_system_config.hpp"
 #include "caf/defaults.hpp"
+#include "caf/detail/meta_object.hpp"
 #include "caf/event_based_actor.hpp"
-#include "caf/raise_error.hpp"
-#include "caf/raw_event_based_actor.hpp"
-#include "caf/send.hpp"
-#include "caf/to_string.hpp"
-
 #include "caf/policy/work_sharing.hpp"
 #include "caf/policy/work_stealing.hpp"
-
+#include "caf/raise_error.hpp"
 #include "caf/scheduler/abstract_coordinator.hpp"
 #include "caf/scheduler/coordinator.hpp"
 #include "caf/scheduler/test_coordinator.hpp"
+#include "caf/send.hpp"
+#include "caf/stateful_actor.hpp"
 
 namespace caf {
 
@@ -46,10 +31,8 @@ struct kvstate {
   using topic_set = std::unordered_set<std::string>;
   std::unordered_map<key_type, std::pair<mapped_type, subscriber_set>> data;
   std::unordered_map<strong_actor_ptr, topic_set> subscribers;
-  static const char* name;
+  static inline const char* name = "caf.system.config-server";
 };
-
-const char* kvstate::name = "config_server";
 
 behavior config_serv_impl(stateful_actor<kvstate>* self) {
   CAF_LOG_TRACE("");
@@ -82,12 +65,12 @@ behavior config_serv_impl(stateful_actor<kvstate>* self) {
         // we never put a nullptr in our map
         auto subscriber = actor_cast<actor>(subscriber_ptr);
         if (subscriber != self->current_sender())
-          self->send(subscriber, update_atom::value, key, vp.first);
+          self->send(subscriber, update_atom_v, key, vp.first);
       }
       // also iterate all subscribers for '*'
       for (auto& subscriber : self->state.data[wildcard].second)
         if (subscriber != self->current_sender())
-          self->send(actor_cast<actor>(subscriber), update_atom::value, key,
+          self->send(actor_cast<actor>(subscriber), update_atom_v, key,
                      vp.first);
     },
     // get a key/value pair
@@ -134,9 +117,13 @@ behavior config_serv_impl(stateful_actor<kvstate>* self) {
       self->state.subscribers[subscriber].erase(key);
       self->state.data[key].second.erase(subscriber);
     },
-    // get a 'named' actor from local registry
-    [=](get_atom, atom_value name) {
+    // get a 'named' actor from the local registry
+    [=](registry_lookup_atom, const std::string& name) {
       return self->home_system().registry().get(name);
+    },
+    // get the intermediary of a local group
+    [=](get_atom, group_atom, const std::string& id) {
+      return self->home_system().groups().get_local(id).get()->intermediary();
     },
   };
 }
@@ -148,16 +135,14 @@ behavior config_serv_impl(stateful_actor<kvstate>* self) {
 // on another node, users can spwan actors remotely.
 
 struct spawn_serv_state {
-  static const char* name;
+  static inline const char* name = "caf.system.spawn-server";
 };
-
-const char* spawn_serv_state::name = "spawn_server";
 
 behavior spawn_serv_impl(stateful_actor<spawn_serv_state>* self) {
   CAF_LOG_TRACE("");
   return {
     [=](spawn_atom, const std::string& name, message& args,
-        actor_system::mpi& xs) -> expected<strong_actor_ptr> {
+        actor_system::mpi& xs) -> result<strong_actor_ptr> {
       CAF_LOG_TRACE(CAF_ARG(name) << CAF_ARG(args));
       return self->system().spawn<strong_actor_ptr>(name, std::move(args),
                                                     self->context(), true, &xs);
@@ -200,45 +185,139 @@ actor_system::module::~module() {
 const char* actor_system::module::name() const noexcept {
   switch (id()) {
     case scheduler:
-      return "Scheduler";
+      return "scheduler";
     case middleman:
-      return "Middleman";
+      return "middleman";
     case openssl_manager:
-      return "OpenSSL Manager";
+      return "openssl-manager";
     case network_manager:
-      return "Network Manager";
+      return "network-manager";
     default:
       return "???";
   }
 }
 
+actor_system::networking_module::~networking_module() {
+  // nop
+}
+
+namespace {
+
+auto make_base_metrics(telemetry::metric_registry& reg) {
+  return actor_system::base_metrics_t{
+    // Initialize the base metrics.
+    reg.counter_singleton("caf.system", "rejected-messages",
+                          "Number of rejected messages.", "1", true),
+    reg.counter_singleton("caf.system", "processed-messages",
+                          "Number of processed messages.", "1", true),
+    reg.gauge_singleton("caf.system", "running-actors",
+                        "Number of currently running actors."),
+    reg.gauge_singleton("caf.system", "queued-messages",
+                        "Number of messages in all mailboxes.", "1", true),
+  };
+}
+
+auto make_actor_metric_families(telemetry::metric_registry& reg) {
+  // Handling a single message generally should take microseconds. Going up to
+  // several milliseconds usually indicates a problem (or blocking operations)
+  // but may still be expected for very compute-intense tasks. Single messages
+  // that approach seconds to process most likely indicate a severe issue.
+  // Hence, the default bucket settings focus on micro- and milliseconds.
+  std::array<double, 9> default_buckets{{
+    .00001, // 10us
+    .0001,  // 100us
+    .0005,  // 500us
+    .001,   // 1ms
+    .01,    // 10ms
+    .1,     // 100ms
+    .5,     // 500ms
+    1.,     // 1s
+    5.,     // 5s
+  }};
+  return actor_system::actor_metric_families_t{
+    reg.histogram_family<double>(
+      "caf.actor", "processing-time", {"name"}, default_buckets,
+      "Time an actor needs to process messages.", "seconds"),
+    reg.histogram_family<double>(
+      "caf.actor", "mailbox-time", {"name"}, default_buckets,
+      "Time a message waits in the mailbox before processing.", "seconds"),
+    reg.gauge_family("caf.actor", "mailbox-size", {"name"},
+                     "Number of messages in the mailbox."),
+    {
+      reg.counter_family("caf.actor.stream", "processed-elements",
+                         {"name", "type"},
+                         "Number of processed stream elements from upstream."),
+      reg.gauge_family("caf.actor.stream", "input-buffer-size",
+                       {"name", "type"},
+                       "Number of buffered stream elements from upstream."),
+      reg.counter_family(
+        "caf.actor.stream", "pushed-elements", {"name", "type"},
+        "Number of elements that have been pushed downstream."),
+      reg.gauge_family("caf.actor.stream", "output-buffer-size",
+                       {"name", "type"},
+                       "Number of buffered output stream elements."),
+    },
+  };
+}
+
+} // namespace
+
 actor_system::actor_system(actor_system_config& cfg)
   : profiler_(cfg.profiler),
     ids_(0),
-    types_(*this),
+    metrics_(cfg),
+    base_metrics_(make_base_metrics(metrics_)),
     logger_(new caf::logger(*this), false),
     registry_(*this),
     groups_(*this),
     dummy_execution_unit_(this),
     await_actors_before_shutdown_(true),
-    detached_(0),
     cfg_(cfg),
     logger_dtor_done_(false),
-    tracing_context_(cfg.tracing_context) {
+    tracing_context_(cfg.tracing_context),
+    private_threads_(this) {
   CAF_SET_LOGGER_SYS(this);
+  meta_objects_guard_ = detail::global_meta_objects_guard();
+  if (!meta_objects_guard_)
+    CAF_CRITICAL("unable to obtain the global meta objects guard");
   for (auto& hook : cfg.thread_hooks_)
     hook->init(*this);
+  // Cache some configuration parameters for faster lookups at runtime.
+  using string_list = std::vector<std::string>;
+  if (auto lst = get_as<string_list>(cfg,
+                                     "caf.metrics-filters.actors.includes"))
+    metrics_actors_includes_ = std::move(*lst);
+  if (auto lst = get_as<string_list>(cfg,
+                                     "caf.metrics-filters.actors.excludes"))
+    metrics_actors_excludes_ = std::move(*lst);
+  if (!metrics_actors_includes_.empty())
+    actor_metric_families_ = make_actor_metric_families(metrics_);
+  // Spin up modules.
   for (auto& f : cfg.module_factories) {
     auto mod_ptr = f(*this);
     modules_[mod_ptr->id()].reset(mod_ptr);
   }
+  // Make sure meta objects are loaded.
+  auto gmos = detail::global_meta_objects();
+  if (gmos.size() < id_block::core_module::end
+      || gmos[id_block::core_module::begin].type_name.empty()) {
+    CAF_CRITICAL("actor_system created without calling "
+                 "caf::init_global_meta_objects<>() before");
+  }
+  if (modules_[module::middleman] != nullptr) {
+    if (gmos.size() < detail::io_module_end
+        || gmos[detail::io_module_begin].type_name.empty()) {
+      CAF_CRITICAL("I/O module loaded without calling "
+                   "caf::io::middleman::init_global_meta_objects() before");
+    }
+  }
+  // Make sure we have a scheduler up and running.
   auto& sched = modules_[module::scheduler];
   using namespace scheduler;
   using policy::work_sharing;
   using policy::work_stealing;
   using share = coordinator<work_sharing>;
   using steal = coordinator<work_stealing>;
-  // set scheduler only if not explicitly loaded by user
   if (!sched) {
     enum sched_conf {
       stealing = 0x0001,
@@ -247,12 +326,12 @@ actor_system::actor_system(actor_system_config& cfg)
     };
     sched_conf sc = stealing;
     namespace sr = defaults::scheduler;
-    auto sr_policy = get_or(cfg, "scheduler.policy", sr::policy);
-    if (sr_policy == atom("sharing"))
+    auto sr_policy = get_or(cfg, "caf.scheduler.policy", sr::policy);
+    if (sr_policy == "sharing")
       sc = sharing;
-    else if (sr_policy == atom("testing"))
+    else if (sr_policy == "testing")
       sc = testing;
-    else if (sr_policy != atom("stealing"))
+    else if (sr_policy != "stealing")
       std::cerr << "[WARNING] " << deep_to_string(sr_policy)
                 << " is an unrecognized scheduler pollicy, "
                    "falling back to 'stealing' (i.e. work-stealing)"
@@ -268,22 +347,23 @@ actor_system::actor_system(actor_system_config& cfg)
         sched.reset(new test_coordinator(*this));
     }
   }
-  // initialize state for each module and give each module the opportunity
-  // to influence the system configuration, e.g., by adding more types
+  // Initialize state for each module and give each module the opportunity to
+  // adapt the system configuration.
   logger_->init(cfg);
   CAF_SET_LOGGER_SYS(this);
   for (auto& mod : modules_)
     if (mod)
       mod->init(cfg);
   groups_.init(cfg);
-  // spawn config and spawn servers (lazily to not access the scheduler yet)
+  // Spawn config and spawn servers (lazily to not access the scheduler yet).
   static constexpr auto Flags = hidden + lazy_init;
   spawn_serv(actor_cast<strong_actor_ptr>(spawn<Flags>(spawn_serv_impl)));
   config_serv(actor_cast<strong_actor_ptr>(spawn<Flags>(config_serv_impl)));
-  // fire up remaining modules
+  // Start all modules.
   registry_.start();
-  registry_.put(atom("SpawnServ"), spawn_serv());
-  registry_.put(atom("ConfigServ"), config_serv());
+  private_threads_.start();
+  registry_.put("SpawnServ", spawn_serv());
+  registry_.put("ConfigServ", config_serv());
   for (auto& mod : modules_)
     if (mod)
       mod->start();
@@ -298,13 +378,12 @@ actor_system::~actor_system() {
     if (await_actors_before_shutdown_)
       await_all_actors_done();
     // shutdown internal actors
-    for (auto& x : internal_actors_) {
+    auto drop = [&](auto& x) {
       anon_send_exit(x, exit_reason::user_shutdown);
       x = nullptr;
-    }
-    registry_.erase(atom("SpawnServ"));
-    registry_.erase(atom("ConfigServ"));
-    registry_.erase(atom("StreamServ"));
+    };
+    drop(spawn_serv_);
+    drop(config_serv_);
     // group module is the first one, relies on MM
     groups_.stop();
     // stop modules in reverse order
@@ -315,7 +394,7 @@ actor_system::~actor_system() {
         ptr->stop();
       }
     }
-    await_detached_threads();
+    private_threads_.stop();
     registry_.stop();
   }
   // reset logger and wait until dtor was called
@@ -324,11 +403,6 @@ actor_system::~actor_system() {
   std::unique_lock<std::mutex> guard{logger_dtor_mtx_};
   while (!logger_dtor_done_)
     logger_dtor_cv_.wait(guard);
-}
-
-/// Returns the host-local identifier for this system.
-const node_id& actor_system::node() const {
-  return node_;
 }
 
 /// Returns the scheduler instance.
@@ -343,20 +417,6 @@ caf::logger& actor_system::logger() {
 
 actor_registry& actor_system::registry() {
   return registry_;
-}
-
-const uniform_type_info_map& actor_system::types() const {
-  return types_;
-}
-
-std::string actor_system::render(const error& x) const {
-  if (!x)
-    return to_string(x);
-  auto& xs = config().error_renderers;
-  auto i = xs.find(x.category());
-  if (i != xs.end())
-    return i->second(x.code(), x.category(), x.context());
-  return to_string(x);
 }
 
 group_manager& actor_system::groups() {
@@ -392,7 +452,7 @@ bool actor_system::has_network_manager() const noexcept {
 net::middleman& actor_system::network_manager() {
   auto& clptr = modules_[module::network_manager];
   if (!clptr)
-    CAF_RAISE_ERROR("cannot access openssl manager: module not loaded");
+    CAF_RAISE_ERROR("cannot access network manager: module not loaded");
   return *reinterpret_cast<net::middleman*>(clptr->subtype_ptr());
 }
 
@@ -412,24 +472,30 @@ void actor_system::await_all_actors_done() const {
   registry_.await_running_count_equal(0);
 }
 
+void actor_system::monitor(const node_id& node, const actor_addr& observer) {
+  // TODO: Currently does not work with other modules, in particular caf_net.
+  auto mm = modules_[module::middleman].get();
+  if (mm == nullptr)
+    return;
+  auto mm_dptr = static_cast<networking_module*>(mm);
+  mm_dptr->monitor(node, observer);
+}
+
+void actor_system::demonitor(const node_id& node, const actor_addr& observer) {
+  // TODO: Currently does not work with other modules, in particular caf_net.
+  auto mm = modules_[module::middleman].get();
+  if (mm == nullptr)
+    return;
+  auto mm_dptr = static_cast<networking_module*>(mm);
+  mm_dptr->demonitor(node, observer);
+}
+
 actor_clock& actor_system::clock() noexcept {
   return scheduler().clock();
 }
 
-void actor_system::inc_detached_threads() {
-  ++detached_;
-}
-
-void actor_system::dec_detached_threads() {
-  std::unique_lock<std::mutex> guard{detached_mtx_};
-  if (--detached_ == 0)
-    detached_cv_.notify_all();
-}
-
-void actor_system::await_detached_threads() {
-  std::unique_lock<std::mutex> guard{detached_mtx_};
-  while (detached_ != 0)
-    detached_cv_.wait(guard);
+size_t actor_system::detached_actors() const noexcept {
+  return private_threads_.running();
 }
 
 void actor_system::thread_started() {
@@ -461,6 +527,14 @@ actor_system::dyn_spawn_impl(const std::string& name, message& args,
   if (check_interface && !assignable(res.second, *expected_ifs))
     return sec::unexpected_actor_messaging_interface;
   return std::move(res.first);
+}
+
+detail::private_thread* actor_system::acquire_private_thread() {
+  return private_threads_.acquire();
+}
+
+void actor_system::release_private_thread(detail::private_thread* ptr) {
+  private_threads_.release(ptr);
 }
 
 } // namespace caf

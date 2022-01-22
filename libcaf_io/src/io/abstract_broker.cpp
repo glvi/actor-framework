@@ -1,55 +1,39 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/actor_system.hpp"
 #include "caf/config.hpp"
+#include "caf/detail/scope_guard.hpp"
+#include "caf/detail/sync_request_bouncer.hpp"
+#include "caf/event_based_actor.hpp"
+#include "caf/io/broker.hpp"
+#include "caf/io/network/multiplexer.hpp"
 #include "caf/logger.hpp"
 #include "caf/make_counted.hpp"
 #include "caf/none.hpp"
 #include "caf/scheduler/abstract_coordinator.hpp"
-
-#include "caf/io/broker.hpp"
-#include "caf/io/middleman.hpp"
-
-#include "caf/detail/scope_guard.hpp"
-#include "caf/detail/sync_request_bouncer.hpp"
-
-#include "caf/event_based_actor.hpp"
+#include "caf/span.hpp"
 
 namespace caf::io {
 
-void abstract_broker::enqueue(strong_actor_ptr src, message_id mid, message msg,
+bool abstract_broker::enqueue(strong_actor_ptr src, message_id mid, message msg,
                               execution_unit*) {
-  enqueue(make_mailbox_element(std::move(src), mid, {}, std::move(msg)),
-          &backend());
+  return enqueue(make_mailbox_element(std::move(src), mid, {}, std::move(msg)),
+                 backend_);
 }
 
-void abstract_broker::enqueue(mailbox_element_ptr ptr, execution_unit*) {
+bool abstract_broker::enqueue(mailbox_element_ptr ptr, execution_unit*) {
   CAF_PUSH_AID(id());
-  scheduled_actor::enqueue(std::move(ptr), &backend());
+  return scheduled_actor::enqueue(std::move(ptr), backend_);
 }
 
 void abstract_broker::launch(execution_unit* eu, bool lazy, bool hide) {
   CAF_PUSH_AID_FROM_PTR(this);
   CAF_ASSERT(eu != nullptr);
-  CAF_ASSERT(eu == &backend());
+  CAF_ASSERT(dynamic_cast<network::multiplexer*>(eu) != nullptr);
+  backend_ = static_cast<network::multiplexer*>(eu);
   CAF_LOG_TRACE(CAF_ARG(lazy) << CAF_ARG(hide));
-  // add implicit reference count held by middleman/multiplexer
   if (!hide)
     register_at_system();
   if (lazy && mailbox().try_block())
@@ -74,27 +58,25 @@ abstract_broker::~abstract_broker() {
 void abstract_broker::configure_read(connection_handle hdl,
                                      receive_policy::config cfg) {
   CAF_LOG_TRACE(CAF_ARG(hdl) << CAF_ARG(cfg));
-  auto x = by_id(hdl);
-  if (x)
+  if (auto x = by_id(hdl))
     x->configure_read(cfg);
 }
 
 void abstract_broker::ack_writes(connection_handle hdl, bool enable) {
   CAF_LOG_TRACE(CAF_ARG(hdl) << CAF_ARG(enable));
-  auto x = by_id(hdl);
-  if (x)
+  if (auto x = by_id(hdl))
     x->ack_writes(enable);
 }
 
 byte_buffer& abstract_broker::wr_buf(connection_handle hdl) {
   CAF_ASSERT(hdl != invalid_connection_handle);
-  auto x = by_id(hdl);
-  if (!x) {
+  if (auto x = by_id(hdl)) {
+    return x->wr_buf();
+  } else {
     CAF_LOG_ERROR("tried to access wr_buf() of an unknown connection_handle:"
                   << CAF_ARG(hdl));
     return dummy_wr_buf_;
   }
-  return x->wr_buf();
 }
 
 void abstract_broker::write(connection_handle hdl, size_t bs, const void* buf) {
@@ -104,35 +86,37 @@ void abstract_broker::write(connection_handle hdl, size_t bs, const void* buf) {
   out.insert(out.end(), first, last);
 }
 
+void abstract_broker::write(connection_handle hdl, span<const byte> buf) {
+  write(hdl, buf.size(), buf.data());
+}
+
 void abstract_broker::flush(connection_handle hdl) {
-  auto x = by_id(hdl);
-  if (x)
+  if (auto x = by_id(hdl))
     x->flush();
 }
 
 void abstract_broker::ack_writes(datagram_handle hdl, bool enable) {
   CAF_LOG_TRACE(CAF_ARG(hdl) << CAF_ARG(enable));
-  auto x = by_id(hdl);
-  if (x)
+  if (auto x = by_id(hdl))
     x->ack_writes(enable);
 }
 
 byte_buffer& abstract_broker::wr_buf(datagram_handle hdl) {
-  auto x = by_id(hdl);
-  if (!x) {
+  if (auto x = by_id(hdl)) {
+    return x->wr_buf(hdl);
+  } else {
     CAF_LOG_ERROR("tried to access wr_buf() of an unknown"
                   "datagram_handle");
     return dummy_wr_buf_;
   }
-  return x->wr_buf(hdl);
 }
 
 void abstract_broker::enqueue_datagram(datagram_handle hdl, byte_buffer buf) {
-  auto x = by_id(hdl);
-  if (!x)
+  if (auto x = by_id(hdl))
+    x->enqueue_datagram(hdl, std::move(buf));
+  else
     CAF_LOG_ERROR("tried to access datagram_buffer() of an unknown"
                   "datagram_handle");
-  x->enqueue_datagram(hdl, std::move(buf));
 }
 
 void abstract_broker::write(datagram_handle hdl, size_t bs, const void* buf) {
@@ -143,8 +127,7 @@ void abstract_broker::write(datagram_handle hdl, size_t bs, const void* buf) {
 }
 
 void abstract_broker::flush(datagram_handle hdl) {
-  auto x = by_id(hdl);
-  if (x)
+  if (auto x = by_id(hdl))
     x->flush();
 }
 
@@ -212,6 +195,8 @@ void abstract_broker::add_datagram_servant(datagram_servant_ptr ptr) {
   launch_servant(ptr);
   for (auto& hdl : hdls)
     add_hdl_for_datagram_servant(ptr, hdl);
+  auto hdl = ptr->hdl();
+  add_hdl_for_datagram_servant(std::move(ptr), hdl);
 }
 
 void abstract_broker::add_hdl_for_datagram_servant(datagram_servant_ptr ptr,
@@ -330,11 +315,12 @@ uint16_t abstract_broker::local_port(datagram_handle hdl) {
 }
 
 bool abstract_broker::remove_endpoint(datagram_handle hdl) {
-  auto x = by_id(hdl);
-  if (!x)
+  if (auto x = by_id(hdl)) {
+    x->remove_endpoint(hdl);
+    return true;
+  } else {
     return false;
-  x->remove_endpoint(hdl);
-  return true;
+  }
 }
 
 void abstract_broker::close_all() {
@@ -356,12 +342,12 @@ resumable::subtype_t abstract_broker::subtype() const {
 resumable::resume_result
 abstract_broker::resume(execution_unit* ctx, size_t mt) {
   CAF_ASSERT(ctx != nullptr);
-  CAF_ASSERT(ctx == &backend());
+  CAF_ASSERT(ctx == backend_);
   return scheduled_actor::resume(ctx, mt);
 }
 
 const char* abstract_broker::name() const {
-  return "broker";
+  return "user.broker";
 }
 
 void abstract_broker::init_broker() {
@@ -375,10 +361,6 @@ void abstract_broker::init_broker() {
 
 abstract_broker::abstract_broker(actor_config& cfg) : scheduled_actor(cfg) {
   // nop
-}
-
-network::multiplexer& abstract_broker::backend() {
-  return system().middleman().backend();
 }
 
 void abstract_broker::launch_servant(doorman_ptr& ptr) {

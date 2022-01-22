@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -22,6 +8,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <unordered_map>
 
@@ -32,15 +19,16 @@
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/shared_spinlock.hpp"
 #include "caf/fwd.hpp"
+#include "caf/telemetry/int_gauge.hpp"
 
 namespace caf {
 
-/// A registry is used to associate actors to IDs or atoms (names). This
-/// allows a middleman to lookup actor handles after receiving actor IDs
-/// via the network and enables developers to use well-known names to
-/// identify important actors independent from their ID at runtime.
-/// Note that the registry does *not* contain all actors of an actor system.
-/// The middleman registers actors as needed.
+/// A registry is used to associate actors to IDs or names. This allows a
+/// middleman to lookup actor handles after receiving actor IDs via the network
+/// and enables developers to use well-known names to identify important actors
+/// independent from their ID at runtime. Note that the registry does *not*
+/// contain all actors of an actor system. The middleman registers actors as
+/// needed.
 class CAF_CORE_EXPORT actor_registry {
 public:
   friend class actor_system;
@@ -64,10 +52,12 @@ public:
   void erase(actor_id key);
 
   /// Increases running-actors-count by one.
-  void inc_running();
+  /// @returns the increased count.
+  size_t inc_running();
 
   /// Decreases running-actors-count by one.
-  void dec_running();
+  /// @returns the decreased count.
+  size_t dec_running();
 
   /// Returns the number of currently running actors.
   size_t running() const;
@@ -78,22 +68,22 @@ public:
 
   /// Returns the actor associated with `key` or `invalid_actor`.
   template <class T = strong_actor_ptr>
-  T get(atom_value key) const {
+  T get(const std::string& key) const {
     return actor_cast<T>(get_impl(key));
   }
 
   /// Associates given actor to `key`.
   template <class T>
-  void put(atom_value key, const T& value) {
+  void put(const std::string& key, const T& value) {
     // using reference here and before to allow putting a scoped_actor without
     // calling .ptr()
-    put_impl(key, actor_cast<strong_actor_ptr>(value));
+    put_impl(std::move(key), actor_cast<strong_actor_ptr>(value));
   }
 
   /// Removes a name mapping.
-  void erase(atom_value key);
+  void erase(const std::string& key);
 
-  using name_map = std::unordered_map<atom_value, strong_actor_ptr>;
+  using name_map = std::unordered_map<std::string, strong_actor_ptr>;
 
   name_map named_actors() const;
 
@@ -111,16 +101,15 @@ private:
   void put_impl(actor_id key, strong_actor_ptr val);
 
   /// Returns the actor associated with `key` or `invalid_actor`.
-  strong_actor_ptr get_impl(atom_value key) const;
+  strong_actor_ptr get_impl(const std::string& key) const;
 
   /// Associates given actor to `key`.
-  void put_impl(atom_value key, strong_actor_ptr value);
+  void put_impl(const std::string& key, strong_actor_ptr value);
 
   using entries = std::unordered_map<actor_id, strong_actor_ptr>;
 
   actor_registry(actor_system& sys);
 
-  std::atomic<size_t> running_;
   mutable std::mutex running_mtx_;
   mutable std::condition_variable running_cv_;
 

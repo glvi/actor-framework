@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -28,6 +14,7 @@
 #include "caf/none.hpp"
 #include "caf/timeout_definition.hpp"
 #include "caf/timespan.hpp"
+#include "caf/unsafe_behavior_init.hpp"
 
 namespace caf {
 
@@ -44,6 +31,11 @@ public:
   behavior(const behavior&) = default;
   behavior& operator=(behavior&&) = default;
   behavior& operator=(const behavior&) = default;
+
+  // Convenience overload to allow "unsafe" initialization of any behavior_type.
+  behavior(unsafe_behavior_init_t, behavior from) : behavior(std::move(from)) {
+    // nop
+  }
 
   /// Creates a behavior from `fun` without timeout.
   behavior(const message_handler& mh);
@@ -68,7 +60,7 @@ public:
     impl_ = detail::make_behavior(std::forward<Ts>(xs)...);
   }
 
-  inline void swap(behavior& other) {
+  void swap(behavior& other) {
     impl_.swap(other.impl_);
   }
 
@@ -83,7 +75,7 @@ public:
   void assign(behavior other);
 
   /// Invokes the timeout callback if set.
-  inline void handle_timeout() {
+  void handle_timeout() {
     impl_->handle_timeout();
   }
 
@@ -94,28 +86,17 @@ public:
   }
 
   /// Runs this handler and returns its (optional) result.
-  inline optional<message> operator()(message& xs) {
-    return impl_ ? impl_->invoke(xs) : none;
-  }
-
-  inline optional<message> operator()(type_erased_tuple& xs) {
+  optional<message> operator()(message& xs) {
     return impl_ ? impl_->invoke(xs) : none;
   }
 
   /// Runs this handler with callback.
-  inline match_case::result
-  operator()(detail::invoke_result_visitor& f, type_erased_tuple& xs) {
-    return impl_ ? impl_->invoke(f, xs) : match_case::no_match;
-  }
-
-  /// Runs this handler with callback.
-  inline match_case::result
-  operator()(detail::invoke_result_visitor& f, message& xs) {
-    return impl_ ? impl_->invoke(f, xs) : match_case::no_match;
+  bool operator()(detail::invoke_result_visitor& f, message& xs) {
+    return impl_ ? impl_->invoke(f, xs) : false;
   }
 
   /// Checks whether this behavior is not empty.
-  inline operator bool() const {
+  operator bool() const {
     return static_cast<bool>(impl_);
   }
 
@@ -123,15 +104,15 @@ public:
 
   using impl_ptr = intrusive_ptr<detail::behavior_impl>;
 
-  inline const impl_ptr& as_behavior_impl() const {
+  const impl_ptr& as_behavior_impl() const {
     return impl_;
   }
 
-  inline behavior(impl_ptr ptr) : impl_(std::move(ptr)) {
+  behavior(impl_ptr ptr) : impl_(std::move(ptr)) {
     // nop
   }
 
-  inline behavior& unbox() {
+  behavior& unbox() {
     return *this;
   }
 

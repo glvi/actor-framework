@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -22,6 +8,7 @@
 #include <type_traits>
 
 #include "caf/fwd.hpp"
+#include "caf/is_error_code_enum.hpp"
 #include "caf/none.hpp"
 
 namespace caf {
@@ -32,7 +19,11 @@ class error_code {
 public:
   using enum_type = Enum;
 
-  using underlying_type = std::underlying_type_t<enum_type>;
+  using underlying_type = std::underlying_type_t<Enum>;
+
+  static_assert(is_error_code_enum_v<Enum>);
+
+  static_assert(std::is_same<underlying_type, uint8_t>::value);
 
   constexpr error_code() noexcept : value_(static_cast<Enum>(0)) {
     // nop
@@ -61,6 +52,10 @@ public:
 
   constexpr enum_type value() const noexcept {
     return value_;
+  }
+
+  friend constexpr underlying_type to_integer(error_code x) noexcept {
+    return static_cast<std::underlying_type_t<Enum>>(x.value());
   }
 
 private:

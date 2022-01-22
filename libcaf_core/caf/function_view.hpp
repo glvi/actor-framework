@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -87,8 +73,8 @@ struct CAF_CORE_EXPORT function_view_storage_catch_all {
     // nop
   }
 
-  result<message> operator()(message_view& xs) {
-    *storage_ = xs.move_content_to_message();
+  skippable_result operator()(message& msg) {
+    *storage_ = std::move(msg);
     return message{};
   }
 };
@@ -176,22 +162,25 @@ public:
   }
 
   /// Sends a request message to the assigned actor and returns the result.
-  template <class... Ts,
-            class R = function_view_flattened_result_t<typename response_type<
-              typename type::signatures,
-              detail::implicit_conversions_t<
-                typename std::decay<Ts>::type>...>::tuple_type>>
-  expected<R> operator()(Ts&&... xs) {
+  template <class... Ts>
+  auto operator()(Ts&&... xs) {
+    static_assert(sizeof...(Ts) > 0, "no message to send");
+    using trait = response_type<typename type::signatures,
+                                detail::strip_and_convert_t<Ts>...>;
+    static_assert(trait::valid, "receiver does not accept given message");
+    using tuple_type = typename trait::tuple_type;
+    using value_type = function_view_flattened_result_t<tuple_type>;
+    using result_type = expected<value_type>;
     if (!impl_)
-      return sec::bad_function_call;
+      return result_type{sec::bad_function_call};
     error err;
-    function_view_result<R> result;
+    function_view_result<value_type> result;
     self_->request(impl_, timeout, std::forward<Ts>(xs)...)
       .receive([&](error& x) { err = std::move(x); },
-               typename function_view_storage<R>::type{result.value});
+               typename function_view_storage<value_type>::type{result.value});
     if (err)
-      return err;
-    return flatten(result.value);
+      return result_type{err};
+    return result_type{flatten(result.value)};
   }
 
   void assign(type x) {

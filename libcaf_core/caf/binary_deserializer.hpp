@@ -1,45 +1,34 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <cstddef>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include "caf/detail/core_export.hpp"
+#include "caf/detail/squashed_int.hpp"
 #include "caf/error_code.hpp"
 #include "caf/fwd.hpp"
+#include "caf/load_inspector_base.hpp"
 #include "caf/sec.hpp"
 #include "caf/span.hpp"
 #include "caf/string_view.hpp"
-#include "caf/write_inspector.hpp"
 
 namespace caf {
 
-/// Deserializes objects from sequence of bytes.
+/// Deserializes C++ objects from sequence of bytes. Does not perform run-time
+/// type checks.
 class CAF_CORE_EXPORT binary_deserializer
-  : public write_inspector<binary_deserializer> {
+  : public load_inspector_base<binary_deserializer> {
 public:
   // -- member types -----------------------------------------------------------
 
-  using result_type = error_code<sec>;
+  using super = load_inspector_base<binary_deserializer>;
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -87,7 +76,7 @@ public:
 
   /// Jumps `num_bytes` forward.
   /// @pre `num_bytes <= remaining()`
-  void skip(size_t num_bytes) noexcept;
+  void skip(size_t num_bytes);
 
   /// Assigns a new input.
   void reset(span<const byte> bytes) noexcept;
@@ -102,56 +91,114 @@ public:
     return end_;
   }
 
-  // -- overridden member functions --------------------------------------------
-
-  result_type begin_object(uint16_t& typenr, std::string& name);
-
-  result_type end_object() noexcept;
-
-  result_type begin_sequence(size_t& list_size) noexcept;
-
-  result_type end_sequence() noexcept;
-
-  result_type apply(bool&) noexcept;
-
-  result_type apply(byte&) noexcept;
-
-  result_type apply(int8_t&) noexcept;
-
-  result_type apply(uint8_t&) noexcept;
-
-  result_type apply(int16_t&) noexcept;
-
-  result_type apply(uint16_t&) noexcept;
-
-  result_type apply(int32_t&) noexcept;
-
-  result_type apply(uint32_t&) noexcept;
-
-  result_type apply(int64_t&) noexcept;
-
-  result_type apply(uint64_t&) noexcept;
-
-  result_type apply(float&) noexcept;
-
-  result_type apply(double&) noexcept;
-
-  result_type apply(long double&);
-
-  result_type apply(span<byte>) noexcept;
-
-  result_type apply(std::string&);
-
-  result_type apply(std::u16string&);
-
-  result_type apply(std::u32string&);
-
-  template <class Enum, class = std::enable_if_t<std::is_enum<Enum>::value>>
-  auto apply(Enum& x) noexcept {
-    return apply(reinterpret_cast<std::underlying_type_t<Enum>&>(x));
+  static constexpr bool has_human_readable_format() noexcept {
+    return false;
   }
 
-  result_type apply(std::vector<bool>& xs);
+  // -- overridden member functions --------------------------------------------
+
+  bool fetch_next_object_type(type_id_t& type) noexcept;
+
+  constexpr bool begin_object(type_id_t, string_view) noexcept {
+    return true;
+  }
+
+  constexpr bool end_object() noexcept {
+    return true;
+  }
+
+  constexpr bool begin_field(string_view) noexcept {
+    return true;
+  }
+
+  bool begin_field(string_view name, bool& is_present) noexcept;
+
+  bool begin_field(string_view name, span<const type_id_t> types,
+                   size_t& index) noexcept;
+
+  bool begin_field(string_view name, bool& is_present,
+                   span<const type_id_t> types, size_t& index) noexcept;
+
+  constexpr bool end_field() {
+    return true;
+  }
+
+  constexpr bool begin_tuple(size_t) noexcept {
+    return true;
+  }
+
+  constexpr bool end_tuple() noexcept {
+    return true;
+  }
+
+  constexpr bool begin_key_value_pair() noexcept {
+    return true;
+  }
+
+  constexpr bool end_key_value_pair() noexcept {
+    return true;
+  }
+
+  bool begin_sequence(size_t& list_size) noexcept;
+
+  constexpr bool end_sequence() noexcept {
+    return true;
+  }
+
+  bool begin_associative_array(size_t& size) noexcept {
+    return begin_sequence(size);
+  }
+
+  bool end_associative_array() noexcept {
+    return end_sequence();
+  }
+
+  bool value(bool& x) noexcept;
+
+  bool value(byte& x) noexcept;
+
+  bool value(uint8_t& x) noexcept;
+
+  bool value(int8_t& x) noexcept;
+
+  bool value(int16_t& x) noexcept;
+
+  bool value(uint16_t& x) noexcept;
+
+  bool value(int32_t& x) noexcept;
+
+  bool value(uint32_t& x) noexcept;
+
+  bool value(int64_t& x) noexcept;
+
+  bool value(uint64_t& x) noexcept;
+
+  template <class T>
+  std::enable_if_t<std::is_integral<T>::value, bool> value(T& x) noexcept {
+    auto tmp = detail::squashed_int_t<T>{0};
+    if (value(tmp)) {
+      x = static_cast<T>(tmp);
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  bool value(float& x) noexcept;
+
+  bool value(double& x) noexcept;
+
+  bool value(long double& x);
+
+  bool value(std::string& x);
+
+  bool value(std::u16string& x);
+
+  bool value(std::u32string& x);
+
+  bool value(span<byte> x) noexcept;
+
+  bool value(std::vector<bool>& x);
 
 private:
   explicit binary_deserializer(actor_system& sys) noexcept;

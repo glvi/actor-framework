@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -58,11 +44,24 @@ public:
 
   // -- constructors, destructors, and assignment operators --------------------
 
-  broadcast_downstream_manager(stream_manager* parent) : super(parent) {
+  broadcast_downstream_manager(stream_manager* parent)
+    : super(parent, type_id_v<T>) {
     // nop
   }
 
   // -- properties -------------------------------------------------------------
+
+  template <class... Ts>
+  bool push_to(stream_slot slot, Ts&&... xs) {
+    auto old_size = buffered();
+    if (auto i = states().find(slot); i != states().end()) {
+      i->second.buf.emplace_back(std::forward<Ts>(xs)...);
+      auto new_size = buffered();
+      this->generated_messages(new_size - old_size);
+      return true;
+    }
+    return false;
+  }
 
   size_t buffered() const noexcept override {
     // We have a central buffer, but also an additional buffer at each path. We
@@ -79,18 +78,6 @@ public:
   size_t buffered(stream_slot slot) const noexcept override {
     auto i = state_map_.find(slot);
     return i != state_map_.end() ? i->second.buf.size() : 0u;
-  }
-
-  int32_t max_capacity() const noexcept override {
-    // The maximum capacity is limited by the slowest downstream path.
-    auto result = std::numeric_limits<int32_t>::max();
-    for (auto& kvp : this->paths_) {
-      auto mc = kvp.second->max_capacity;
-      // max_capacity is 0 if and only if we didn't receive an ack_batch yet.
-      if (mc > 0)
-        result = std::min(result, mc);
-    }
-    return result;
   }
 
   /// Sets the filter for `slot` to `filter`. Inserts a new element if `slot`
@@ -195,6 +182,7 @@ public:
 
   /// Forces the manager flush its buffer to the individual path buffers.
   void fan_out_flush() {
+    auto old_size = buffered();
     auto& buf = this->buf_;
     auto f = [&](typename map_type::value_type& x,
                  typename state_map_type::value_type& y) {
@@ -203,8 +191,7 @@ public:
         return;
       // Push data from the global buffer to path buffers.
       auto& st = y.second;
-      // TODO: replace with `if constexpr` when switching to C++17
-      if (std::is_same<select_type, detail::select_all>::value) {
+      if constexpr (std::is_same<select_type, detail::select_all>::value) {
         st.buf.insert(st.buf.end(), buf.begin(), buf.end());
       } else {
         for (auto& piece : buf)
@@ -214,6 +201,10 @@ public:
     };
     detail::zip_foreach(f, this->paths_.container(), state_map_.container());
     buf.clear();
+    // We may drop messages due to filtering or because all paths are closed.
+    auto new_size = buffered();
+    CAF_ASSERT(old_size >= new_size);
+    this->dropped_messages(old_size - new_size);
   }
 
 protected:
@@ -230,6 +221,7 @@ private:
     CAF_ASSERT(this->paths_.size() <= state_map_.size());
     if (this->paths_.empty())
       return;
+    auto old_size = buffered();
     // Calculate the chunk size, i.e., how many more items we can put to our
     // caches at the most.
     auto not_closing = [&](typename map_type::value_type& x,
@@ -256,7 +248,6 @@ private:
       detail::zip_foreach(g, this->paths_.container(), state_map_.container());
       return;
     }
-
     auto chunk = this->get_chunk(chunk_size);
     if (chunk.empty()) {
       auto g = [&](typename map_type::value_type& x,
@@ -273,8 +264,7 @@ private:
         // Don't enqueue new data into a closing path.
         if (!x.second->closing) {
           // Push data from the global buffer to path buffers.
-          // TODO: replace with `if constexpr` when switching to C++17
-          if (std::is_same<select_type, detail::select_all>::value) {
+          if constexpr (std::is_same_v<select_type, detail::select_all>) {
             st.buf.insert(st.buf.end(), chunk.begin(), chunk.end());
           } else {
             for (auto& piece : chunk)
@@ -288,6 +278,12 @@ private:
       };
       detail::zip_foreach(g, this->paths_.container(), state_map_.container());
     }
+    auto new_size = buffered();
+    CAF_ASSERT(old_size >= new_size);
+    auto shipped = old_size - new_size;
+    this->shipped_messages(shipped);
+    if (shipped > 0)
+      this->last_send_ = this->self()->now();
   }
 
   state_map_type state_map_;

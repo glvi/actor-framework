@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -32,9 +18,19 @@ template <long Pos, class... Ts>
 typename tl_at<type_list<Ts...>, Pos>::type get(const type_list<Ts...>&);
 
 template <class F, long... Is, class Tuple>
-auto apply_args(F& f, detail::int_list<Is...>, Tuple& tup)
-  -> decltype(f(get<Is>(tup)...)) {
+decltype(auto) apply_args(F& f, detail::int_list<Is...>, Tuple& tup) {
   return f(get<Is>(tup)...);
+}
+
+template <class F, size_t... Is, class Tuple>
+decltype(auto) apply_args(F& f, std::index_sequence<Is...>, Tuple& tup) {
+  return f(get<Is>(tup)...);
+}
+
+template <class F, long... Is, class Tuple>
+decltype(auto) apply_args(F& f, Tuple& tup) {
+  auto token = get_indices(tup);
+  return apply_args(f, token, tup);
 }
 
 template <class F, long... Is, class Tuple>

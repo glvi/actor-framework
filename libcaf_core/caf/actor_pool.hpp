@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -99,19 +85,23 @@ public:
   static actor
   make(execution_unit* eu, size_t num_workers, const factory& fac, policy pol);
 
-  void enqueue(mailbox_element_ptr what, execution_unit* eu) override;
+  bool enqueue(mailbox_element_ptr what, execution_unit* eu) override;
 
   actor_pool(actor_config& cfg);
 
   void on_destroy() override;
 
+  void setup_metrics() {
+    // nop
+  }
+
 protected:
   void on_cleanup(const error& reason) override;
 
 private:
-  bool
-  filter(upgrade_lock<detail::shared_spinlock>&, const strong_actor_ptr& sender,
-         message_id mid, message_view& mv, execution_unit* eu);
+  bool filter(upgrade_lock<detail::shared_spinlock>&,
+              const strong_actor_ptr& sender, message_id mid, message& msg,
+              execution_unit* eu);
 
   // call without workers_mtx_ held
   void quit(execution_unit* host);

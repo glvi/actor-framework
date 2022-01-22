@@ -1,24 +1,10 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/io/network/ip_endpoint.hpp"
 
-#include "caf/detail/fnv_hash.hpp"
+#include "caf/hash/fnv.hpp"
 #include "caf/io/network/native_socket.hpp"
 #include "caf/logger.hpp"
 #include "caf/sec.hpp"
@@ -30,6 +16,7 @@
 #  include <ws2tcpip.h>
 #  include <ws2ipdef.h>
 #else
+#  include <sys/types.h>
 #  include <arpa/inet.h>
 #  include <cerrno>
 #  include <netinet/in.h>
@@ -42,9 +29,6 @@
 #ifdef CAF_WINDOWS
 using sa_family_t = short;
 #endif
-
-using caf::detail::fnv_hash;
-using caf::detail::fnv_hash_append;
 
 namespace caf::io::network {
 
@@ -64,9 +48,11 @@ ip_endpoint::ip_endpoint(const ip_endpoint& other) {
 }
 
 ip_endpoint& ip_endpoint::operator=(const ip_endpoint& other) {
-  ptr_.reset(new ip_endpoint::impl);
-  memcpy(address(), other.caddress(), sizeof(sockaddr_storage));
-  *length() = *other.clength();
+  if (this != &other) {
+    ptr_.reset(new ip_endpoint::impl);
+    memcpy(address(), other.caddress(), sizeof(sockaddr_storage));
+    *length() = *other.clength();
+  }
   return *this;
 }
 
@@ -112,16 +98,12 @@ size_t ep_hash::operator()(const sockaddr& sa) const noexcept {
 }
 
 size_t ep_hash::hash(const sockaddr_in* sa) const noexcept {
-  auto result = fnv_hash(sa->sin_addr.s_addr);
-  result = fnv_hash_append(result, sa->sin_port);
-  return result;
+  return hash::fnv<size_t>::compute(sa->sin_addr.s_addr, sa->sin_port);
 }
 
 size_t ep_hash::hash(const sockaddr_in6* sa) const noexcept {
-  auto& addr = sa->sin6_addr.s6_addr;
-  auto result = fnv_hash(addr, addr + 16);
-  result = fnv_hash_append(result, sa->sin6_port);
-  return result;
+  auto bytes = as_bytes(make_span(sa->sin6_addr.s6_addr));
+  return hash::fnv<size_t>::compute(bytes, sa->sin6_port);
 }
 
 bool operator==(const ip_endpoint& lhs, const ip_endpoint& rhs) {
@@ -242,7 +224,7 @@ error_code<sec> save_endpoint(ip_endpoint& ep, uint32_t& f, std::string& h,
     l = *ep.length();
   } else {
     f = 0;
-    h = "";
+    h.clear();
     p = 0;
     l = 0;
   }

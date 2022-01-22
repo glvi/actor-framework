@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -22,6 +8,7 @@
 #include <string>
 
 #include "caf/abstract_channel.hpp"
+#include "caf/actor.hpp"
 #include "caf/actor_addr.hpp"
 #include "caf/attachable.hpp"
 #include "caf/detail/core_export.hpp"
@@ -46,12 +33,6 @@ public:
 
   // -- pure virtual member functions ------------------------------------------
 
-  /// Serialize this group to `sink`.
-  virtual error save(serializer& sink) const = 0;
-
-  /// Serialize this group to `sink`.
-  virtual error_code<sec> save(binary_serializer& sink) const = 0;
-
   /// Subscribes `who` to this group and returns `true` on success
   /// or `false` if `who` is already subscribed.
   virtual bool subscribe(strong_actor_ptr who) = 0;
@@ -64,14 +45,17 @@ public:
 
   // -- observers --------------------------------------------------------------
 
+  /// Returns the hosting system.
+  actor_system& system() const noexcept;
+
   /// Returns the parent module.
-  inline group_module& module() const {
-    return parent_;
+  group_module& module() const noexcept {
+    return *parent_;
   }
 
-  /// Returns the hosting system.
-  inline actor_system& system() const {
-    return system_;
+  /// Returns the origin node of the group if applicable.
+  node_id origin() const noexcept {
+    return origin_;
   }
 
   /// Returns a string representation of the group identifier, e.g.,
@@ -80,13 +64,18 @@ public:
     return identifier_;
   }
 
-protected:
-  abstract_group(group_module& mod, std::string id, node_id nid);
+  /// Returns a human-readable string representation of the group ID.
+  virtual std::string stringify() const;
 
-  actor_system& system_;
-  group_module& parent_;
-  std::string identifier_;
+  /// Returns the intermediary actor for the group if applicable.
+  virtual actor intermediary() const noexcept;
+
+protected:
+  abstract_group(group_module_ptr mod, std::string id, node_id nid);
+
+  group_module_ptr parent_;
   node_id origin_;
+  std::string identifier_;
 };
 
 /// A smart pointer type that manages instances of {@link group}.

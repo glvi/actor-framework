@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -37,7 +23,11 @@ public:
   virtual ~abstract_channel();
 
   /// Enqueues a new message without forwarding stack to the channel.
-  virtual void enqueue(strong_actor_ptr sender, message_id mid, message content,
+  /// @returns `true` if the message has been dispatches successful, `false`
+  ///          otherwise. In the latter case, the channel has been closed and
+  ///          the message has been dropped. Once this function returns `false`,
+  ///          it returns `false` for all future invocations.
+  virtual bool enqueue(strong_actor_ptr sender, message_id mid, message content,
                        execution_unit* host = nullptr)
     = 0;
 
@@ -53,15 +43,15 @@ public:
 
   static constexpr int is_hidden_flag = 0x10000000;
 
-  inline bool is_abstract_actor() const {
+  bool is_abstract_actor() const {
     return static_cast<bool>(flags() & is_abstract_actor_flag);
   }
 
-  inline bool is_abstract_group() const {
+  bool is_abstract_group() const {
     return static_cast<bool>(flags() & is_abstract_group_flag);
   }
 
-  inline bool is_actor_decorator() const {
+  bool is_actor_decorator() const {
     return static_cast<bool>(flags() & is_actor_decorator_mask);
   }
 
@@ -72,11 +62,11 @@ protected:
   // flags that are considered constant after an actor has launched are
   // read by others, i.e., there is no acquire/release semantic between
   // setting and reading flags
-  inline int flags() const {
+  int flags() const {
     return flags_.load(std::memory_order_relaxed);
   }
 
-  inline void flags(int new_value) {
+  void flags(int new_value) {
     flags_.store(new_value, std::memory_order_relaxed);
   }
 

@@ -1,27 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright (C) 2011 - 2017                                                  *
- * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE intrusive.wdrr_fixed_multiplexed_queue
 
 #include "caf/intrusive/wdrr_fixed_multiplexed_queue.hpp"
 
-#include "caf/test/unit_test.hpp"
+#include "core-test.hpp"
 
 #include <memory>
 
@@ -86,15 +71,16 @@ public:
 
 using nested_queue_type = drr_queue<inode_policy>;
 
-using queue_type = wdrr_fixed_multiplexed_queue<
-  inode_policy, high_prio_queue, nested_queue_type, nested_queue_type>;
+using queue_type
+  = wdrr_fixed_multiplexed_queue<inode_policy, high_prio_queue,
+                                 nested_queue_type, nested_queue_type>;
 
 struct fetch_helper {
   std::string result;
 
   template <size_t I, class Queue>
-  task_result operator()(std::integral_constant<size_t, I>, const Queue&,
-                         inode& x) {
+  task_result
+  operator()(std::integral_constant<size_t, I>, const Queue&, inode& x) {
     if (!result.empty())
       result += ',';
     result += std::to_string(I);
@@ -133,9 +119,13 @@ struct fixture {
   }
 };
 
+auto make_new_round_result(size_t consumed_items, bool stop_all) {
+  return new_round_result{consumed_items, stop_all};
+}
+
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(wdrr_fixed_multiplexed_queue_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(default_constructed) {
   CAF_REQUIRE_EQUAL(queue.empty(), true);
@@ -146,20 +136,20 @@ CAF_TEST(new_round) {
   // Allow f to consume 2 items per nested queue.
   fetch_helper f;
   auto round_result = queue.new_round(2, f);
-  CAF_CHECK_EQUAL(round_result, make_new_round_result(true));
-  CAF_CHECK_EQUAL(f.result, "0:3,0:6,1:1,1:4,2:2,2:5");
+  CHECK_EQ(round_result, make_new_round_result(6, false));
+  CHECK_EQ(f.result, "0:3,0:6,1:1,1:4,2:2,2:5");
   CAF_REQUIRE_EQUAL(queue.empty(), false);
   // Allow f to consume one more item from each queue.
   f.result.clear();
   round_result = queue.new_round(1, f);
-  CAF_CHECK_EQUAL(round_result, make_new_round_result(true));
-  CAF_CHECK_EQUAL(f.result, "0:9,1:7,2:8");
+  CHECK_EQ(round_result, make_new_round_result(3, false));
+  CHECK_EQ(f.result, "0:9,1:7,2:8");
   CAF_REQUIRE_EQUAL(queue.empty(), false);
   // Allow f to consume the remainder, i.e., 12.
   f.result.clear();
   round_result = queue.new_round(1000, f);
-  CAF_CHECK_EQUAL(round_result, make_new_round_result(true));
-  CAF_CHECK_EQUAL(f.result, "0:12");
+  CHECK_EQ(round_result, make_new_round_result(1, false));
+  CHECK_EQ(f.result, "0:12");
   CAF_REQUIRE_EQUAL(queue.empty(), true);
 }
 
@@ -167,13 +157,13 @@ CAF_TEST(priorities) {
   queue.policy().enable_priorities = true;
   fill(queue, 1, 2, 3, 4, 5, 6, 7, 8, 9);
   // Allow f to consume 2 items from the high priority and 1 item otherwise.
-  CAF_CHECK_EQUAL(fetch(1), "0:3,0:6,1:1,2:2");
+  CHECK_EQ(fetch(1), "0:3,0:6,1:1,2:2");
   CAF_REQUIRE_EQUAL(queue.empty(), false);
   // Drain the high-priority queue with one item left per other queue.
-  CAF_CHECK_EQUAL(fetch(1), "0:9,1:4,2:5");
+  CHECK_EQ(fetch(1), "0:9,1:4,2:5");
   CAF_REQUIRE_EQUAL(queue.empty(), false);
   // Drain queue.
-  CAF_CHECK_EQUAL(fetch(1000), "1:7,2:8");
+  CHECK_EQ(fetch(1000), "1:7,2:8");
   CAF_REQUIRE_EQUAL(queue.empty(), true);
 }
 
@@ -188,23 +178,17 @@ CAF_TEST(peek_all) {
     queue.peek_all(peek_fun);
     return str;
   };
-  CAF_CHECK_EQUAL(queue_to_string(), "");
+  CHECK_EQ(queue_to_string(), "");
   queue.emplace_back(1);
-  CAF_CHECK_EQUAL(queue_to_string(), "1");
+  CHECK_EQ(queue_to_string(), "1");
   queue.emplace_back(2);
-  CAF_CHECK_EQUAL(queue_to_string(), "1, 2");
+  CHECK_EQ(queue_to_string(), "1, 2");
   queue.emplace_back(3);
   // Lists are iterated in order and 3 is stored in the first queue for
   // `x mod 3 == 0` values.
-  CAF_CHECK_EQUAL(queue_to_string(), "3, 1, 2");
+  CHECK_EQ(queue_to_string(), "3, 1, 2");
   queue.emplace_back(4);
-  CAF_CHECK_EQUAL(queue_to_string(), "3, 1, 4, 2");
+  CHECK_EQ(queue_to_string(), "3, 1, 4, 2");
 }
 
-CAF_TEST(to_string) {
-  CAF_CHECK_EQUAL(deep_to_string(queue), "[]");
-  fill(queue, 1, 2, 3, 4);
-  CAF_CHECK_EQUAL(deep_to_string(queue), "[3, 1, 4, 2]");
-}
-
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

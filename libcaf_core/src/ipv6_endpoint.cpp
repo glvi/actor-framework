@@ -1,24 +1,10 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/ipv6_endpoint.hpp"
 
-#include "caf/detail/fnv_hash.hpp"
+#include "caf/hash/fnv.hpp"
 #include "caf/ipv4_address.hpp"
 #include "caf/ipv4_endpoint.hpp"
 
@@ -35,8 +21,7 @@ ipv6_endpoint::ipv6_endpoint(ipv4_address address, uint16_t port)
 }
 
 size_t ipv6_endpoint::hash_code() const noexcept {
-  auto result = detail::fnv_hash(address_.data());
-  return detail::fnv_hash_append(result, port_);
+  return hash::fnv<size_t>::compute(address_, port_);
 }
 
 long ipv6_endpoint::compare(ipv6_endpoint x) const noexcept {

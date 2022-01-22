@@ -1,26 +1,13 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE binary_serializer
 
 #include "caf/binary_serializer.hpp"
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
+#include "nasty.hpp"
 
 #include <cstring>
 #include <vector>
@@ -43,26 +30,13 @@ byte operator"" _b(char x) {
   return static_cast<byte>(x);
 }
 
-enum class test_enum : int32_t {
-  a,
-  b,
-  c,
-};
-
-struct test_data {
-  int32_t i32_;
-  int64_t i64_;
-  float f32_;
-  double f64_;
-  caf::timestamp ts_;
-  test_enum te_;
-  std::string str_;
+struct arr {
+  int8_t xs[3];
 };
 
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, test_data& x) {
-  return f(caf::meta::type_name("test_data"), x.i32_, x.i64_, x.f32_, x.f64_,
-           x.ts_, x.te_, x.str_);
+bool inspect(Inspector& f, arr& x) {
+  return f.object(x).fields(f.field("xs", x.xs));
 }
 
 struct fixture {
@@ -70,31 +44,29 @@ struct fixture {
   auto save(const Ts&... xs) {
     byte_buffer result;
     binary_serializer sink{nullptr, result};
-    if (auto err = sink(xs...))
-      CAF_FAIL("binary_serializer failed to save: "
-               << actor_system_config::render(err));
+    if (!(sink.apply(xs) && ...))
+      CAF_FAIL("binary_serializer failed to save: " << sink.get_error());
     return result;
   }
 
   template <class... Ts>
   void save_to_buf(byte_buffer& data, const Ts&... xs) {
     binary_serializer sink{nullptr, data};
-    if (auto err = sink(xs...))
-      CAF_FAIL("binary_serializer failed to save: "
-               << actor_system_config::render(err));
+    if (!(sink.apply(xs) && ...))
+      CAF_FAIL("binary_serializer failed to save: " << sink.get_error());
   }
 };
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(binary_serializer_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 #define SUBTEST(msg)                                                           \
-  CAF_MESSAGE(msg);                                                            \
-  for (int subtest_dummy = 0; subtest_dummy < 1; ++subtest_dummy)
+  MESSAGE(msg);                                                                \
+  if (true)
 
 #define CHECK_SAVE(type, value, ...)                                           \
-  CAF_CHECK_EQUAL(save(type{value}), byte_buffer({__VA_ARGS__}))
+  CHECK_EQ(save(type{value}), byte_buffer({__VA_ARGS__}))
 
 CAF_TEST(primitive types) {
   SUBTEST("8-bit integers") {
@@ -134,17 +106,17 @@ CAF_TEST(primitive types) {
 
 CAF_TEST(concatenation) {
   SUBTEST("calling f(a, b) writes a and b into the buffer in order") {
-    CAF_CHECK_EQUAL(save(int8_t{7}, int16_t{-32683}),
-                    byte_buffer({7_b, 0x80_b, 0x55_b}));
-    CAF_CHECK_EQUAL(save(int16_t{-32683}, int8_t{7}),
-                    byte_buffer({0x80_b, 0x55_b, 7_b}));
+    CHECK_EQ(save(int8_t{7}, int16_t{-32683}),
+             byte_buffer({7_b, 0x80_b, 0x55_b}));
+    CHECK_EQ(save(int16_t{-32683}, int8_t{7}),
+             byte_buffer({0x80_b, 0x55_b, 7_b}));
   }
   SUBTEST("calling f(a) and then f(b) is equal to calling f(a, b)") {
     byte_buffer data;
     binary_serializer sink{nullptr, data};
     save_to_buf(data, int8_t{7});
     save_to_buf(data, int16_t{-32683});
-    CAF_CHECK_EQUAL(data, byte_buffer({7_b, 0x80_b, 0x55_b}));
+    CHECK_EQ(data, byte_buffer({7_b, 0x80_b, 0x55_b}));
   }
   SUBTEST("calling f(make_pair(a, b)) is equal to calling f(a, b)") {
     using i8i16_pair = std::pair<int8_t, int16_t>;
@@ -163,8 +135,8 @@ CAF_TEST(concatenation) {
                0x80_b, 0x55_b, 7_b);
   }
   SUBTEST("arrays behave like tuples") {
-    int8_t xs[] = {1, 2, 3};
-    CAF_CHECK_EQUAL(save(xs), byte_buffer({1_b, 2_b, 3_b}));
+    arr xs{{1, 2, 3}};
+    CHECK_EQ(save(xs), byte_buffer({1_b, 2_b, 3_b}));
   }
 }
 
@@ -183,8 +155,8 @@ CAF_TEST(binary serializer picks up inspect functions) {
   SUBTEST("node ID") {
     auto nid = make_node_id(123, "000102030405060708090A0B0C0D0E0F10111213");
     CHECK_SAVE(node_id, unbox(nid),
-               // Implementation ID: atom("default").
-               0_b, 0_b, 0x3E_b, 0x9A_b, 0xAB_b, 0x9B_b, 0xAC_b, 0x79_b,
+               // content index for hashed_node_id (1)
+               1_b,
                // Process ID.
                0_b, 0_b, 0_b, 123_b,
                // Host ID.
@@ -193,13 +165,8 @@ CAF_TEST(binary serializer picks up inspect functions) {
   }
   SUBTEST("custom struct") {
     caf::timestamp ts{caf::timestamp::duration{1478715821 * 1000000000ll}};
-    test_data value{-345,
-                    -1234567890123456789ll,
-                    3.45,
-                    54.3,
-                    ts,
-                    test_enum::b,
-                    "Lorem ipsum dolor sit amet."};
+    test_data value{-345,         -1234567890123456789ll,       3.45, 54.3, ts,
+                    test_enum::b, "Lorem ipsum dolor sit amet."};
     CHECK_SAVE(test_data, value,
                // 32-bit i32_ member: -345
                0xFF_b, 0xFF_b, 0xFE_b, 0xA7_b,
@@ -219,6 +186,10 @@ CAF_TEST(binary serializer picks up inspect functions) {
                'u'_b, 'm'_b, ' '_b, 'd'_b, 'o'_b, 'l'_b, 'o'_b, 'r'_b, ' '_b,
                's'_b, 'i'_b, 't'_b, ' '_b, 'a'_b, 'm'_b, 'e'_b, 't'_b, '.'_b);
   }
+  SUBTEST("enum class with non-default overload") {
+    auto day = weekday::friday;
+    CHECK_SAVE(weekday, day, 0x04_b);
+  }
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

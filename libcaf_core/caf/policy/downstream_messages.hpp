@@ -1,23 +1,10 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright (C) 2011 - 2017                                                  *
- * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
+
+#include <map>
 
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
@@ -48,6 +35,18 @@ public:
 
     using handler_type = std::unique_ptr<inbound_path>;
 
+    static task_size_type task_size(const downstream_msg_batch& x) noexcept;
+
+    static constexpr task_size_type
+    task_size(const downstream_msg_close&) noexcept {
+      return 1;
+    }
+
+    static constexpr task_size_type
+    task_size(const downstream_msg_forced_close&) noexcept {
+      return 1;
+    }
+
     static task_size_type task_size(const mailbox_element& x) noexcept;
 
     // -- constructors, destructors, and assignment operators ------------------
@@ -70,6 +69,8 @@ public:
     // -- member variables -----------------------------------------------------
 
     handler_type handler;
+
+    size_t bulk_inserted_size = 0;
   };
 
   // -- member types -----------------------------------------------------------
@@ -79,6 +80,8 @@ public:
   using task_size_type = size_t;
 
   using deficit_type = size_t;
+
+  using pointer = mapped_type*;
 
   using unique_pointer = mailbox_element_ptr;
 
@@ -94,8 +97,8 @@ public:
 
   static bool enabled(const nested_queue_type& q) noexcept;
 
-  static deficit_type
-  quantum(const nested_queue_type& q, deficit_type x) noexcept;
+  static deficit_type quantum(const nested_queue_type& q,
+                              deficit_type x) noexcept;
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -111,9 +114,19 @@ public:
 
   // -- required functions for drr_queue ---------------------------------------
 
-  static inline task_size_type task_size(const mailbox_element&) noexcept {
+  static task_size_type task_size(const mailbox_element&) noexcept {
     return 1;
   }
+
+  // -- required functions for wdrr_dynamic_multiplexed_queue ------------------
+
+  static void cleanup(nested_queue_type&) noexcept;
+
+  static bool push_back(nested_queue_type& sub_queue, pointer ptr) noexcept;
+
+  static void lifo_append(nested_queue_type& sub_queue, pointer ptr) noexcept;
+
+  static void stop_lifo_append(nested_queue_type& sub_queue) noexcept;
 };
 
 } // namespace caf::policy

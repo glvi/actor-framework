@@ -3,161 +3,158 @@
  * based on group communication.                                              *
  *                                                                            *
  * Setup for a minimal chat between "alice" and "bob":                        *
- * - ./build/bin/group_chat -s -p 4242                                        *
- * - ./build/bin/group_chat -g remote:chatroom@localhost:4242 -n alice        *
- * - ./build/bin/group_chat -g remote:chatroom@localhost:4242 -n bob          *
-\ ******************************************************************************/
+ * - group_chat -s -p 4242                                                    *
+ * - group_chat -g remote:chatroom@localhost:4242 -n alice                    *
+ * - group_chat -g remote:chatroom@localhost:4242 -n bob                      *
+\******************************************************************************/
 
-#include <set>
-#include <map>
-#include <vector>
 #include <cstdlib>
-#include <sstream>
 #include <iostream>
+#include <map>
+#include <set>
+#include <sstream>
+#include <vector>
 
 #include "caf/all.hpp"
 #include "caf/io/all.hpp"
 
 #include "caf/string_algorithms.hpp"
 
-using namespace std;
+CAF_BEGIN_TYPE_ID_BLOCK(group_chat, first_custom_type_id)
+
+  CAF_ADD_ATOM(group_chat, broadcast_atom)
+
+CAF_END_TYPE_ID_BLOCK(group_chat)
+
 using namespace caf;
 
-namespace {
+struct line {
+  std::string str;
+};
 
-using broadcast_atom = atom_constant<atom("broadcast")>;
-
-struct line { string str; };
-
-istream& operator>>(istream& is, line& l) {
-  getline(is, l.str);
+std::istream& operator>>(std::istream& is, line& l) {
+  std::getline(is, l.str);
   return is;
 }
 
-behavior client(event_based_actor* self, const string& name) {
+behavior client(event_based_actor* self, const std::string& name) {
   return {
-    [=](broadcast_atom, const string& message) {
-      for(auto& dest : self->joined_groups()) {
+    [=](broadcast_atom, const std::string& message) {
+      for (auto& dest : self->joined_groups()) {
         self->send(dest, name + ": " + message);
       }
     },
     [=](join_atom, const group& what) {
-      for (const auto& g : self->joined_groups()) {
-        cout << "*** leave " << to_string(g) << endl;
-        self->send(g, name + " has left the chatroom");
-        self->leave(g);
+      auto groups = self->joined_groups();
+      for (auto&& grp : groups) {
+        std::cout << "*** leave " << to_string(grp) << std::endl;
+        self->send(grp, name + " has left the chatroom");
+        self->leave(grp);
       }
-      cout << "*** join " << to_string(what) << endl;
+      std::cout << "*** join " << to_string(what) << std::endl;
       self->join(what);
       self->send(what, name + " has entered the chatroom");
     },
-    [=](const string& txt) {
+    [=](const std::string& txt) {
       // don't print own messages
       if (self->current_sender() != self)
-        cout << txt << endl;
+        std::cout << txt << std::endl;
     },
     [=](const group_down_msg& g) {
-      cout << "*** chatroom offline: " << to_string(g.source) << endl;
-    }
+      std::cout << "*** chatroom offline: " << to_string(g.source) << std::endl;
+    },
+    [=](leave_atom) {
+      auto groups = self->joined_groups();
+      for (auto&& grp : groups) {
+        std::cout << "*** leave " << to_string(grp) << std::endl;
+        self->send(grp, name + " has left the chatroom");
+        self->leave(grp);
+      }
+    },
   };
 }
 
 class config : public actor_system_config {
 public:
-  std::string name;
-  std::vector<std::string> group_uris;
-  uint16_t port = 0;
-  bool server_mode = false;
-
   config() {
     opt_group{custom_options_, "global"}
-    .add(name, "name,n", "set name")
-    .add(group_uris, "group,g", "join group")
-    .add(server_mode, "server,s", "run in server mode")
-    .add(port, "port,p", "set port (ignored in client mode)");
+      .add<std::string>("name,n", "set name")
+      .add<std::string>("group,g", "join group")
+      .add<bool>("server,s", "run in server mode")
+      .add<uint16_t>("port,p", "set port (ignored in client mode)");
   }
 };
 
-void run_server(actor_system& system, const config& cfg) {
-  auto res = system.middleman().publish_local_groups(cfg.port);
-  if (! res) {
+void run_server(actor_system& sys) {
+  auto port = get_or(sys.config(), "port", uint16_t{0});
+  auto res = sys.middleman().publish_local_groups(port);
+  if (!res) {
     std::cerr << "*** publishing local groups failed: "
-              << system.render(res.error()) << endl;
+              << to_string(res.error()) << std::endl;
     return;
   }
-  cout << "*** listening at port " << *res << endl
-       << "*** press [enter] to quit" << endl;
-  string dummy;
+  std::cout << "*** listening at port " << *res << std::endl
+            << "*** press [enter] to quit" << std::endl;
+  std::string dummy;
   std::getline(std::cin, dummy);
-  cout << "... cya" << endl;
+  std::cout << "... cya" << std::endl;
 }
 
-void run_client(actor_system& system, const config& cfg) {
-  auto name = cfg.name;
+void run_client(actor_system& sys) {
+  std::string name;
+  if (auto config_name = get_if<std::string>(&sys.config(), "name"))
+    name = *config_name;
   while (name.empty()) {
-    cout << "please enter your name: " << flush;
-    if (!getline(cin, name)) {
-      cerr << "*** no name given... terminating" << endl;
+    std::cout << "please enter your name: " << std::flush;
+    if (!std::getline(std::cin, name)) {
+      std::cerr << "*** no name given... terminating" << std::endl;
       return;
     }
   }
-  cout << "*** starting client, type '/help' for a list of commands" << endl;
-  auto client_actor = system.spawn(client, name);
-  for (auto& uri : cfg.group_uris) {
-    auto tmp = system.groups().get(uri);
-    if (tmp)
-      anon_send(client_actor, join_atom::value, std::move(*tmp));
-    else
-      cerr << R"(*** failed to parse ")" << uri << R"(" as group URI: )"
-           << system.render(tmp.error()) << endl;
+  auto client_actor = sys.spawn(client, name);
+  if (auto locator = get_if<std::string>(&sys.config(), "group")) {
+    if (auto grp = sys.groups().get(*locator)) {
+      anon_send(client_actor, join_atom_v, std::move(*grp));
+    } else {
+      std::cerr << R"(*** failed to parse ")" << *locator
+                << R"(" as group locator: )" << to_string(grp.error())
+                << std::endl;
+    }
   }
-  istream_iterator<line> eof;
-  vector<string> words;
-  for (istream_iterator<line> i(cin); i != eof; ++i) {
-    auto send_input = [&] {
-      if (!i->str.empty())
-        anon_send(client_actor, broadcast_atom::value, i->str);
-    };
-    words.clear();
-    split(words, i->str, is_any_of(" "));
-    auto res = message_builder(words.begin(), words.end()).apply({
-      [&](const string& cmd, const string& mod, const string& id) {
-        if (cmd == "/join") {
-          auto grp = system.groups().get(mod, id);
-          if (grp)
-            anon_send(client_actor, join_atom::value, *grp);
-        }
-        else {
-          send_input();
-        }
-      },
-      [&](const string& cmd) {
-        if (cmd == "/quit") {
-          cin.setstate(ios_base::eofbit);
-        }
-        else if (cmd[0] == '/') {
-          cout << "*** available commands:\n"
-            "  /join <module> <group> join a new chat channel\n"
-            "  /quit          quit the program\n"
-            "  /help          print this text\n" << flush;
-        }
-        else {
-          send_input();
-        }
+  std::cout << "*** starting client, type '/help' for a list of commands\n";
+  std::istream_iterator<line> eof;
+  std::vector<std::string> words;
+  for (std::istream_iterator<line> i{std::cin}; i != eof; ++i) {
+    if (i->str.empty()) {
+      // Ignore empty lines.
+    } else if (i->str[0] == '/') {
+      words.clear();
+      split(words, i->str, is_any_of(" "));
+      if (words.size() == 3 && words[0] == "/join") {
+        if (auto grp = sys.groups().get(words[1], words[2]))
+          anon_send(client_actor, join_atom_v, *grp);
+        else
+          std::cerr << "*** failed to join group: " << to_string(grp.error())
+                    << std::endl;
+      } else if (words.size() == 1 && words[0] == "/quit") {
+        std::cin.setstate(std::ios_base::eofbit);
+      } else {
+        std::cout << "*** available commands:\n"
+                     "  /join <module> <group> join a new chat channel\n"
+                     "  /quit                  quit the program\n"
+                     "  /help                  print this text\n";
       }
-    });
-    if (!res)
-      send_input();
+    } else {
+      anon_send(client_actor, broadcast_atom_v, i->str);
+    }
   }
-  // force actor to quit
+  anon_send(client_actor, leave_atom_v);
   anon_send_exit(client_actor, exit_reason::user_shutdown);
 }
 
-void caf_main(actor_system& system, const config& cfg) {
-  auto f = cfg.server_mode ? run_server : run_client;
-  f(system, cfg);
+void caf_main(actor_system& sys, const config& cfg) {
+  auto f = get_or(cfg, "server", false) ? run_server : run_client;
+  f(sys);
 }
 
-} // namespace
-
-CAF_MAIN(io::middleman)
+CAF_MAIN(id_block::group_chat, io::middleman)

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -31,21 +17,13 @@ namespace caf {
 /// skipping to the runtime.
 class CAF_CORE_EXPORT skip_t {
 public:
-  using fun
-    = std::function<result<message>(scheduled_actor* self, message_view&)>;
+  using fun = std::function<skippable_result(scheduled_actor* self, message&)>;
 
   constexpr skip_t() {
     // nop
   }
 
-  constexpr skip_t operator()() const {
-    return *this;
-  }
-
   operator fun() const;
-
-private:
-  static result<message> skip_fun_impl(scheduled_actor*, message_view&);
 };
 
 /// Tells the runtime system to skip a message when used as message

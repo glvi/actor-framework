@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/actor_registry.hpp"
 
@@ -24,18 +10,16 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "caf/sec.hpp"
+#include "caf/actor_system.hpp"
+#include "caf/attachable.hpp"
+#include "caf/detail/shared_spinlock.hpp"
+#include "caf/event_based_actor.hpp"
+#include "caf/exit_reason.hpp"
 #include "caf/locks.hpp"
 #include "caf/logger.hpp"
-#include "caf/attachable.hpp"
-#include "caf/exit_reason.hpp"
-#include "caf/actor_system.hpp"
 #include "caf/scoped_actor.hpp"
+#include "caf/sec.hpp"
 #include "caf/stateful_actor.hpp"
-#include "caf/event_based_actor.hpp"
-#include "caf/uniform_type_info_map.hpp"
-
-#include "caf/detail/shared_spinlock.hpp"
 
 namespace caf {
 
@@ -50,7 +34,7 @@ actor_registry::~actor_registry() {
   // nop
 }
 
-actor_registry::actor_registry(actor_system& sys) : running_(0), system_(sys) {
+actor_registry::actor_registry(actor_system& sys) : system_(sys) {
   // nop
 }
 
@@ -96,39 +80,34 @@ void actor_registry::erase(actor_id key) {
   }
 }
 
-void actor_registry::inc_running() {
-# if CAF_LOG_LEVEL >= CAF_LOG_LEVEL_DEBUG
-  auto value = ++running_;
-  CAF_LOG_DEBUG(CAF_ARG(value));
-# else
-  ++running_;
-# endif
+size_t actor_registry::inc_running() {
+  return ++*system_.base_metrics().running_actors;
 }
 
 size_t actor_registry::running() const {
-  return running_.load();
+  return static_cast<size_t>(system_.base_metrics().running_actors->value());
 }
 
-void actor_registry::dec_running() {
-  size_t new_val = --running_;
+size_t actor_registry::dec_running() {
+  size_t new_val = --*system_.base_metrics().running_actors;
   if (new_val <= 1) {
     std::unique_lock<std::mutex> guard(running_mtx_);
     running_cv_.notify_all();
   }
-  CAF_LOG_DEBUG(CAF_ARG(new_val));
+  return new_val;
 }
 
 void actor_registry::await_running_count_equal(size_t expected) const {
   CAF_ASSERT(expected == 0 || expected == 1);
   CAF_LOG_TRACE(CAF_ARG(expected));
   std::unique_lock<std::mutex> guard{running_mtx_};
-  while (running_ != expected) {
-    CAF_LOG_DEBUG(CAF_ARG(running_.load()));
+  while (running() != expected) {
+    CAF_LOG_DEBUG(CAF_ARG(running()));
     running_cv_.wait(guard);
   }
 }
 
-strong_actor_ptr actor_registry::get_impl(atom_value key) const {
+strong_actor_ptr actor_registry::get_impl(const std::string& key) const {
   shared_guard guard{named_entries_mtx_};
   auto i = named_entries_.find(key);
   if (i == named_entries_.end())
@@ -136,16 +115,16 @@ strong_actor_ptr actor_registry::get_impl(atom_value key) const {
   return i->second;
 }
 
-void actor_registry::put_impl(atom_value key, strong_actor_ptr value) {
+void actor_registry::put_impl(const std::string& key, strong_actor_ptr value) {
   if (value == nullptr) {
     erase(key);
     return;
   }
   exclusive_guard guard{named_entries_mtx_};
-  named_entries_.emplace(key, std::move(value));
+  named_entries_.emplace(std::move(key), std::move(value));
 }
 
-void actor_registry::erase(atom_value key) {
+void actor_registry::erase(const std::string& key) {
   // Stores a reference to the actor we're going to remove for the same
   // reasoning as in erase(actor_id).
   strong_actor_ptr ref;
@@ -169,7 +148,14 @@ void actor_registry::start() {
 }
 
 void actor_registry::stop() {
-  // nop
+  {
+    exclusive_guard guard{instances_mtx_};
+    entries_.clear();
+  }
+  {
+    exclusive_guard guard{named_entries_mtx_};
+    named_entries_.clear();
+  }
 }
 
 } // namespace caf

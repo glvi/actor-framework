@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
-
-#include "caf/after.hpp"
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE simple_timeout
 
-#include "caf/test/dsl.hpp"
+#include "caf/after.hpp"
+
+#include "core-test.hpp"
 
 #include <chrono>
 #include <memory>
@@ -33,7 +19,6 @@ namespace {
 
 using ms = std::chrono::milliseconds;
 
-using reset_atom = atom_constant<atom("reset")>;
 using timer = typed_actor<reacts_to<reset_atom>>;
 
 struct timer_state {
@@ -41,39 +26,41 @@ struct timer_state {
 };
 
 timer::behavior_type timer_impl(timer::stateful_pointer<timer_state> self) {
-  self->delayed_send(self, ms(100), reset_atom::value);
+  self->delayed_send(self, ms(100), reset_atom_v);
   return {
     [=](reset_atom) {
-      CAF_MESSAGE("timer reset");
+      MESSAGE("timer reset");
       self->state.had_reset = true;
     },
-    after(ms(600)) >> [=] {
-      CAF_MESSAGE("timer expired");
-      CAF_REQUIRE(self->state.had_reset);
-      self->quit();
-    }
+    after(ms(600)) >>
+      [=] {
+        MESSAGE("timer expired");
+        CAF_REQUIRE(self->state.had_reset);
+        self->quit();
+      },
   };
 }
 
 timer::behavior_type timer_impl2(timer::pointer self) {
   auto had_reset = std::make_shared<bool>(false);
-  delayed_anon_send(self, ms(100), reset_atom::value);
+  delayed_anon_send(self, ms(100), reset_atom_v);
   return {
     [=](reset_atom) {
-      CAF_MESSAGE("timer reset");
+      MESSAGE("timer reset");
       *had_reset = true;
     },
-    after(ms(600)) >> [=] {
-      CAF_MESSAGE("timer expired");
-      CAF_REQUIRE(*had_reset);
-      self->quit();
-    }
+    after(ms(600)) >>
+      [=] {
+        MESSAGE("timer expired");
+        CAF_REQUIRE(*had_reset);
+        self->quit();
+      },
   };
 }
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(simple_timeout_tests, test_coordinator_fixture<>)
+BEGIN_FIXTURE_SCOPE(test_coordinator_fixture<>)
 
 CAF_TEST(single_timeout) {
   sys.spawn(timer_impl);
@@ -83,4 +70,4 @@ CAF_TEST(single_anon_timeout) {
   sys.spawn(timer_impl2);
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

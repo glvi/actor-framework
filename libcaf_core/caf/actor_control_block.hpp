@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -25,10 +11,6 @@
 #include "caf/error.hpp"
 #include "caf/fwd.hpp"
 #include "caf/intrusive_ptr.hpp"
-#include "caf/meta/load_callback.hpp"
-#include "caf/meta/omittable_if_none.hpp"
-#include "caf/meta/save_callback.hpp"
-#include "caf/meta/type_name.hpp"
 #include "caf/node_id.hpp"
 #include "caf/weak_intrusive_ptr.hpp"
 
@@ -97,7 +79,7 @@ public:
   static_assert(sizeof(std::atomic<size_t>) == sizeof(void*),
                 "std::atomic not lockfree on this platform");
 
-  static_assert(sizeof(intrusive_ptr<node_id::data>) == sizeof(void*),
+  static_assert(sizeof(intrusive_ptr<int>) == sizeof(int*),
                 "intrusive_ptr<T> and T* have different size");
 
   static_assert(sizeof(node_id) == sizeof(void*),
@@ -107,7 +89,7 @@ public:
                 "functiion pointer and regular pointers have different size");
 
   /// Returns a pointer to the actual actor instance.
-  inline abstract_actor* get() {
+  abstract_actor* get() {
     // this pointer arithmetic is compile-time checked in actor_storage's ctor
     return reinterpret_cast<abstract_actor*>(reinterpret_cast<intptr_t>(this)
                                              + CAF_CACHE_LINE_SIZE);
@@ -125,18 +107,18 @@ public:
 
   actor_addr address();
 
-  inline actor_id id() const noexcept {
+  actor_id id() const noexcept {
     return aid;
   }
 
-  inline const node_id& node() const noexcept {
+  const node_id& node() const noexcept {
     return nid;
   }
 
-  void enqueue(strong_actor_ptr sender, message_id mid, message content,
+  bool enqueue(strong_actor_ptr sender, message_id mid, message content,
                execution_unit* host);
 
-  void enqueue(mailbox_element_ptr what, execution_unit* host);
+  bool enqueue(mailbox_element_ptr what, execution_unit* host);
 
   /// @endcond
 };
@@ -160,27 +142,21 @@ inline void intrusive_ptr_add_ref(actor_control_block* x) {
 /// @relates actor_control_block
 CAF_CORE_EXPORT void intrusive_ptr_release(actor_control_block* x);
 
-/// @relates abstract_actor
 /// @relates actor_control_block
 using strong_actor_ptr = intrusive_ptr<actor_control_block>;
 
-/// @relates strong_actor_ptr
 CAF_CORE_EXPORT bool operator==(const strong_actor_ptr&, const abstract_actor*);
 
-/// @relates strong_actor_ptr
 CAF_CORE_EXPORT bool operator==(const abstract_actor*, const strong_actor_ptr&);
 
-/// @relates strong_actor_ptr
 inline bool operator!=(const strong_actor_ptr& x, const abstract_actor* y) {
   return !(x == y);
 }
 
-/// @relates strong_actor_ptr
 inline bool operator!=(const abstract_actor* x, const strong_actor_ptr& y) {
   return !(x == y);
 }
 
-/// @relates abstract_actor
 /// @relates actor_control_block
 using weak_actor_ptr = weak_intrusive_ptr<actor_control_block>;
 
@@ -211,25 +187,38 @@ CAF_CORE_EXPORT std::string to_string(const weak_actor_ptr& x);
 CAF_CORE_EXPORT void append_to_string(std::string& x, const weak_actor_ptr& y);
 
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, strong_actor_ptr& x) {
+bool inspect(Inspector& f, strong_actor_ptr& x) {
   actor_id aid = 0;
   node_id nid;
-  if (x) {
-    aid = x->aid;
-    nid = x->nid;
+  if constexpr (!Inspector::is_loading) {
+    if (x) {
+      aid = x->aid;
+      nid = x->nid;
+    }
   }
-  auto load = [&] { return load_actor(x, context_of(&f), aid, nid); };
-  auto save = [&] { return save_actor(x, context_of(&f), aid, nid); };
-  return f(meta::type_name("actor"), aid, meta::omittable_if_none(), nid,
-           meta::load_callback(load), meta::save_callback(save));
+  auto load_cb = [&] { return load_actor(x, context_of(&f), aid, nid); };
+  auto save_cb = [&] { return save_actor(x, context_of(&f), aid, nid); };
+  return f.object(x)
+    .pretty_name("actor")
+    .on_load(load_cb)
+    .on_save(save_cb)
+    .fields(f.field("id", aid), f.field("node", nid));
 }
 
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, weak_actor_ptr& x) {
-  // inspect as strong pointer, then write back to weak pointer on save
-  auto tmp = x.lock();
-  auto load = [&] { x.reset(tmp.get()); };
-  return f(tmp, meta::load_callback(load));
+bool inspect(Inspector& f, weak_actor_ptr& x) {
+  // Inspect as strong pointer, then write back to weak pointer on save.
+  if constexpr (Inspector::is_loading) {
+    strong_actor_ptr tmp;
+    if (inspect(f, tmp)) {
+      x.reset(tmp.get());
+      return true;
+    }
+    return false;
+  } else {
+    auto tmp = x.lock();
+    return inspect(f, tmp);
+  }
 }
 
 } // namespace caf
@@ -239,14 +228,14 @@ namespace std {
 
 template <>
 struct hash<caf::strong_actor_ptr> {
-  inline size_t operator()(const caf::strong_actor_ptr& ptr) const {
+  size_t operator()(const caf::strong_actor_ptr& ptr) const {
     return ptr ? static_cast<size_t>(ptr->id()) : 0;
   }
 };
 
 template <>
 struct hash<caf::weak_actor_ptr> {
-  inline size_t operator()(const caf::weak_actor_ptr& ptr) const {
+  size_t operator()(const caf::weak_actor_ptr& ptr) const {
     return ptr ? static_cast<size_t>(ptr->id()) : 0;
   }
 };

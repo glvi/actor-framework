@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/downstream_manager.hpp"
 
@@ -41,7 +27,7 @@ downstream_manager::downstream_manager::path_predicate::~path_predicate() {
 
 downstream_manager::downstream_manager(stream_manager* parent)
     : parent_(parent) {
-  // nop
+  last_send_ = parent->self()->now();
 }
 
 downstream_manager::~downstream_manager() {
@@ -60,6 +46,13 @@ stream_manager* downstream_manager::parent() const noexcept {
 
 bool downstream_manager::terminal() const noexcept {
   return true;
+}
+
+// -- time management ----------------------------------------------------------
+
+void downstream_manager::tick(time_point now, timespan max_batch_delay) {
+  if (now >= last_send_ + max_batch_delay && buffered() > 0)
+    force_emit_batches();
 }
 
 // -- path management ----------------------------------------------------------
@@ -197,10 +190,6 @@ size_t downstream_manager::buffered() const noexcept {
 
 size_t downstream_manager::buffered(stream_slot) const noexcept {
   return 0;
-}
-
-int32_t downstream_manager::max_capacity() const noexcept {
-  return std::numeric_limits<int32_t>::max();
 }
 
 bool downstream_manager::stalled() const noexcept {

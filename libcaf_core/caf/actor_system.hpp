@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -26,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <typeinfo>
 
 #include "caf/abstract_actor.hpp"
@@ -35,9 +22,10 @@
 #include "caf/actor_profiler.hpp"
 #include "caf/actor_registry.hpp"
 #include "caf/actor_traits.hpp"
-#include "caf/composable_behavior_based_actor.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/init_fun_factory.hpp"
+#include "caf/detail/private_thread_pool.hpp"
+#include "caf/detail/set_thread_name.hpp"
 #include "caf/detail/spawn_fwd.hpp"
 #include "caf/detail/spawnable.hpp"
 #include "caf/fwd.hpp"
@@ -47,72 +35,55 @@
 #include "caf/logger.hpp"
 #include "caf/make_actor.hpp"
 #include "caf/prohibit_top_level_spawn_marker.hpp"
-#include "caf/runtime_settings_map.hpp"
 #include "caf/scoped_execution_unit.hpp"
 #include "caf/spawn_options.hpp"
 #include "caf/string_algorithms.hpp"
-#include "caf/uniform_type_info_map.hpp"
+#include "caf/telemetry/metric_registry.hpp"
+#include "caf/type_id.hpp"
 
-namespace caf {
+namespace caf::detail {
 
-template <class T>
-struct mpi_field_access {
-  std::string operator()(const uniform_type_info_map& types) {
-    auto result = types.portable_name(type_nr<T>::value, &typeid(T));
-    if (result == types.default_type_name()) {
-      result = "<invalid-type[typeid ";
-      result += typeid(T).name();
-      result += "]>";
-    }
-    return result;
-  }
-};
-
-template <atom_value X>
-struct mpi_field_access<atom_constant<X>> {
-  std::string operator()(const uniform_type_info_map&) {
-    return to_string(X);
-  }
-};
-
-template <>
-struct mpi_field_access<void> {
-  std::string operator()(const uniform_type_info_map&) {
-    return "void";
-  }
-};
-
-template <class T>
-std::string get_mpi_field(const uniform_type_info_map& types) {
-  mpi_field_access<T> f;
-  return f(types);
-}
-
-template <class T>
+template <class>
 struct typed_mpi_access;
 
-template <class... Is, class... Ls>
-struct typed_mpi_access<
-  typed_mpi<detail::type_list<Is...>, output_tuple<Ls...>>> {
-  std::string operator()(const uniform_type_info_map& types) const {
-    static_assert(sizeof...(Is) > 0, "typed MPI without inputs");
-    static_assert(sizeof...(Ls) > 0, "typed MPI without outputs");
-    std::vector<std::string> inputs{get_mpi_field<Is>(types)...};
-    std::vector<std::string> outputs1{get_mpi_field<Ls>(types)...};
-    std::string result = "caf::replies_to<";
+template <class Out, class... In>
+struct typed_mpi_access<Out(In...)> {
+  std::string operator()() const {
+    static_assert(sizeof...(In) > 0, "typed MPI without inputs");
+    std::vector<std::string> inputs{type_name_v<In>...};
+    std::string result = "(";
     result += join(inputs, ",");
-    result += ">::with<";
+    result += ") -> ";
+    result += type_name_v<Out>;
+    return result;
+  }
+};
+
+template <class... Out, class... In>
+struct typed_mpi_access<result<Out...>(In...)> {
+  std::string operator()() const {
+    static_assert(sizeof...(In) > 0, "typed MPI without inputs");
+    static_assert(sizeof...(Out) > 0, "typed MPI without outputs");
+    std::vector<std::string> inputs{to_string(type_name_v<In>)...};
+    std::vector<std::string> outputs1{to_string(type_name_v<Out>)...};
+    std::string result = "(";
+    result += join(inputs, ",");
+    result += ") -> (";
     result += join(outputs1, ",");
-    result += ">";
+    result += ")";
     return result;
   }
 };
 
 template <class T>
-std::string get_rtti_from_mpi(const uniform_type_info_map& types) {
+std::string get_rtti_from_mpi() {
   typed_mpi_access<T> f;
-  return f(types);
+  return f();
 }
+
+} // namespace caf::detail
+
+namespace caf {
 
 /// Actor environment including scheduler, registry, and optional components
 /// such as a middleman.
@@ -123,24 +94,15 @@ public:
   friend class net::middleman;
   friend class abstract_actor;
 
-  /// The number of actors implicitly spawned by the actor system on startup.
-  static constexpr size_t num_internal_actors = 2;
-
-  /// Returns the ID of an internal actor by its name.
-  /// @pre x in {'SpawnServ', 'ConfigServ', 'StreamServ'}
-  static constexpr size_t internal_actor_id(atom_value x) {
-    return x == atom("SpawnServ") ? 0 : (x == atom("ConfigServ") ? 1 : 2);
-  }
-
   /// Returns the internal actor for dynamic spawn operations.
   const strong_actor_ptr& spawn_serv() const {
-    return internal_actors_[internal_actor_id(atom("SpawnServ"))];
+    return spawn_serv_;
   }
 
   /// Returns the internal actor for storing the runtime configuration
   /// for this actor system.
   const strong_actor_ptr& config_serv() const {
-    return internal_actors_[internal_actor_id(atom("ConfigServ"))];
+    return config_serv_;
   }
 
   actor_system() = delete;
@@ -184,6 +146,77 @@ public:
 
   using module_array = std::array<module_ptr, module::num_ids>;
 
+  /// An (optional) component of the actor system with networking capabilities.
+  class CAF_CORE_EXPORT networking_module : public module {
+  public:
+    ~networking_module() override;
+
+    /// Causes the module to send a `node_down_msg` to `observer` if this system
+    /// loses connection to `node`.
+    virtual void monitor(const node_id& node, const actor_addr& observer) = 0;
+
+    /// Causes the module remove one entry for `observer` from the list of
+    /// actors that receive a `node_down_msg` if this system loses connection to
+    /// `node`. Each call to `monitor` requires one call to `demonitor` in order
+    /// to unsubscribe the `observer` completely.
+    virtual void demonitor(const node_id& node, const actor_addr& observer) = 0;
+  };
+
+  /// Metrics that the actor system collects by default.
+  /// @warning Do not modify these metrics in user code. Some may be used by the
+  ///          system for synchronization.
+  struct base_metrics_t {
+    /// Counts the number of messages that where rejected because the target
+    /// mailbox was closed or did not exist.
+    telemetry::int_counter* rejected_messages;
+
+    /// Counts the total number of processed messages.
+    telemetry::int_counter* processed_messages;
+
+    /// Tracks the current number of running actors in the system.
+    telemetry::int_gauge* running_actors;
+
+    /// Counts the total number of messages that wait in a mailbox.
+    telemetry::int_gauge* queued_messages;
+  };
+
+  /// Metrics that some actors may collect in addition to the base metrics. All
+  /// families in this set use the label dimension *name* (the user-defined name
+  /// of the actor).
+  struct actor_metric_families_t {
+    /// Samples how long the actor needs to process messages.
+    telemetry::dbl_histogram_family* processing_time = nullptr;
+
+    /// Samples how long a message waits in the mailbox before the actor
+    /// processes it.
+    telemetry::dbl_histogram_family* mailbox_time = nullptr;
+
+    /// Counts how many messages are currently waiting in the mailbox.
+    telemetry::int_gauge_family* mailbox_size = nullptr;
+
+    struct {
+      // -- inbound ------------------------------------------------------------
+
+      /// Counts the total number of processed stream elements from upstream.
+      telemetry::int_counter_family* processed_elements = nullptr;
+
+      /// Tracks how many stream elements from upstream are currently buffered.
+      telemetry::int_gauge_family* input_buffer_size = nullptr;
+
+      // -- outbound -----------------------------------------------------------
+
+      /// Counts the total number of elements that have been pushed downstream.
+      telemetry::int_counter_family* pushed_elements = nullptr;
+
+      /// Tracks how many stream elements are currently waiting in the output
+      /// buffer due to insufficient credit.
+      telemetry::int_gauge_family* output_buffer_size = nullptr;
+    }
+
+    /// Wraps streaming-related actor metric families.
+    stream;
+  };
+
   /// @warning The system stores a reference to `cfg`, which means the
   ///          config object must outlive the actor system.
   explicit actor_system(actor_system_config& cfg);
@@ -202,7 +235,7 @@ public:
   template <class... Ts>
   mpi message_types(detail::type_list<typed_actor<Ts...>>) const {
     static_assert(sizeof...(Ts) > 0, "empty typed actor handle given");
-    mpi result{get_rtti_from_mpi<Ts>(types())...};
+    mpi result{detail::get_rtti_from_mpi<Ts>()...};
     return result;
   }
 
@@ -241,8 +274,20 @@ public:
     return assignable(xs, message_types<T>());
   }
 
+  /// Returns the metrics registry for this system.
+  telemetry::metric_registry& metrics() noexcept {
+    return metrics_;
+  }
+
+  /// Returns the metrics registry for this system.
+  const telemetry::metric_registry& metrics() const noexcept {
+    return metrics_;
+  }
+
   /// Returns the host-local identifier for this system.
-  const node_id& node() const;
+  const node_id& node() const {
+    return node_;
+  }
 
   /// Returns the scheduler instance.
   scheduler::abstract_coordinator& scheduler();
@@ -252,12 +297,6 @@ public:
 
   /// Returns the system-wide actor registry.
   actor_registry& registry();
-
-  /// Returns the system-wide factory for custom types and actors.
-  const uniform_type_info_map& types() const;
-
-  /// Returns a string representation for `err`.
-  std::string render(const error& x) const;
 
   /// Returns the system-wide group manager.
   group_manager& groups();
@@ -296,6 +335,17 @@ public:
   /// Blocks this caller until all actors are done.
   void await_all_actors_done() const;
 
+  /// Send a `node_down_msg` to `observer` if this system loses connection to
+  /// `node`.
+  /// @note Calling this function *n* times causes the system to send
+  ///       `node_down_msg` *n* times to the observer. In order to not receive
+  ///       the messages, the observer must call `demonitor` *n* times.
+  void monitor(const node_id& node, const actor_addr& observer);
+
+  /// Removes `observer` from the list of actors that receive a `node_down_msg`
+  /// if this system loses connection to `node`.
+  void demonitor(const node_id& node, const actor_addr& observer);
+
   /// Called by `spawn` when used to create a class-based actor to
   /// apply automatic conversions to `xs` before spawning the actor.
   /// Should not be called by users of the library directly.
@@ -315,11 +365,6 @@ public:
     check_invariants<C>();
     actor_config cfg;
     return spawn_impl<C, Os>(cfg, detail::spawn_fwd<Ts>(xs)...);
-  }
-
-  template <class S, spawn_options Os = no_spawn_options>
-  infer_handle_from_state_t<S> spawn() {
-    return spawn<composable_behavior_based_actor<S>, Os>();
   }
 
   /// Called by `spawn` when used to create a functor-based actor to select a
@@ -398,9 +443,9 @@ public:
   /// range `[first, last)`.
   /// @private
   template <spawn_options Os, class Iter, class F, class... Ts>
-  infer_handle_from_fun_t<F>
-  spawn_fun_in_groups(actor_config& cfg, Iter first, Iter second, F& fun,
-                      Ts&&... xs) {
+  infer_handle_from_fun_t<F> spawn_fun_in_groups(actor_config& cfg, Iter first,
+                                                 Iter second, F& fun,
+                                                 Ts&&... xs) {
     using impl = infer_impl_from_fun_t<F>;
     check_invariants<impl>();
     using traits = actor_traits<impl>;
@@ -483,31 +528,10 @@ public:
   /// Returns the system-wide clock.
   actor_clock& clock() noexcept;
 
-  /// Returns application-specific, system-wide runtime settings.
-  runtime_settings_map& runtime_settings() {
-    return settings_;
-  }
-
-  /// Returns application-specific, system-wide runtime settings.
-  const runtime_settings_map& runtime_settings() const {
-    return settings_;
-  }
-
   /// Returns the number of detached actors.
-  size_t detached_actors() {
-    return detached_.load();
-  }
+  size_t detached_actors() const noexcept;
 
   /// @cond PRIVATE
-
-  /// Increases running-detached-threads-count by one.
-  void inc_detached_threads();
-
-  /// Decreases running-detached-threads-count by one.
-  void dec_detached_threads();
-
-  /// Blocks the caller until all detached threads are done.
-  void await_detached_threads();
 
   /// Calls all thread started hooks
   /// @warning must be called by thread which is about to start
@@ -517,14 +541,38 @@ public:
   /// @warning must be called by thread which is about to terminate
   void thread_terminates();
 
+  template <class F>
+  std::thread launch_thread(const char* thread_name, F fun) {
+    auto body = [this, thread_name, f{std::move(fun)}](auto guard) {
+      CAF_IGNORE_UNUSED(guard);
+      CAF_SET_LOGGER_SYS(this);
+      detail::set_thread_name(thread_name);
+      thread_started();
+      f();
+      thread_terminates();
+    };
+    return std::thread{std::move(body), meta_objects_guard_};
+  }
+
+  auto meta_objects_guard() const noexcept {
+    return meta_objects_guard_;
+  }
+
+  const auto& metrics_actors_includes() const noexcept {
+    return metrics_actors_includes_;
+  }
+
+  const auto& metrics_actors_excludes() const noexcept {
+    return metrics_actors_excludes_;
+  }
+
   template <class C, spawn_options Os, class... Ts>
   infer_handle_from_class_t<C> spawn_impl(actor_config& cfg, Ts&&... xs) {
     static_assert(is_unbound(Os),
                   "top-level spawns cannot have monitor or link flag");
-    // TODO: use `if constexpr` when switching to C++17
-    if (has_detach_flag(Os) || std::is_base_of<blocking_actor, C>::value)
+    if constexpr (has_detach_flag(Os) || std::is_base_of_v<blocking_actor, C>)
       cfg.flags |= abstract_actor::is_detached_flag;
-    if (has_hide_flag(Os))
+    if constexpr (has_hide_flag(Os))
       cfg.flags |= abstract_actor::is_hidden_flag;
     if (cfg.host == nullptr)
       cfg.host = dummy_execution_unit();
@@ -561,8 +609,8 @@ public:
       profiler_->after_processing(self, result);
   }
 
-  void
-  profiler_before_sending(const local_actor& self, mailbox_element& element) {
+  void profiler_before_sending(const local_actor& self,
+                               mailbox_element& element) {
     if (profiler_)
       profiler_->before_sending(self, element);
   }
@@ -574,9 +622,25 @@ public:
       profiler_->before_sending_scheduled(self, timeout, element);
   }
 
+  base_metrics_t& base_metrics() noexcept {
+    return base_metrics_;
+  }
+
+  const auto& base_metrics() const noexcept {
+    return base_metrics_;
+  }
+
+  const auto& actor_metric_families() const noexcept {
+    return actor_metric_families_;
+  }
+
   tracing_data_factory* tracing_context() const noexcept {
     return tracing_context_;
   }
+
+  detail::private_thread* acquire_private_thread();
+
+  void release_private_thread(detail::private_thread*);
 
   /// @endcond
 
@@ -594,12 +658,12 @@ private:
 
   /// Sets the internal actor for dynamic spawn operations.
   void spawn_serv(strong_actor_ptr x) {
-    internal_actors_[internal_actor_id(atom("SpawnServ"))] = std::move(x);
+    spawn_serv_ = std::move(x);
   }
 
   /// Sets the internal actor for storing the runtime configuration.
   void config_serv(strong_actor_ptr x) {
-    internal_actors_[internal_actor_id(atom("ConfigServ"))] = std::move(x);
+    config_serv_ = std::move(x);
   }
 
   // -- member variables -------------------------------------------------------
@@ -610,8 +674,11 @@ private:
   /// Used to generate ascending actor IDs.
   std::atomic<size_t> ids_;
 
-  /// Stores runtime type information for builtin and user-defined types.
-  uniform_type_info_map types_;
+  /// Manages all metrics collected by the system.
+  telemetry::metric_registry metrics_;
+
+  /// Stores all metrics that the actor system collects by default.
+  base_metrics_t base_metrics_;
 
   /// Identifies this actor system in a distributed setting.
   node_id node_;
@@ -634,17 +701,11 @@ private:
   /// Stores whether the system should wait for running actors on shutdown.
   bool await_actors_before_shutdown_;
 
-  /// Stores SpawnServ, ConfigServ, and StreamServ.
-  std::array<strong_actor_ptr, num_internal_actors> internal_actors_;
+  /// Stores config parameters.
+  strong_actor_ptr config_serv_;
 
-  /// Counts the number of detached actors.
-  std::atomic<size_t> detached_;
-
-  /// Guards `detached`.
-  mutable std::mutex detached_mtx_;
-
-  /// Allows waiting on specific values for `detached`.
-  mutable std::condition_variable detached_cv_;
+  /// Allows fully dynamic spawning of actors.
+  strong_actor_ptr spawn_serv_;
 
   /// The system-wide, user-provided configuration.
   actor_system_config& cfg_;
@@ -659,11 +720,25 @@ private:
   /// Allows waiting on specific values for `logger_dtor_done_`.
   mutable std::condition_variable logger_dtor_cv_;
 
-  /// Stores custom, system-wide key-value pairs.
-  runtime_settings_map settings_;
-
   /// Stores the system-wide factory for deserializing tracing data.
   tracing_data_factory* tracing_context_;
+
+  /// Caches the configuration parameter `caf.metrics-filters.actors.includes`
+  /// for faster lookups at runtime.
+  std::vector<std::string> metrics_actors_includes_;
+
+  /// Caches the configuration parameter `caf.metrics-filters.actors.excludes`
+  /// for faster lookups at runtime.
+  std::vector<std::string> metrics_actors_excludes_;
+
+  /// Caches families for optional actor metrics.
+  actor_metric_families_t actor_metric_families_;
+
+  /// Manages threads for detached actors.
+  detail::private_thread_pool private_threads_;
+
+  /// Ties the lifetime of the meta objects table to the actor system.
+  detail::global_meta_objects_guard_type meta_objects_guard_;
 };
 
 } // namespace caf

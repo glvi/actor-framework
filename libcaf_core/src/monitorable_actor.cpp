@@ -1,30 +1,17 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/monitorable_actor.hpp"
 
-#include "caf/sec.hpp"
-#include "caf/logger.hpp"
 #include "caf/actor_cast.hpp"
 #include "caf/actor_system.hpp"
-#include "caf/message_handler.hpp"
-#include "caf/system_messages.hpp"
 #include "caf/default_attachable.hpp"
+#include "caf/logger.hpp"
+#include "caf/message_handler.hpp"
+#include "caf/sec.hpp"
+#include "caf/system_messages.hpp"
+#include "caf/typed_message_view.hpp"
 
 #include "caf/detail/sync_request_bouncer.hpp"
 
@@ -33,7 +20,7 @@
 namespace caf {
 
 const char* monitorable_actor::name() const {
-  return "monitorable_actor";
+  return "user.monitorable-actor";
 }
 
 void monitorable_actor::attach(attachable_ptr ptr) {
@@ -49,7 +36,8 @@ void monitorable_actor::attach(attachable_ptr ptr) {
     return true;
   });
   if (!attached) {
-    CAF_LOG_DEBUG("cannot attach functor to terminated actor: call immediately");
+    CAF_LOG_DEBUG(
+      "cannot attach functor to terminated actor: call immediately");
     ptr->actor_exited(fail_state, nullptr);
   }
 }
@@ -61,15 +49,15 @@ size_t monitorable_actor::detach(const attachable::token& what) {
 }
 
 void monitorable_actor::unlink_from(const actor_addr& x) {
+  CAF_LOG_TRACE(CAF_ARG(x));
+  CAF_ASSERT(x != nullptr);
   auto ptr = actor_cast<strong_actor_ptr>(x);
   if (ptr != nullptr) {
     if (ptr->get() != this)
       remove_link(ptr->get());
   } else {
     default_attachable::observe_token tk{x, default_attachable::link};
-    exclusive_critical_section([&] {
-      detach_impl(tk, true);
-    });
+    exclusive_critical_section([&] { detach_impl(tk, true); });
   }
 }
 
@@ -90,8 +78,8 @@ bool monitorable_actor::cleanup(error&& reason, execution_unit* host) {
   });
   if (!set_fail_state)
     return false;
-  CAF_LOG_DEBUG("cleanup" << CAF_ARG(id())
-                << CAF_ARG(node()) << CAF_ARG(fail_state_));
+  CAF_LOG_DEBUG("cleanup" << CAF_ARG(id()) << CAF_ARG(node())
+                          << CAF_ARG(fail_state_));
   // send exit messages
   for (attachable* i = head.get(); i != nullptr; i = i->next.get())
     i->actor_exited(fail_state_, host);
@@ -99,7 +87,7 @@ bool monitorable_actor::cleanup(error&& reason, execution_unit* host) {
   if (getf(abstract_actor::has_used_aout_flag)) {
     auto pr = home_system().scheduler().printer();
     pr->enqueue(make_mailbox_element(nullptr, make_message_id(), {},
-                                      delete_atom::value, id()),
+                                     delete_atom_v, id()),
                 nullptr);
   }
   return true;
@@ -111,9 +99,7 @@ void monitorable_actor::on_cleanup(const error&) {
 
 void monitorable_actor::bounce(mailbox_element_ptr& what) {
   error err;
-  shared_critical_section([&] {
-    err = fail_state_;
-  });
+  shared_critical_section([&] { err = fail_state_; });
   bounce(what, err);
 }
 
@@ -146,7 +132,7 @@ void monitorable_actor::add_link(abstract_actor* x) {
   });
   if (send_exit_immediately)
     x->enqueue(nullptr, make_message_id(),
-                 make_message(exit_msg{address(), fail_state}), nullptr);
+               make_message(exit_msg{address(), fail_state}), nullptr);
 }
 
 void monitorable_actor::remove_link(abstract_actor* x) {
@@ -164,8 +150,7 @@ bool monitorable_actor::add_backlink(abstract_actor* x) {
   CAF_ASSERT(x);
   error fail_state;
   bool send_exit_immediately = false;
-  default_attachable::observe_token tk{x->address(),
-                                       default_attachable::link};
+  default_attachable::observe_token tk{x->address(), default_attachable::link};
   auto tmp = default_attachable::make_link(address(), x->address());
   auto success = false;
   if (getf(is_terminated_flag)) {
@@ -222,35 +207,38 @@ bool monitorable_actor::handle_system_message(mailbox_element& x,
                                               execution_unit* ctx,
                                               bool trap_exit) {
   auto& msg = x.content();
-  if (!trap_exit && msg.size() == 1 && msg.match_element<exit_msg>(0)) {
-    // exits for non-normal exit reasons
-    auto& em = msg.get_mutable_as<exit_msg>(0);
-    if (em.reason)
-      cleanup(std::move(em.reason), ctx);
-    return true;
+  if (!trap_exit) {
+    if (auto view = make_typed_message_view<exit_msg>(msg)) {
+      // exits for non-normal exit reasons
+      auto& em = get<0>(view);
+      if (em.reason)
+        cleanup(std::move(em.reason), ctx);
+      return true;
+    }
   }
   if (msg.size() > 1 && msg.match_element<sys_atom>(0)) {
     if (!x.sender)
       return true;
     error err;
     mailbox_element_ptr res;
-    msg.apply(
+    message_handler f{
       [&](sys_atom, get_atom, std::string& what) {
         CAF_LOG_TRACE(CAF_ARG(what));
         if (what != "info") {
           err = sec::unsupported_sys_key;
           return;
         }
-        res = make_mailbox_element(ctrl(), x.mid.response_id(), {},
-                                    ok_atom::value, std::move(what),
-                                    strong_actor_ptr{ctrl()}, name());
-      }
-    );
+        res = make_mailbox_element(ctrl(), x.mid.response_id(), {}, ok_atom_v,
+                                   std::move(what), strong_actor_ptr{ctrl()},
+                                   name());
+      },
+    };
+    f(msg);
     if (!res && !err)
       err = sec::unsupported_sys_message;
     if (err && x.mid.is_request())
-      res = make_mailbox_element(ctrl(), x.mid.response_id(),
-                                  {}, std::move(err));
+      res = make_mailbox_element(ctrl(), x.mid.response_id(), {},
+                                 std::move(err));
     if (res) {
       auto s = actor_cast<strong_actor_ptr>(x.sender);
       if (s)

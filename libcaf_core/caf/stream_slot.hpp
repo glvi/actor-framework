@@ -1,26 +1,13 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <cstdint>
 
 #include "caf/detail/comparable.hpp"
+#include "caf/fwd.hpp"
 
 namespace caf {
 
@@ -55,7 +42,7 @@ struct stream_slots : detail::comparable<stream_slots> {
     return {receiver, sender};
   }
 
-  inline long compare(stream_slots other) const noexcept {
+  long compare(stream_slots other) const noexcept {
     static_assert(sizeof(long) >= sizeof(int32_t),
                   "sizeof(long) < sizeof(int32_t)");
     long x = (sender << 16) | receiver;
@@ -149,9 +136,8 @@ public:
   // -- serialization ----------------------------------------------------------
 
   template <class Inspector>
-  friend typename Inspector::result_type
-  inspect(Inspector& f, outbound_stream_slot& x) {
-    return f(x.value_);
+  friend bool inspect(Inspector& f, outbound_stream_slot& x) {
+    return f.object(x).fields(f.field("value_", x.value_));
   }
 
 private:
@@ -160,8 +146,9 @@ private:
 
 /// @relates stream_slots
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, stream_slots& x) {
-  return f(x.sender, x.receiver);
+bool inspect(Inspector& f, stream_slots& x) {
+  return f.object(x).fields(f.field("sender", x.sender),
+                            f.field("receiver", x.receiver));
 }
 
 } // namespace caf

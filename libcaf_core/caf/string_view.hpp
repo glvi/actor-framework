@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -23,6 +9,7 @@
 #include <iosfwd>
 #include <iterator>
 #include <limits>
+#include <string>
 #include <type_traits>
 
 #include "caf/detail/comparable.hpp"
@@ -40,16 +27,15 @@ struct is_string_like {
   template <class U>
   static bool sfinae(
     const U* x,
-    // check if `(*x)[0]` returns `const char&`
-    typename std::enable_if<
-      std::is_same<const char&, decltype((*x)[0])>::value>::type* = nullptr,
+    // check if `x->data()` returns  const char*
+    std::enable_if_t<
+      std::is_same<const char*, decltype(x->data())>::value>* = nullptr,
     // check if `x->size()` returns an integer
-    typename std::enable_if<
-      std::is_integral<decltype(x->size())>::value>::type* = nullptr,
+    std::enable_if_t<std::is_integral<decltype(x->size())>::value>* = nullptr,
     // check if `x->find('?', 0)` is well-formed and returns an integer
     // (distinguishes vectors from strings)
-    typename std::enable_if<
-      std::is_integral<decltype(x->find('?', 0))>::value>::type* = nullptr);
+    std::enable_if_t<
+      std::is_integral<decltype(x->find('?', 0))>::value>* = nullptr);
 
   // SFINAE fallback.
   static void sfinae(void*);
@@ -96,6 +82,11 @@ public:
     // nop
   }
 
+  constexpr string_view(iterator first, iterator last) noexcept
+    : data_(first), size_(static_cast<size_t>(last - first)) {
+    // nop
+  }
+
 #ifdef CAF_GCC
   constexpr string_view(const char* cstr) noexcept
     : data_(cstr), size_(strlen(cstr)) {
@@ -113,15 +104,9 @@ public:
 
   template <class T, class = typename std::enable_if<
                        detail::is_string_like<T>::value>::type>
-  string_view(const T& str) noexcept {
-    auto len = str.size();
-    if (len == 0) {
-      data_ = nullptr;
-      size_ = 0;
-    } else {
-      data_ = &(str[0]);
-      size_ = str.size();
-    }
+  constexpr string_view(const T& str) noexcept
+    : data_(str.data()), size_(str.size()) {
+    // nop
   }
 
   string_view& operator=(const string_view&) noexcept = default;
@@ -281,7 +266,20 @@ private:
   size_t size_;
 };
 
+/// @relates string_view
+inline std::string to_string(string_view x) {
+  return std::string{x.begin(), x.end()};
+}
+
 } // namespace caf
+
+namespace caf::literals {
+
+constexpr string_view operator""_sv(const char* cstr, size_t len) {
+  return {cstr, len};
+}
+
+} // namespace caf::literals
 
 namespace std {
 

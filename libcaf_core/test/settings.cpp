@@ -1,41 +1,25 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE settings
 
 #include "caf/settings.hpp"
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
 
 #include <string>
 
-#include "caf/atom.hpp"
+#include "caf/detail/config_consumer.hpp"
+#include "caf/detail/parser/read_config.hpp"
 #include "caf/none.hpp"
 #include "caf/optional.hpp"
+
+using namespace std::string_literals;
 
 using namespace caf;
 
 namespace {
-
-// TODO: switch to std::operator""s when switching to C++14
-std::string operator"" _s(const char* str, size_t size) {
-  return std::string(str, size);
-}
 
 struct fixture {
   settings x;
@@ -44,10 +28,10 @@ struct fixture {
     x["hello"] = "world";
     x["one"].as_dictionary()["two"].as_dictionary()["three"] = 4;
     auto& logger = x["logger"].as_dictionary();
-    logger["component-blacklist"] = make_config_value_list(atom("caf"));
-    logger["console"] = atom("none");
+    logger["component-blacklist"] = make_config_value_list("caf");
+    logger["console"] = "none";
     logger["console-format"] = "%m";
-    logger["console-verbosity"] = atom("trace");
+    logger["console-verbosity"] = "trace";
     logger["file-format"] = "%r %c %p %a %t %C %M %F:%L %m%n";
     logger["inline-output"] = false;
     auto& middleman = x["middleman"].as_dictionary();
@@ -63,23 +47,22 @@ struct fixture {
   }
 };
 
-const config_value& unpack(const settings& x, string_view key) {
-  auto i = x.find(key);
-  if (i == x.end())
-    CAF_FAIL("key not found in dictionary: " << key);
-  return i->second;
+config_value unpack(const settings& x, string_view key) {
+  if (auto i = x.find(key); i != x.end())
+    return i->second;
+  else
+    return {};
 }
 
 template <class... Ts>
-const config_value& unpack(const settings& x, string_view key,
-                           const char* next_key, Ts... keys) {
-  auto i = x.find(key);
-  if (i == x.end())
-    CAF_FAIL("key not found in dictionary: " << key);
-  if (!holds_alternative<settings>(i->second))
-    CAF_FAIL("value is not a dictionary: " << key);
-  return unpack(get<settings>(i->second), {next_key, strlen(next_key)},
-                keys...);
+config_value
+unpack(const settings& x, string_view key, const char* next_key, Ts... keys) {
+  if (auto i = x.find(key); i == x.end())
+    return {};
+  else if (auto ptr = get_if<settings>(std::addressof(i->second)))
+    return unpack(*ptr, {next_key, strlen(next_key)}, keys...);
+  else
+    return {};
 }
 
 struct foobar {
@@ -87,129 +70,129 @@ struct foobar {
   int bar = 0;
 };
 
+template <class Inspector>
+bool inspect(Inspector& f, foobar& x) {
+  return f.object(x).fields(f.field("foo", x.foo), f.field("bar", x.bar));
+}
+
 } // namespace
 
-namespace caf {
-
-// Enable users to configure foobar's like this:
-// my-value {
-//   foo = 42
-//   bar = 23
-// }
-template <>
-struct config_value_access<foobar> {
-  static bool is(const config_value& x) {
-    auto dict = caf::get_if<config_value::dictionary>(&x);
-    if (dict != nullptr) {
-      return caf::get_if<int>(dict, "foo") != none
-             && caf::get_if<int>(dict, "bar") != none;
-    }
-    return false;
-  }
-
-  static optional<foobar> get_if(const config_value* x) {
-    foobar result;
-    if (!is(*x))
-      return none;
-    const auto& dict = caf::get<config_value::dictionary>(*x);
-    result.foo = caf::get<int>(dict, "foo");
-    result.bar = caf::get<int>(dict, "bar");
-    return result;
-  }
-
-  static foobar get(const config_value& x) {
-    auto result = get_if(&x);
-    if (!result)
-      CAF_RAISE_ERROR("invalid type found");
-    return std::move(*result);
-  }
-};
-
-} // namespace caf
-
-CAF_TEST_FIXTURE_SCOPE(settings_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(put) {
   put(x, "foo", "bar");
-  put(x, "logger.console", atom("none"));
+  put(x, "logger.console", "none");
   put(x, "one.two.three", "four");
-  CAF_CHECK_EQUAL(x.size(), 3u);
-  CAF_CHECK(x.contains("foo"));
-  CAF_CHECK(x.contains("logger"));
-  CAF_CHECK(x.contains("one"));
-  CAF_CHECK_EQUAL(unpack(x, "foo"), "bar"_s);
-  CAF_CHECK_EQUAL(unpack(x, "logger", "console"), atom("none"));
-  CAF_CHECK_EQUAL(unpack(x, "one", "two", "three"), "four"_s);
-  put(x, "logger.console", atom("trace"));
-  CAF_CHECK_EQUAL(unpack(x, "logger", "console"), atom("trace"));
+  CHECK_EQ(x.size(), 3u);
+  CHECK(x.contains("foo"));
+  CHECK(x.contains("logger"));
+  CHECK(x.contains("one"));
+  CHECK_EQ(unpack(x, "foo"), config_value{"bar"s});
+  CHECK_EQ(unpack(x, "logger", "console"), config_value{"none"s});
+  CHECK_EQ(unpack(x, "one", "two", "three"), config_value{"four"s});
+  put(x, "logger.console", "trace");
+  CHECK_EQ(unpack(x, "logger", "console"), config_value{"trace"s});
 }
 
 CAF_TEST(put missing) {
   put_missing(x, "foo", "bar");
-  put_missing(x, "logger.console", atom("none"));
+  put_missing(x, "logger.console", "none");
   put_missing(x, "one.two.three", "four");
-  CAF_CHECK_EQUAL(x.size(), 3u);
-  CAF_CHECK(x.contains("foo"));
-  CAF_CHECK(x.contains("logger"));
-  CAF_CHECK(x.contains("one"));
-  CAF_CHECK_EQUAL(unpack(x, "foo"), "bar"_s);
-  CAF_CHECK_EQUAL(unpack(x, "logger", "console"), atom("none"));
-  CAF_CHECK_EQUAL(unpack(x, "one", "two", "three"), "four"_s);
-  put_missing(x, "logger.console", atom("trace"));
-  CAF_CHECK_EQUAL(unpack(x, "logger", "console"), atom("none"));
+  CHECK_EQ(x.size(), 3u);
+  CHECK(x.contains("foo"));
+  CHECK(x.contains("logger"));
+  CHECK(x.contains("one"));
+  CHECK_EQ(unpack(x, "foo"), config_value{"bar"s});
+  CHECK_EQ(unpack(x, "logger", "console"), config_value{"none"s});
+  CHECK_EQ(unpack(x, "one", "two", "three"), config_value{"four"s});
+  put_missing(x, "logger.console", "trace");
+  CHECK_EQ(unpack(x, "logger", "console"), config_value{"none"s});
 }
 
 CAF_TEST(put list) {
   put_list(x, "integers").emplace_back(42);
-  CAF_CHECK(x.contains("integers"));
-  CAF_CHECK_EQUAL(unpack(x, "integers"), make_config_value_list(42));
+  CHECK(x.contains("integers"));
+  CHECK_EQ(unpack(x, "integers"), make_config_value_list(42));
   put_list(x, "foo.bar").emplace_back("str");
-  CAF_CHECK_EQUAL(unpack(x, "foo", "bar"), make_config_value_list("str"));
+  CHECK_EQ(unpack(x, "foo", "bar"), make_config_value_list("str"));
   put_list(x, "one.two.three").emplace_back(4);
-  CAF_CHECK_EQUAL(unpack(x, "one", "two", "three"), make_config_value_list(4));
+  CHECK_EQ(unpack(x, "one", "two", "three"), make_config_value_list(4));
 }
 
 CAF_TEST(put dictionary) {
-  put_dictionary(x, "logger").emplace("console", atom("none"));
-  CAF_CHECK(x.contains("logger"));
-  CAF_CHECK_EQUAL(unpack(x, "logger", "console"), atom("none"));
+  put_dictionary(x, "logger").emplace("console", "none");
+  CHECK(x.contains("logger"));
+  CHECK_EQ(unpack(x, "logger", "console"), config_value{"none"s});
   put_dictionary(x, "foo.bar").emplace("value", 42);
-  CAF_CHECK_EQUAL(unpack(x, "foo", "bar", "value"), 42);
+  CHECK_EQ(unpack(x, "foo", "bar", "value"), config_value{42});
   put_dictionary(x, "one.two.three").emplace("four", "five");
-  CAF_CHECK_EQUAL(unpack(x, "one", "two", "three", "four"), "five"_s);
+  CHECK_EQ(unpack(x, "one", "two", "three", "four"), config_value{"five"s});
 }
 
 CAF_TEST(get and get_if) {
   fill();
-  CAF_CHECK(get_if(&x, "hello") != nullptr);
-  CAF_CHECK(get_if<atom_value>(&x, "hello") == none);
-  CAF_REQUIRE(get_if<std::string>(&x, "hello") != none);
-  CAF_CHECK(get<std::string>(x, "hello") == "world"_s);
-  CAF_CHECK(get_if(&x, "logger.console") != nullptr);
-  CAF_CHECK(get_if<std::string>(&x, "logger.console") == none);
-  CAF_REQUIRE(get_if<atom_value>(&x, "logger.console") != none);
-  CAF_CHECK(get<atom_value>(x, "logger.console") == atom("none"));
-  CAF_CHECK(get_if(&x, "one.two.three") != nullptr);
-  CAF_CHECK(get_if<std::string>(&x, "one.two.three") == none);
-  CAF_REQUIRE(get_if<int>(&x, "one.two.three") != none);
-  CAF_CHECK(get<int>(x, "one.two.three") == 4);
+  CHECK(get_if(&x, "hello") != nullptr);
+  CHECK(get<std::string>(x, "hello") == "world"s);
+  CHECK(get_if(&x, "logger.console") != nullptr);
+  CHECK(get_if<std::string>(&x, "logger.console") != nullptr);
+  CHECK(get<std::string>(x, "logger.console") == "none"s);
+  CHECK(get_if(&x, "one.two.three") != nullptr);
+  CHECK(get_if<std::string>(&x, "one.two.three") == nullptr);
+  if (CHECK(get_if<int64_t>(&x, "one.two.three") != nullptr))
+    CHECK(get<int64_t>(x, "one.two.three") == 4);
 }
 
 CAF_TEST(get_or) {
   fill();
-  CAF_CHECK_EQUAL(get_or(x, "hello", "nobody"), "world"_s);
-  CAF_CHECK_EQUAL(get_or(x, "hello", atom("nobody")), atom("nobody"));
-  CAF_CHECK_EQUAL(get_or(x, "goodbye", "nobody"), "nobody"_s);
+  CHECK_EQ(get_or(x, "hello", "nobody"), "world"s);
+  CHECK_EQ(get_or(x, "goodbye", "nobody"), "nobody"s);
 }
 
 CAF_TEST(custom type) {
   put(x, "my-value.foo", 42);
   put(x, "my-value.bar", 24);
-  CAF_REQUIRE(holds_alternative<foobar>(x, "my-value"));
-  CAF_REQUIRE(get_if<foobar>(&x, "my-value") != caf::none);
-  auto fb = get<foobar>(x, "my-value");
-  CAF_CHECK_EQUAL(fb.foo, 42);
-  CAF_CHECK_EQUAL(fb.bar, 24);
+  if (auto fb = get_as<foobar>(x, "my-value"); CHECK(fb)) {
+    CHECK_EQ(fb->foo, 42);
+    CHECK_EQ(fb->bar, 24);
+  }
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+CAF_TEST(read_config accepts the to_string output of settings) {
+  fill();
+  auto str = to_string(x);
+  settings y;
+  config_option_set dummy;
+  detail::config_consumer consumer{dummy, y};
+  string_view str_view = str;
+  string_parser_state res{str_view.begin(), str_view.end()};
+  detail::parser::read_config(res, consumer);
+  CHECK(res.i == res.e);
+  CHECK_EQ(res.code, pec::success);
+  CHECK_EQ(x, y);
+}
+
+SCENARIO("put_missing normalizes 'global' suffixes") {
+  GIVEN("empty settings") {
+    settings uut;
+    WHEN("calling put_missing with and without 'global' suffix") {
+      THEN("put_missing drops the 'global' suffix") {
+        put_missing(uut, "global.foo", "bar"s);
+        CHECK_EQ(get_as<std::string>(uut, "foo"), "bar"s);
+        CHECK_EQ(get_as<std::string>(uut, "global.foo"), "bar"s);
+      }
+    }
+  }
+  GIVEN("settings with a value for 'foo'") {
+    settings uut;
+    uut["foo"] = "bar"s;
+    WHEN("calling put_missing 'global.foo'") {
+      THEN("the function call results in a no-op") {
+        put_missing(uut, "global.foo", "baz"s);
+        CHECK_EQ(get_as<std::string>(uut, "foo"), "bar"s);
+        CHECK_EQ(get_as<std::string>(uut, "global.foo"), "bar"s);
+      }
+    }
+  }
+}
+
+END_FIXTURE_SCOPE()

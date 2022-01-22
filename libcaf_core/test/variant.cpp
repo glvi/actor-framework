@@ -1,48 +1,26 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
-
-#include "caf/config.hpp"
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE variant
-#include "caf/test/unit_test.hpp"
+
+#include "caf/variant.hpp"
+
+#include "core-test.hpp"
 
 #include <string>
 
 #include "caf/actor_system.hpp"
 #include "caf/actor_system_config.hpp"
-#include "caf/binary_deserializer.hpp"
-#include "caf/binary_serializer.hpp"
 #include "caf/byte_buffer.hpp"
 #include "caf/deep_to_string.hpp"
 #include "caf/none.hpp"
-#include "caf/variant.hpp"
 
-using namespace std;
+using namespace std::string_literals;
+
 using namespace caf;
 
-struct tostring_visitor : static_visitor<string> {
-  template <class T>
-  inline string operator()(const T& value) {
-    return to_string(value);
-  }
-};
-
-// 20 integer wrappers for building a variant with 20 distint types
+// 20 integer wrappers for building a variant with 20 distinct types
 #define i_n(n)                                                                 \
   class i##n {                                                                 \
   public:                                                                      \
@@ -70,8 +48,8 @@ struct tostring_visitor : static_visitor<string> {
     return x.x == y.x;                                                         \
   }                                                                            \
   template <class Inspector>                                                   \
-  typename Inspector::result_type inspect(Inspector& f, i##n& x) {             \
-    return f(meta::type_name(CAF_STR(i##n)), x.x);                             \
+  bool inspect(Inspector& f, i##n& x) {                                        \
+    return f.object(x).fields(f.field("x", x.x));                              \
   }
 
 #define macro_repeat20(macro)                                                  \
@@ -81,51 +59,38 @@ struct tostring_visitor : static_visitor<string> {
 
 macro_repeat20(i_n)
 
-// a variant with 20 element types
-using v20 = variant<i01, i02, i03, i04, i05, i06, i07, i08, i09, i10,
-                    i11, i12, i13, i14, i15, i16, i17, i18, i19, i20>;
+  // a variant with 20 element types
+  using v20 = variant<i01, i02, i03, i04, i05, i06, i07, i08, i09, i10, i11,
+                      i12, i13, i14, i15, i16, i17, i18, i19, i20>;
 
-#define announce_n(n) cfg.add_message_type<i##n>(CAF_STR(i##n));
+#define VARIANT_EQ(x, y)                                                       \
+  do {                                                                         \
+    using type = std::decay_t<decltype(y)>;                                    \
+    auto&& tmp = x;                                                            \
+    if (CHECK(holds_alternative<type>(tmp)))                                   \
+      CHECK_EQ(get<type>(tmp), y);                                             \
+  } while (false)
 
 #define v20_test(n)                                                            \
   x3 = i##n{0x##n};                                                            \
-  CAF_CHECK_EQUAL(deep_to_string(x3), CAF_STR(i##n) + std::string("(")         \
-                                        + std::to_string(0x##n) + ")");        \
-  CAF_CHECK_EQUAL(v20{x3}, i##n{0x##n});                                       \
+  VARIANT_EQ(v20{x3}, i##n{0x##n});                                            \
   x4 = x3;                                                                     \
-  CAF_CHECK_EQUAL(x4, i##n{0x##n});                                            \
-  CAF_CHECK_EQUAL(v20{std::move(x3)}, i##n{0x##n});                            \
-  CAF_CHECK_EQUAL(x3, i##n{0});                                                \
+  VARIANT_EQ(x4, i##n{0x##n});                                                 \
+  VARIANT_EQ(v20{std::move(x3)}, i##n{0x##n});                                 \
+  VARIANT_EQ(x3, i##n{0});                                                     \
   x3 = std::move(x4);                                                          \
-  CAF_CHECK_EQUAL(x4, i##n{0});                                                \
-  CAF_CHECK_EQUAL(x3, i##n{0x##n});                                            \
-  {                                                                            \
-    byte_buffer buf;                                                           \
-    binary_serializer sink{sys.dummy_execution_unit(), buf};                   \
-    if (auto err = sink(x3))                                                   \
-      CAF_FAIL("failed to serialize data: " << sys.render(err));               \
-    CAF_CHECK_EQUAL(x3, i##n{0x##n});                                          \
-    v20 tmp;                                                                   \
-    binary_deserializer source{sys.dummy_execution_unit(), buf};               \
-    if (auto err = source(tmp))                                                \
-      CAF_FAIL("failed to deserialize data: " << sys.render(err));             \
-    CAF_CHECK_EQUAL(tmp, i##n{0x##n});                                         \
-    CAF_CHECK_EQUAL(tmp, x3);                                                  \
-  }
+  VARIANT_EQ(x4, i##n{0});                                                     \
+  VARIANT_EQ(x3, i##n{0x##n});
 
 // copy construction, copy assign, move construction, move assign
 // and finally serialization round-trip
 CAF_TEST(copying_moving_roundtrips) {
   actor_system_config cfg;
-  macro_repeat20(announce_n)
   actor_system sys{cfg};
-  // default construction
-  variant<none_t> x1;
-  CAF_CHECK_EQUAL(x1, none);
   variant<int, none_t> x2;
-  CAF_CHECK_EQUAL(x2, 0);
+  VARIANT_EQ(x2, 0);
   v20 x3;
-  CAF_CHECK_EQUAL(x3, i01{0});
+  VARIANT_EQ(x3, i01{0});
   v20 x4;
   macro_repeat20(v20_test);
 }
@@ -134,72 +99,66 @@ namespace {
 
 struct test_visitor {
   template <class... Ts>
-  string operator()(const Ts&... xs) {
-    return deep_to_string(std::forward_as_tuple(xs...));
+  std::string operator()(const Ts&... xs) {
+    return deep_to_string_as_tuple(xs...);
   }
 };
 
 } // namespace
 
 CAF_TEST(constructors) {
-  variant<int, string> a{42};
-  variant<string, atom_value> b{atom("foo")};
-  variant<float, int, string> c{string{"bar"}};
-  variant<int, string, double> d{123};
-  variant<bool, uint8_t> e{uint8_t{252}};
-  CAF_CHECK_EQUAL(a, 42);
-  CAF_CHECK_EQUAL(b, atom("foo"));
-  CAF_CHECK_EQUAL(d, 123);
-  CAF_CHECK_NOT_EQUAL(d, std::string{"123"});
-  CAF_CHECK_EQUAL(e, uint8_t{252});
+  variant<int, std::string> a{42};
+  variant<float, int, std::string> b{"bar"s};
+  variant<int, std::string, double> c{123};
+  variant<bool, uint8_t> d{uint8_t{252}};
+  VARIANT_EQ(a, 42);
+  VARIANT_EQ(b, "bar"s);
+  VARIANT_EQ(c, 123);
+  VARIANT_EQ(d, uint8_t{252});
 }
 
 CAF_TEST(n_ary_visit) {
-  variant<int, string> a{42};
-  variant<string, atom_value> b{atom("foo")};
-  variant<float, int, string> c{string{"bar"}};
-  variant<int, string, double> d{123};
+  variant<int, std::string> a{42};
+  variant<float, int, std::string> b{"bar"s};
+  variant<int, std::string, double> c{123};
   test_visitor f;
-  CAF_CHECK_EQUAL(visit(f, a, b), "(42, 'foo')");
-  CAF_CHECK_EQUAL(visit(f, a, b, c), "(42, 'foo', \"bar\")");
-  CAF_CHECK_EQUAL(visit(f, a, b, c, d), "(42, 'foo', \"bar\", 123)");
+  CHECK_EQ(visit(f, a), R"__([42])__");
+  CHECK_EQ(visit(f, a, b), R"__([42, "bar"])__");
+  CHECK_EQ(visit(f, a, b, c), R"__([42, "bar", 123])__");
 }
 
 CAF_TEST(get_if) {
-  variant<int ,string, atom_value> b = atom("foo");
-  CAF_MESSAGE("test get_if directly");
-  CAF_CHECK_EQUAL(get_if<int>(&b), nullptr);
-  CAF_CHECK_EQUAL(get_if<string>(&b), nullptr);
-  CAF_CHECK_NOT_EQUAL(get_if<atom_value>(&b), nullptr);
-  CAF_MESSAGE("test get_if via unit test framework");
-  CAF_CHECK_NOT_EQUAL(b, 42);
-  CAF_CHECK_NOT_EQUAL(b, string{"foo"});
-  CAF_CHECK_EQUAL(b, atom("foo"));
+  variant<int, std::string> b = "foo"s;
+  MESSAGE("test get_if directly");
+  CHECK_EQ(get_if<int>(&b), nullptr);
+  CHECK_NE(get_if<std::string>(&b), nullptr);
+  MESSAGE("test get_if via unit test framework");
+  VARIANT_EQ(b, "foo"s);
 }
 
 CAF_TEST(less_than) {
   using variant_type = variant<char, int>;
   auto a = variant_type{'x'};
   auto b = variant_type{'y'};
-  CAF_CHECK(a < b);
-  CAF_CHECK(!(a > b));
-  CAF_CHECK(a <= b);
-  CAF_CHECK(!(a >= b));
+  CHECK(a < b);
+  CHECK(!(a > b));
+  CHECK(a <= b);
+  CHECK(!(a >= b));
   b = 42;
-  CAF_CHECK(a < b);
-  CAF_CHECK(!(a > b));
-  CAF_CHECK(a <= b);
-  CAF_CHECK(!(a >= b));
+  CHECK(a < b);
+  CHECK(!(a > b));
+  CHECK(a <= b);
+  CHECK(!(a >= b));
   a = 42;
-  CAF_CHECK(!(a < b));
-  CAF_CHECK(!(a > b));
-  CAF_CHECK(a <= b);
-  CAF_CHECK(a >= b);
+  CHECK(!(a < b));
+  CHECK(!(a > b));
+  CHECK(a <= b);
+  CHECK(a >= b);
   b = 'x';
 }
 
 CAF_TEST(equality) {
   variant<uint16_t, int> x = 42;
   variant<uint16_t, int> y = uint16_t{42};
-  CAF_CHECK_NOT_EQUAL(x, y);
+  CHECK_NE(x, y);
 }

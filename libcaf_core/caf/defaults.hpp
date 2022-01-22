@@ -1,97 +1,117 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <chrono>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <vector>
 
-#include "caf/atom.hpp"
-#include "caf/detail/core_export.hpp"
+#include "caf/detail/build_config.hpp"
+#include "caf/detail/log_level.hpp"
 #include "caf/string_view.hpp"
 #include "caf/timestamp.hpp"
 
 // -- hard-coded default values for various CAF options ------------------------
 
-namespace caf::defaults {
+namespace caf::defaults::stream {
 
-namespace stream {
+constexpr auto max_batch_delay = timespan{1'000'000};
 
-extern CAF_CORE_EXPORT const timespan desired_batch_complexity;
-extern CAF_CORE_EXPORT const timespan max_batch_delay;
-extern CAF_CORE_EXPORT const timespan credit_round_interval;
-extern CAF_CORE_EXPORT const atom_value credit_policy;
+/// Configures an algorithm for assigning credit and adjusting batch sizes.
+///
+/// The `size-based` controller (default) samples how many Bytes stream elements
+/// occupy when serialized to CAF's binary wire format.
+///
+/// The `token-based` controller associates each stream element with one token.
+/// Input buffer and batch sizes are then statically defined in terms of tokens.
+/// This strategy makes no dynamic adjustment or sampling.
+constexpr auto credit_policy = string_view{"size-based"};
 
-namespace size_policy {
+} // namespace caf::defaults::stream
 
-extern CAF_CORE_EXPORT const int32_t bytes_per_batch;
-extern CAF_CORE_EXPORT const int32_t buffer_capacity;
+namespace caf::defaults::stream::size_policy {
 
-} // namespace size_policy
+/// Desired size of a single batch in Bytes, when serialized into CAF's binary
+/// wire format.
+constexpr auto bytes_per_batch = int32_t{2 * 1024}; //  2 KB
 
-} // namespace stream
+/// Number of Bytes (over all received elements) an inbound path may buffer.
+/// Actors use heuristics for calculating the estimated memory use, so actors
+/// may still allocate more memory in practice.
+constexpr auto buffer_capacity = int32_t{64 * 1024}; // 64 KB
 
-namespace scheduler {
+/// Frequency of computing the serialized size of incoming batches. Smaller
+/// values may increase accuracy, but also add computational overhead.
+constexpr auto sampling_rate = int32_t{100};
 
-extern CAF_CORE_EXPORT const atom_value policy;
-extern CAF_CORE_EXPORT string_view profiling_output_file;
-extern CAF_CORE_EXPORT const size_t max_threads;
-extern CAF_CORE_EXPORT const size_t max_throughput;
-extern CAF_CORE_EXPORT const timespan profiling_resolution;
+/// Frequency of re-calibrating batch sizes. For example, a calibration interval
+/// of 10 and a sampling rate of 20 causes the actor to re-calibrate every 200
+/// batches.
+constexpr auto calibration_interval = int32_t{20};
 
-} // namespace scheduler
+/// Value between 0 and 1 representing the degree of weighting decrease for
+/// adjusting batch sizes. A higher factor discounts older observations faster.
+constexpr auto smoothing_factor = 0.6f;
 
-namespace work_stealing {
+} // namespace caf::defaults::stream::size_policy
 
-extern CAF_CORE_EXPORT const size_t aggressive_poll_attempts;
-extern CAF_CORE_EXPORT const size_t aggressive_steal_interval;
-extern CAF_CORE_EXPORT const size_t moderate_poll_attempts;
-extern CAF_CORE_EXPORT const size_t moderate_steal_interval;
-extern CAF_CORE_EXPORT const timespan moderate_sleep_duration;
-extern CAF_CORE_EXPORT const size_t relaxed_steal_interval;
-extern CAF_CORE_EXPORT const timespan relaxed_sleep_duration;
+namespace caf::defaults::stream::token_policy {
 
-} // namespace work_stealing
+/// Number of elements in a single batch.
+constexpr auto batch_size = int32_t{256}; // 2 KB for elements of size 8.
 
-namespace logger {
+/// Maximum number of elements in the input buffer.
+constexpr auto buffer_size = int32_t{4096}; // // 32 KB for elements of size 8.
 
-extern CAF_CORE_EXPORT string_view component_filter;
-extern CAF_CORE_EXPORT const atom_value console;
-extern CAF_CORE_EXPORT string_view console_format;
-extern CAF_CORE_EXPORT const atom_value console_verbosity;
-extern CAF_CORE_EXPORT string_view file_format;
-extern CAF_CORE_EXPORT string_view file_name;
-extern CAF_CORE_EXPORT const atom_value file_verbosity;
+} // namespace caf::defaults::stream::token_policy
 
-} // namespace logger
+namespace caf::defaults::scheduler {
 
-namespace middleman {
+constexpr auto policy = string_view{"stealing"};
+constexpr auto profiling_output_file = string_view{""};
+constexpr auto max_throughput = std::numeric_limits<size_t>::max();
+constexpr auto profiling_resolution = timespan(100'000'000);
 
-extern CAF_CORE_EXPORT std::vector<std::string> app_identifiers;
-extern CAF_CORE_EXPORT const atom_value network_backend;
-extern CAF_CORE_EXPORT const size_t max_consecutive_reads;
-extern CAF_CORE_EXPORT const size_t heartbeat_interval;
-extern CAF_CORE_EXPORT const size_t cached_udp_buffers;
-extern CAF_CORE_EXPORT const size_t max_pending_msgs;
-extern CAF_CORE_EXPORT const size_t workers;
+} // namespace caf::defaults::scheduler
 
-} // namespace middleman
+namespace caf::defaults::work_stealing {
 
-} // namespace caf::defaults
+constexpr auto aggressive_poll_attempts = size_t{100};
+constexpr auto aggressive_steal_interval = size_t{10};
+constexpr auto moderate_poll_attempts = size_t{500};
+constexpr auto moderate_steal_interval = size_t{5};
+constexpr auto moderate_sleep_duration = timespan{50'000};
+constexpr auto relaxed_steal_interval = size_t{1};
+constexpr auto relaxed_sleep_duration = timespan{10'000'000};
+
+} // namespace caf::defaults::work_stealing
+
+namespace caf::defaults::logger::file {
+
+constexpr auto format = string_view{"%r %c %p %a %t %C %M %F:%L %m%n"};
+constexpr auto path = string_view{"actor_log_[PID]_[TIMESTAMP]_[NODE].log"};
+
+} // namespace caf::defaults::logger::file
+
+namespace caf::defaults::logger::console {
+
+constexpr auto colored = true;
+constexpr auto format = string_view{"[%c:%p] %d %m"};
+
+} // namespace caf::defaults::logger::console
+
+namespace caf::defaults::middleman {
+
+constexpr auto app_identifier = string_view{"generic-caf-app"};
+constexpr auto network_backend = string_view{"default"};
+constexpr auto max_consecutive_reads = size_t{50};
+constexpr auto heartbeat_interval = timespan{10'000'000'000};
+constexpr auto connection_timeout = timespan{30'000'000'000};
+constexpr auto cached_udp_buffers = size_t{10};
+constexpr auto max_pending_msgs = size_t{10};
+
+} // namespace caf::defaults::middleman

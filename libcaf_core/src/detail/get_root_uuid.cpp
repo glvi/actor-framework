@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/detail/get_root_uuid.hpp"
 #include "caf/config.hpp"
@@ -53,6 +39,32 @@ std::string get_root_uuid() {
   }
   pclose(get_uuid_cmd);
   erase_trailing_newline(uuid);
+  return uuid;
+}
+
+} // namespace detail
+} // namespace caf
+
+#elif defined(CAF_IOS) || defined(CAF_ANDROID) || defined(CAF_NET_BSD)
+
+// Return a randomly-generated UUID on mobile devices or NetBSD (requires root
+// access to get UUID from disk).
+
+#  include <random>
+
+namespace caf {
+namespace detail {
+
+std::string get_root_uuid() {
+  std::random_device rd;
+  std::uniform_int_distribution<int> dist(0, 15);
+  std::string uuid = uuid_format;
+  for (auto& c : uuid) {
+    if (c != '-') {
+      auto n = dist(rd);
+      c = static_cast<char>((n < 10) ? n + '0' : (n - 10) + 'A');
+    }
+  }
   return uuid;
 }
 
@@ -198,31 +210,6 @@ std::string get_root_uuid() {
           }
         }
       }
-    }
-  }
-  return uuid;
-}
-
-} // namespace detail
-} // namespace caf
-
-#elif defined(CAF_IOS) || defined(CAF_ANDROID)
-
-// return a randomly-generated UUID on mobile devices
-
-#  include <random>
-
-namespace caf {
-namespace detail {
-
-std::string get_root_uuid() {
-  std::random_device rd;
-  std::uniform_int_distribution<int> dist(0, 15);
-  std::string uuid = uuid_format;
-  for (auto& c : uuid) {
-    if (c != '-') {
-      auto n = dist(rd);
-      c = static_cast<char>((n < 10) ? n + '0' : (n - 10) + 'A');
     }
   }
   return uuid;

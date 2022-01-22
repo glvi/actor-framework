@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/io/network/stream.hpp"
 
@@ -31,11 +17,12 @@ namespace caf::io::network {
 stream::stream(default_multiplexer& backend_ref, native_socket sockfd)
   : event_handler(backend_ref, sockfd),
     max_consecutive_reads_(get_or(backend().system().config(),
-                                  "middleman.max-consecutive-reads",
+                                  "caf.middleman.max-consecutive-reads",
                                   defaults::middleman::max_consecutive_reads)),
     read_threshold_(1),
     collected_(0),
-    written_(0) {
+    written_(0),
+    wr_op_backoff_(false) {
   configure_read(receive_policy::at_most(1024));
 }
 
@@ -67,7 +54,7 @@ void stream::write(const void* buf, size_t num_bytes) {
 void stream::flush(const manager_ptr& mgr) {
   CAF_ASSERT(mgr != nullptr);
   CAF_LOG_TRACE(CAF_ARG(wr_offline_buf_.size()));
-  if (!wr_offline_buf_.empty() && !state_.writing) {
+  if (!wr_offline_buf_.empty() && !state_.writing && !wr_op_backoff_) {
     backend().add(operation::write, fd(), this);
     writer_ = mgr;
     state_.writing = true;
@@ -110,8 +97,6 @@ void stream::force_empty_write(const manager_ptr& mgr) {
 
 void stream::prepare_next_read() {
   collected_ = 0;
-  // This cast does nothing, but prevents a weird compiler error on GCC <= 4.9.
-  // TODO: remove cast when dropping support for GCC 4.9.
   switch (static_cast<receive_policy_flag>(state_.rd_flag)) {
     case receive_policy_flag::exactly:
       if (rd_buf_.size() != max_)
@@ -138,7 +123,7 @@ void stream::prepare_next_write() {
   CAF_LOG_TRACE(CAF_ARG(wr_buf_.size()) << CAF_ARG(wr_offline_buf_.size()));
   written_ = 0;
   wr_buf_.clear();
-  if (wr_offline_buf_.empty()) {
+  if (wr_offline_buf_.empty() || wr_op_backoff_) {
     state_.writing = false;
     backend().del(operation::write, fd(), this);
     if (state_.shutting_down)
@@ -157,6 +142,17 @@ bool stream::handle_read_result(rw_state read_result, size_t rb) {
     case rw_state::indeterminate:
       return false;
     case rw_state::success:
+      // Recover previous pending write if it is the first successful read after
+      // want_read was reported.
+      if (wr_op_backoff_) {
+        CAF_ASSERT(reader_ != nullptr);
+        backend().add(operation::write, fd(), this);
+        writer_ = reader_;
+        state_.writing = true;
+        wr_op_backoff_ = false;
+      }
+      [[fallthrough]];
+    case rw_state::want_read:
       if (rb == 0)
         return false;
       collected_ += rb;
@@ -182,6 +178,15 @@ void stream::handle_write_result(rw_state write_result, size_t wb) {
     case rw_state::indeterminate:
       prepare_next_write();
       break;
+    case rw_state::want_read:
+      // If the write operation returns want_read, we need to suspend writing to
+      // the socket until the next successful read. Otherwise, we may cause
+      // spinning and high CPU usage.
+      backend().del(operation::write, fd(), this);
+      wr_op_backoff_ = true;
+      if (wb == 0)
+        break;
+      [[fallthrough]];
     case rw_state::success:
       written_ += wb;
       CAF_ASSERT(written_ <= wr_buf_.size());

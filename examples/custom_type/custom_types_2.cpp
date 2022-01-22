@@ -1,18 +1,24 @@
 // showcases how to add custom message types to CAF
 // if friend access for serialization is available
 
-#include <utility>
 #include <iostream>
+#include <utility>
 
 #include "caf/all.hpp"
+
+class foo;
+
+CAF_BEGIN_TYPE_ID_BLOCK(custom_types_2, first_custom_type_id)
+
+  CAF_ADD_TYPE_ID(custom_types_2, (foo))
+
+CAF_END_TYPE_ID_BLOCK(custom_types_2)
 
 using std::cout;
 using std::endl;
 using std::make_pair;
 
 using namespace caf;
-
-namespace {
 
 // a simple class using getter and setter member functions
 class foo {
@@ -41,8 +47,8 @@ public:
   }
 
   template <class Inspector>
-  friend typename Inspector::result_type inspect(Inspector& f, foo& x) {
-    return f(meta::type_name("foo"), x.a_, x.b_);
+  friend bool inspect(Inspector& f, foo& x) {
+    return f.object(x).fields(f.field("a", x.a_), f.field("b", x.b_));
   }
 
 private:
@@ -52,23 +58,12 @@ private:
 
 behavior testee(event_based_actor* self) {
   return {
-    [=](const foo& x) {
-      aout(self) << to_string(x) << endl;
-    }
+    [=](const foo& x) { aout(self) << deep_to_string(x) << endl; },
   };
 }
 
-class config : public actor_system_config {
-public:
-  config() {
-    add_message_type<foo>("foo");
-  }
-};
-
-void caf_main(actor_system& system, const config&) {
-  anon_send(system.spawn(testee), foo{1, 2});
+void caf_main(actor_system& sys) {
+  anon_send(sys.spawn(testee), foo{1, 2});
 }
 
-} // namespace
-
-CAF_MAIN()
+CAF_MAIN(id_block::custom_types_2)

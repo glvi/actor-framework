@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -234,7 +220,7 @@ public:
 
   // -- overridden functions of abstract_actor ---------------------------------
 
-  void enqueue(mailbox_element_ptr, execution_unit*) override;
+  bool enqueue(mailbox_element_ptr, execution_unit*) override;
 
   mailbox_element* peek_at_next_mailbox_element() override;
 
@@ -331,7 +317,6 @@ public:
   /// Blocks this actor until all `xs...` have terminated.
   template <class... Ts>
   void wait_for(Ts&&... xs) {
-    using wait_for_atom = atom_constant<atom("waitFor")>;
     size_t expected = 0;
     size_t i = 0;
     size_t attach_results[] = {attach_functor(xs)...};
@@ -341,6 +326,8 @@ public:
       // nop
     });
   }
+
+  using super::fail_state;
 
   /// Sets a user-defined exit reason `err`. This reason
   /// is signalized to other actors after `act()` returns.
@@ -359,7 +346,7 @@ public:
   virtual mailbox_element_ptr dequeue();
 
   /// Returns the queue for storing incoming messages.
-  inline mailbox_type& mailbox() {
+  mailbox_type& mailbox() {
     return mailbox_;
   }
   /// @cond PRIVATE
@@ -405,11 +392,11 @@ public:
 
   // -- backwards compatibility ------------------------------------------------
 
-  inline mailbox_element_ptr next_message() {
+  mailbox_element_ptr next_message() {
     return dequeue();
   }
 
-  inline bool has_next_message() {
+  bool has_next_message() {
     return !mailbox_.empty();
   }
 

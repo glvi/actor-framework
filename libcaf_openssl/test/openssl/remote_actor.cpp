@@ -1,29 +1,13 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
-#include "caf/config.hpp"
+#define CAF_SUITE openssl.dynamic_remote_actor
 
-#include <signal.h>
-
-#define CAF_SUITE openssl_dynamic_remote_actor
-#include "caf/test/dsl.hpp"
+#include "openssl-test.hpp"
 
 #include <algorithm>
+#include <signal.h>
 #include <sstream>
 #include <utility>
 #include <vector>
@@ -43,13 +27,11 @@ public:
   config() {
     load<io::middleman>();
     load<openssl::manager>();
-    add_message_type<std::vector<int>>("std::vector<int>");
-    actor_system_config::parse(test::engine::argc(), test::engine::argv());
     // Setting the "max consecutive reads" to 1 is highly likely to cause
     // OpenSSL to buffer data internally and report "pending" data after a read
     // operation. This will trigger `must_read_more` in the SSL read policy
     // with high probability.
-    set("middleman.max-consecutive-reads", 1);
+    set("caf.middleman.max-consecutive-reads", 1);
   }
 };
 
@@ -69,24 +51,24 @@ behavior make_pong_behavior() {
   return {
     [](int val) -> int {
       ++val;
-      CAF_MESSAGE("pong with " << val);
+      MESSAGE("pong with " << val);
       return val;
     },
   };
 }
 
 behavior make_ping_behavior(event_based_actor* self, const actor& pong) {
-  CAF_MESSAGE("ping with " << 0);
+  MESSAGE("ping with " << 0);
   self->send(pong, 0);
   return {
     [=](int val) -> int {
       if (val == 3) {
-        CAF_MESSAGE("ping with exit");
+        MESSAGE("ping with exit");
         self->send_exit(self->current_sender(), exit_reason::user_shutdown);
-        CAF_MESSAGE("ping quits");
+        MESSAGE("ping quits");
         self->quit();
       }
-      CAF_MESSAGE("ping with " << val);
+      MESSAGE("ping with " << val);
       return val;
     },
   };
@@ -103,9 +85,9 @@ std::string to_string(const std::vector<int>& vec) {
 behavior make_sort_behavior() {
   return {
     [](std::vector<int>& vec) -> std::vector<int> {
-      CAF_MESSAGE("sorter received: " << to_string(vec));
+      MESSAGE("sorter received: " << to_string(vec));
       std::sort(vec.begin(), vec.end());
-      CAF_MESSAGE("sorter sent: " << to_string(vec));
+      MESSAGE("sorter sent: " << to_string(vec));
       return std::move(vec);
     },
   };
@@ -116,9 +98,9 @@ behavior make_sort_requester_behavior(event_based_actor* self,
   self->send(sorter, std::vector<int>{5, 4, 3, 2, 1});
   return {
     [=](const std::vector<int>& vec) {
-      CAF_MESSAGE("sort requester received: " << to_string(vec));
+      MESSAGE("sort requester received: " << to_string(vec));
       for (size_t i = 1; i < vec.size(); ++i)
-        CAF_CHECK_EQUAL(static_cast<int>(i), vec[i - 1]);
+        CHECK_EQ(static_cast<int>(i), vec[i - 1]);
       self->send_exit(sorter, exit_reason::user_shutdown);
       self->quit();
     },
@@ -135,17 +117,17 @@ behavior fragile_mirror(event_based_actor* self) {
 }
 
 behavior linking_actor(event_based_actor* self, const actor& buddy) {
-  CAF_MESSAGE("link to mirror and send dummy message");
+  MESSAGE("link to mirror and send dummy message");
   self->link_to(buddy);
   self->send(buddy, 42);
   return {
-    [](int i) { CAF_CHECK_EQUAL(i, 42); },
+    [](int i) { CHECK_EQ(i, 42); },
   };
 }
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(dynamic_remote_actor_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 using openssl::publish;
 using openssl::remote_actor;
@@ -158,18 +140,18 @@ CAF_TEST_DISABLED(identity_semantics) {
   CAF_REQUIRE_NOT_EQUAL(port1, port2);
   auto same_server = unbox(remote_actor(server_side, local_host, port2));
   CAF_REQUIRE_EQUAL(same_server, server);
-  CAF_CHECK_EQUAL(same_server->node(), server_side.node());
+  CHECK_EQ(same_server->node(), server_side.node());
   auto server1 = unbox(remote_actor(client_side, local_host, port1));
   auto server2 = unbox(remote_actor(client_side, local_host, port2));
-  CAF_CHECK_EQUAL(server1, remote_actor(client_side, local_host, port1));
-  CAF_CHECK_EQUAL(server2, remote_actor(client_side, local_host, port2));
+  CHECK_EQ(server1, remote_actor(client_side, local_host, port1));
+  CHECK_EQ(server2, remote_actor(client_side, local_host, port2));
   anon_send_exit(server, exit_reason::user_shutdown);
 }
 
 CAF_TEST_DISABLED(ping_pong) {
   // server side
-  auto port = unbox(
-    publish(server_side.spawn(make_pong_behavior), 0, local_host));
+  auto port
+    = unbox(publish(server_side.spawn(make_pong_behavior), 0, local_host));
   // client side
   auto pong = unbox(remote_actor(client_side, local_host, port));
   client_side.spawn(make_ping_behavior, pong);
@@ -177,8 +159,8 @@ CAF_TEST_DISABLED(ping_pong) {
 
 CAF_TEST_DISABLED(custom_message_type) {
   // server side
-  auto port = unbox(
-    publish(server_side.spawn(make_sort_behavior), 0, local_host));
+  auto port
+    = unbox(publish(server_side.spawn(make_sort_behavior), 0, local_host));
   // client side
   auto sorter = unbox(remote_actor(client_side, local_host, port));
   client_side.spawn(make_sort_requester_behavior, sorter);
@@ -192,9 +174,9 @@ CAF_TEST_DISABLED(remote_link) {
   auto linker = client_side.spawn(linking_actor, mirror);
   scoped_actor self{client_side};
   self->wait_for(linker);
-  CAF_MESSAGE("linker exited");
+  MESSAGE("linker exited");
   self->wait_for(mirror);
-  CAF_MESSAGE("mirror exited");
+  MESSAGE("mirror exited");
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

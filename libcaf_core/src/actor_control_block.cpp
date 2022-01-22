@@ -1,35 +1,15 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/actor_control_block.hpp"
 
-#include "caf/to_string.hpp"
-
-
-
-
-#include "caf/message.hpp"
-#include "caf/actor_system.hpp"
-#include "caf/proxy_registry.hpp"
 #include "caf/abstract_actor.hpp"
+#include "caf/actor_system.hpp"
 #include "caf/mailbox_element.hpp"
-
-#include "caf/detail/disposer.hpp"
+#include "caf/message.hpp"
+#include "caf/proxy_registry.hpp"
+#include "caf/sec.hpp"
 
 namespace caf {
 
@@ -37,14 +17,14 @@ actor_addr actor_control_block::address() {
   return {this, true};
 }
 
-void actor_control_block::enqueue(strong_actor_ptr sender, message_id mid,
+bool actor_control_block::enqueue(strong_actor_ptr sender, message_id mid,
                                   message content, execution_unit* host) {
-  get()->enqueue(std::move(sender), mid, std::move(content), host);
+  return get()->enqueue(std::move(sender), mid, std::move(content), host);
 }
 
-void actor_control_block::enqueue(mailbox_element_ptr what,
+bool actor_control_block::enqueue(mailbox_element_ptr what,
                                   execution_unit* host) {
-  get()->enqueue(std::move(what), host);
+  return get()->enqueue(std::move(what), host);
 }
 
 bool intrusive_ptr_upgrade_weak(actor_control_block* x) {
@@ -124,7 +104,7 @@ void append_to_string_impl(std::string& x, const actor_control_block* y) {
       append_to_string(x, y->nid);
     }
   } else {
-    x += "null:pointer";
+    x += "null";
   }
 }
 

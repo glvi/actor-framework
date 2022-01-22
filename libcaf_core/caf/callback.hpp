@@ -1,56 +1,51 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include "caf/config.hpp"
+#include "caf/detail/type_traits.hpp"
 #include "caf/error.hpp"
 
-#include "caf/detail/type_traits.hpp"
-
-// The class `callback` intentionally has no virtual destructor, because
-// the lifetime of callback objects is never managed via base pointers.
-CAF_PUSH_NON_VIRTUAL_DTOR_WARNING
+#include <memory>
 
 namespace caf {
 
 /// Describes a simple callback, usually implemented via lambda expression.
 /// Callbacks are used as "type-safe function objects" wherever an interface
 /// requires dynamic dispatching. The alternative would be to store the lambda
-/// in a `std::function`, which adds another layer of indirection and
-/// requires a heap allocation. With the callback implementation of CAF,
-/// the object remains on the stack and does not cause more overhead
-/// than necessary.
+/// in a `std::function`, which adds another layer of indirection and always
+/// requires a heap allocation. With the callback implementation of CAF, the
+/// object may remains on the stack and do not cause more overhead than
+/// necessary.
 template <class Signature>
 class callback;
 
 template <class Result, class... Ts>
 class callback<Result(Ts...)> {
 public:
+  virtual ~callback() {
+    // nop
+  }
+
   virtual Result operator()(Ts...) = 0;
 };
+
+/// Smart pointer type for heap-allocated callbacks with unique ownership.
+template <class Signature>
+using unique_callback_ptr = std::unique_ptr<callback<Signature>>;
+
+/// Smart pointer type for heap-allocated callbacks with shared ownership.
+template <class Signature>
+using shared_callback_ptr = std::shared_ptr<callback<Signature>>;
 
 /// Utility class for wrapping a function object of type `F`.
 template <class F, class Signature>
 class callback_impl;
 
 template <class F, class Result, class... Ts>
-class callback_impl<F, Result(Ts...)> : public callback<Result(Ts...)> {
+class callback_impl<F, Result(Ts...)> final : public callback<Result(Ts...)> {
 public:
   callback_impl(F&& f) : f_(std::move(f)) {
     // nop
@@ -68,7 +63,7 @@ private:
   F f_;
 };
 
-/// Creates a ::callback from the function object `fun`.
+/// Wraps `fun` into a @ref callback function object.
 /// @relates callback
 template <class F>
 auto make_callback(F fun) {
@@ -76,6 +71,24 @@ auto make_callback(F fun) {
   return callback_impl<F, signature>{std::move(fun)};
 }
 
-} // namespace caf
+/// Creates a heap-allocated, type-erased @ref callback from the function object
+/// `fun`.
+/// @relates callback
+template <class F>
+auto make_type_erased_callback(F fun) {
+  using signature = typename detail::get_callable_trait<F>::fun_sig;
+  using result_t = unique_callback_ptr<signature>;
+  return result_t{new callback_impl<F, signature>{std::move(fun)}};
+}
 
-CAF_POP_WARNINGS
+/// Creates a heap-allocated, type-erased @ref callback from the function object
+/// `fun` with shared ownership.
+/// @relates callback
+template <class F>
+auto make_shared_type_erased_callback(F fun) {
+  using signature = typename detail::get_callable_trait<F>::fun_sig;
+  auto res = std::make_shared<callback_impl<F, signature>>(std::move(fun));
+  return shared_callback_ptr<signature>{std::move(res)};
+}
+
+} // namespace caf

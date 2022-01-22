@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 // This file is partially included in the manual, do not modify
 // without updating the references in the *.tex files!
@@ -22,13 +8,18 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
+#include <type_traits>
 
+#include "caf/default_enum_inspect.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
+#include "caf/is_error_code_enum.hpp"
 
 namespace caf {
 
+// --(rst-sec-begin)--
 /// SEC stands for "System Error Code". This enum contains error codes for
 /// ::actor_system and its modules.
 enum class sec : uint8_t {
@@ -126,26 +117,73 @@ enum class sec : uint8_t {
   socket_operation_failed = 45,
   /// A resource is temporarily unavailable or would block.
   unavailable_or_would_block,
+  /// Connection refused because of incompatible CAF versions.
+  incompatible_versions,
+  /// Connection refused because of incompatible application IDs.
+  incompatible_application_ids,
+  /// The middleman received a malformed BASP message from another node.
+  malformed_basp_message,
+  /// The middleman closed a connection because it failed to serialize or
+  /// deserialize a payload.
+  serializing_basp_payload_failed = 50,
+  /// The middleman closed a connection to itself or an already connected node.
+  redundant_connection,
   /// Resolving a path on a remote node failed.
   remote_lookup_failed,
   /// Serialization failed because actor_system::tracing_context is null.
   no_tracing_context,
+  /// No request produced a valid result.
+  all_requests_failed,
+  /// Deserialization failed because an invariant got violated after reading
+  /// the content of a field.
+  field_invariant_check_failed = 55,
+  /// Deserialization failed because a setter rejected the input.
+  field_value_synchronization_failed,
+  /// Deserialization failed because the source announced an invalid type.
+  invalid_field_type,
+  /// Serialization failed because a type was flagged as unsafe message type.
+  unsafe_type,
+  /// Serialization failed because a save callback returned `false`.
+  save_callback_failed,
+  /// Deserialization failed because a load callback returned `false`.
+  load_callback_failed = 60,
+  /// Converting between two types failed.
+  conversion_failed,
+  /// A network connection was closed by the remote side.
+  connection_closed,
+  /// An operation failed because run-time type information diverged from the
+  /// expected type.
+  type_clash,
+  /// An operation failed because the callee does not implement this
+  /// functionality.
+  unsupported_operation,
+  /// A key lookup failed.
+  no_such_key = 65,
+  /// An destroyed a response promise without calling deliver or delegate on it.
+  broken_promise,
+  /// Disconnected from a BASP node after reaching the connection timeout.
+  connection_timeout,
+  /// Signals that an actor fell behind a periodic action trigger. After raising
+  /// this error, an @ref actor_clock stops scheduling the action.
+  action_reschedule_failed,
 };
+// --(rst-sec-end)--
 
 /// @relates sec
 CAF_CORE_EXPORT std::string to_string(sec);
 
 /// @relates sec
-CAF_CORE_EXPORT error make_error(sec);
+CAF_CORE_EXPORT bool from_string(string_view, sec&);
 
 /// @relates sec
-CAF_CORE_EXPORT error make_error(sec, message);
+CAF_CORE_EXPORT bool from_integer(std::underlying_type_t<sec>, sec&);
 
 /// @relates sec
-template <class T, class... Ts>
-auto make_error(sec code, T&& x, Ts&&... xs) {
-  return make_error(code,
-                    make_message(std::forward<T>(x), std::forward<Ts>(xs)...));
+template <class Inspector>
+bool inspect(Inspector& f, sec& x) {
+  return default_enum_inspect(f, x);
 }
 
 } // namespace caf
+
+CAF_ERROR_CODE_ENUM(sec)

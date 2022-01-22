@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -29,8 +15,6 @@
 #include "caf/io/datagram_handle.hpp"
 #include "caf/io/handle.hpp"
 #include "caf/io/network/receive_buffer.hpp"
-#include "caf/meta/hex_formatted.hpp"
-#include "caf/meta/type_name.hpp"
 
 namespace caf::io {
 
@@ -43,8 +27,9 @@ struct new_connection_msg {
 };
 
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, new_connection_msg& x) {
-  return f(meta::type_name("new_connection_msg"), x.source, x.handle);
+bool inspect(Inspector& f, new_connection_msg& x) {
+  return f.object(x).fields(f.field("source", x.source),
+                            f.field("handle", x.handle));
 }
 
 /// Signalizes newly arrived data for a {@link broker}.
@@ -57,9 +42,8 @@ struct new_data_msg {
 
 /// @relates new_data_msg
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, new_data_msg& x) {
-  return f(meta::type_name("new_data_msg"), x.handle, meta::hex_formatted(),
-           x.buf);
+bool inspect(Inspector& f, new_data_msg& x) {
+  return f.object(x).fields(f.field("handle", x.handle), f.field("buf", x.buf));
 }
 
 /// Signalizes that a certain amount of bytes has been written.
@@ -74,9 +58,10 @@ struct data_transferred_msg {
 
 /// @relates data_transferred_msg
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, data_transferred_msg& x) {
-  return f(meta::type_name("data_transferred_msg"), x.handle, x.written,
-           x.remaining);
+bool inspect(Inspector& f, data_transferred_msg& x) {
+  return f.object(x).fields(f.field("handle", x.handle),
+                            f.field("written", x.written),
+                            f.field("remaining", x.remaining));
 }
 
 /// Signalizes that a {@link broker} connection has been closed.
@@ -87,9 +72,8 @@ struct connection_closed_msg {
 
 /// @relates connection_closed_msg
 template <class Inspector>
-typename Inspector::result_type
-inspect(Inspector& f, connection_closed_msg& x) {
-  return f(meta::type_name("connection_closed_msg"), x.handle);
+bool inspect(Inspector& f, connection_closed_msg& x) {
+  return f.object(x).fields(f.field("handle", x.handle));
 }
 
 /// Signalizes that a {@link broker} acceptor has been closed.
@@ -100,8 +84,8 @@ struct acceptor_closed_msg {
 
 /// @relates connection_closed_msg
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, acceptor_closed_msg& x) {
-  return f(meta::type_name("acceptor_closed_msg"), x.handle);
+bool inspect(Inspector& f, acceptor_closed_msg& x) {
+  return f.object(x).fields(f.field("handle", x.handle));
 }
 
 /// Signalizes that a connection has entered passive mode.
@@ -111,9 +95,8 @@ struct connection_passivated_msg {
 
 /// @relates connection_passivated_msg
 template <class Inspector>
-typename Inspector::result_type
-inspect(Inspector& f, connection_passivated_msg& x) {
-  return f(meta::type_name("connection_passivated_msg"), x.handle);
+bool inspect(Inspector& f, connection_passivated_msg& x) {
+  return f.object(x).fields(f.field("handle", x.handle));
 }
 
 /// Signalizes that an acceptor has entered passive mode.
@@ -123,9 +106,8 @@ struct acceptor_passivated_msg {
 
 /// @relates acceptor_passivated_msg
 template <class Inspector>
-typename Inspector::result_type
-inspect(Inspector& f, acceptor_passivated_msg& x) {
-  return f(meta::type_name("acceptor_passivated_msg"), x.handle);
+bool inspect(Inspector& f, acceptor_passivated_msg& x) {
+  return f.object(x).fields(f.field("handle", x.handle));
 }
 
 /// Signalizes that a datagram with a certain size has been sent.
@@ -138,8 +120,8 @@ struct new_datagram_msg {
 
 /// @relates new_datagram_msg
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, new_datagram_msg& x) {
-  return f(meta::type_name("new_datagram_msg"), x.handle, x.buf);
+bool inspect(Inspector& f, new_datagram_msg& x) {
+  return f.object(x).fields(f.field("handle", x.handle), f.field("buf", x.buf));
 }
 
 /// Signalizes that a datagram with a certain size has been sent.
@@ -154,8 +136,10 @@ struct datagram_sent_msg {
 
 /// @relates datagram_sent_msg
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, datagram_sent_msg& x) {
-  return f(meta::type_name("datagram_sent_msg"), x.handle, x.written, x.buf);
+bool inspect(Inspector& f, datagram_sent_msg& x) {
+  return f.object(x).fields(f.field("handle", x.handle),
+                            f.field("written", x.written),
+                            f.field("buf", x.buf));
 }
 
 /// Signalizes that a datagram sink has entered passive mode.
@@ -165,9 +149,8 @@ struct datagram_servant_passivated_msg {
 
 /// @relates datagram_servant_passivated_msg
 template <class Inspector>
-typename Inspector::result_type
-inspect(Inspector& f, datagram_servant_passivated_msg& x) {
-  return f(meta::type_name("datagram_servant_passivated_msg"), x.handle);
+bool inspect(Inspector& f, datagram_servant_passivated_msg& x) {
+  return f.object(x).fields(f.field("handle", x.handle));
 }
 
 /// Signalizes that a datagram endpoint has entered passive mode.
@@ -177,9 +160,8 @@ struct datagram_servant_closed_msg {
 
 /// @relates datagram_servant_closed_msg
 template <class Inspector>
-typename Inspector::result_type
-inspect(Inspector& f, datagram_servant_closed_msg& x) {
-  return f(meta::type_name("datagram_servant_closed_msg"), x.handles);
+bool inspect(Inspector& f, datagram_servant_closed_msg& x) {
+  return f.object(x).fields(f.field("handles", x.handles));
 }
 
 } // namespace caf::io

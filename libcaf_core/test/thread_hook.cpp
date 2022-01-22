@@ -1,28 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
-#include "caf/config.hpp"
-
-// this suite tests whether actors terminate as expect in several use cases
 #define CAF_SUITE thread_hook
 
 #include "caf/all.hpp"
-#include "caf/test/unit_test.hpp"
+
+#include "core-test.hpp"
 
 using namespace caf;
 
@@ -50,16 +34,14 @@ struct dummy_thread_hook : thread_hook {
 class counting_thread_hook : public thread_hook {
 public:
   counting_thread_hook()
-      : count_init_{0},
-        count_thread_started_{0},
-        count_thread_terminates_{0} {
+    : count_init_{0}, count_thread_started_{0}, count_thread_terminates_{0} {
     // nop
   }
 
   ~counting_thread_hook() override {
-    CAF_CHECK_EQUAL(count_init_, assumed_init_calls);
-    CAF_CHECK_EQUAL(count_thread_started_, assumed_thread_count);
-    CAF_CHECK_EQUAL(count_thread_terminates_, assumed_thread_count);
+    CHECK_EQ(count_init_, assumed_init_calls);
+    CHECK_EQ(count_thread_started_, assumed_thread_count);
+    CHECK_EQ(count_thread_terminates_, assumed_thread_count);
   }
 
   void init(actor_system&) override {
@@ -84,7 +66,7 @@ template <class Hook>
 struct config : actor_system_config {
   config() {
     add_thread_hook<Hook>();
-    set("logger.verbosity", atom("quiet"));
+    set("caf.logger.verbosity", "quiet");
   }
 };
 
@@ -105,21 +87,21 @@ CAF_TEST(counting_no_system) {
   cfg.add_thread_hook<counting_thread_hook>();
 }
 
-CAF_TEST_FIXTURE_SCOPE(dummy_hook, fixture<dummy_thread_hook>)
+BEGIN_FIXTURE_SCOPE(fixture<dummy_thread_hook>)
 
 CAF_TEST(counting_no_args) {
   // nop
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()
 
-CAF_TEST_FIXTURE_SCOPE(counting_hook, fixture<counting_thread_hook>)
+BEGIN_FIXTURE_SCOPE(fixture<counting_thread_hook>)
 
 CAF_TEST(counting_system_without_actor) {
   assumed_init_calls = 1;
-  assumed_thread_count = get_or(cfg, "scheduler.max-threads",
-                                defaults::scheduler::max_threads)
-                         + 1; // caf.clock
+  auto fallback = scheduler::abstract_coordinator::default_thread_count();
+  assumed_thread_count = get_or(cfg, "caf.scheduler.max-threads", fallback)
+                         + 2; // clock and private thread pool
   auto& sched = sys.scheduler();
   if (sched.detaches_utility_actors())
     assumed_thread_count += sched.num_utility_actors();
@@ -127,9 +109,9 @@ CAF_TEST(counting_system_without_actor) {
 
 CAF_TEST(counting_system_with_actor) {
   assumed_init_calls = 1;
-  assumed_thread_count = get_or(cfg, "scheduler.max-threads",
-                                defaults::scheduler::max_threads)
-                         + 2; // caf.clock and detached actor
+  auto fallback = scheduler::abstract_coordinator::default_thread_count();
+  assumed_thread_count = get_or(cfg, "caf.scheduler.max-threads", fallback)
+                         + 3; // clock, private thread pool, and  detached actor
   auto& sched = sys.scheduler();
   if (sched.detaches_utility_actors())
     assumed_thread_count += sched.num_utility_actors();
@@ -137,5 +119,4 @@ CAF_TEST(counting_system_with_actor) {
   sys.spawn([] {});
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
-
+END_FIXTURE_SCOPE()

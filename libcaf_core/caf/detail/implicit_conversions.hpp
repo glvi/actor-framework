@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -22,10 +8,10 @@
 #include <type_traits>
 
 #include "caf/actor_traits.hpp"
-#include "caf/fwd.hpp"
-
 #include "caf/detail/type_list.hpp"
 #include "caf/detail/type_traits.hpp"
+#include "caf/fwd.hpp"
+#include "caf/type_id.hpp"
 
 namespace caf::detail {
 
@@ -54,8 +40,8 @@ struct implicit_actor_conversions<actor_control_block, false, false> {
 
 template <class T>
 struct implicit_conversions {
-  using type = typename std::conditional<std::is_convertible<T, error>::value,
-                                         error, T>::type;
+  using type = std::conditional_t<std::is_convertible<T, error>::value, error,
+                                  squash_if_int_t<T>>;
 };
 
 template <class T>
@@ -117,11 +103,14 @@ using implicit_conversions_t = typename implicit_conversions<T>::type;
 
 template <class T>
 struct strip_and_convert {
-  using type = typename implicit_conversions<typename std::remove_const<
-    typename std::remove_reference<T>::type>::type>::type;
+  using type
+    = implicit_conversions_t<std::remove_const_t<std::remove_reference_t<T>>>;
 };
 
 template <class T>
 using strip_and_convert_t = typename strip_and_convert<T>::type;
+
+template <class T>
+constexpr bool sendable = is_complete<type_id<strip_and_convert_t<T>>>;
 
 } // namespace caf::detail

@@ -1,37 +1,28 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 #include "caf/actor_control_block.hpp"
 #include "caf/actor_proxy.hpp"
 #include "caf/binary_deserializer.hpp"
 #include "caf/config.hpp"
+#include "caf/const_typed_message_view.hpp"
 #include "caf/detail/scope_guard.hpp"
 #include "caf/detail/sync_request_bouncer.hpp"
 #include "caf/execution_unit.hpp"
 #include "caf/io/basp/header.hpp"
+#include "caf/io/middleman.hpp"
 #include "caf/logger.hpp"
 #include "caf/message.hpp"
 #include "caf/message_id.hpp"
 #include "caf/node_id.hpp"
+#include "caf/telemetry/histogram.hpp"
+#include "caf/telemetry/timer.hpp"
 
 namespace caf::io::basp {
 
@@ -55,10 +46,16 @@ public:
     // Registry setup.
     dref.proxies_->set_last_hop(&dref.last_hop_);
     // Get the local receiver.
-    if (dref.hdr_.has(basp::header::named_receiver_flag))
-      dst = sys.registry().get(static_cast<atom_value>(dref.hdr_.dest_actor));
-    else
+    if (dref.hdr_.has(basp::header::named_receiver_flag)) {
+      // TODO: consider replacing hacky workaround (requires changing BASP).
+      if (dref.hdr_.dest_actor == 1) {
+        dst = sys.registry().get("ConfigServ");
+      } else if (dref.hdr_.dest_actor == 2) {
+        dst = sys.registry().get("SpawnServ");
+      }
+    } else {
       dst = sys.registry().get(dref.hdr_.dest_actor);
+    }
     // Short circuit if we already know there's nothing to do.
     if (dst == nullptr && !mid.is_request()) {
       CAF_LOG_INFO("drop asynchronous remote message: unknown destination");
@@ -68,8 +65,14 @@ public:
     if (dref.hdr_.operation == basp::message_type::routed_message) {
       node_id src_node;
       node_id dst_node;
-      if (auto err = source(src_node, dst_node)) {
-        CAF_LOG_ERROR("cannot read source and destination of remote message");
+      if (!source.apply(src_node)) {
+        CAF_LOG_ERROR(
+          "failed to read source of routed message:" << source.get_error());
+        return;
+      }
+      if (!source.apply(dst_node)) {
+        CAF_LOG_ERROR("failed to read destination of routed message:"
+                      << source.get_error());
         return;
       }
       CAF_ASSERT(dst_node == sys.node());
@@ -91,32 +94,38 @@ public:
       return;
     }
     // Get the remainder of the message.
-    if (auto err = source(stages, msg)) {
-      CAF_LOG_ERROR("cannot read stages and content of remote message");
+    if (!source.apply(stages)) {
+      CAF_LOG_ERROR("failed to read stages:" << source.get_error());
       return;
     }
+    auto& mm_metrics = ctx->system().middleman().metric_singletons;
+    auto t0 = telemetry::timer::clock_type::now();
+    if (!source.apply(msg)) {
+      CAF_LOG_ERROR("failed to read message content:" << source.get_error());
+      return;
+    }
+    telemetry::timer::observe(mm_metrics.deserialization_time, t0);
+    auto signed_size = static_cast<int64_t>(dref.payload_.size());
+    mm_metrics.inbound_messages_size->observe(signed_size);
     // Intercept link messages. Forwarding actor proxies signalize linking
     // by sending link_atom/unlink_atom message with src == dest.
-    if (msg.type_token() == make_type_token<atom_value, strong_actor_ptr>()) {
-      const auto& ptr = msg.get_as<strong_actor_ptr>(1);
-      switch (static_cast<uint64_t>(msg.get_as<atom_value>(0))) {
-        default:
-          break;
-        case link_atom::uint_value(): {
-          if (ptr != nullptr)
-            static_cast<actor_proxy*>(ptr->get())->add_link(dst->get());
-          else
-            CAF_LOG_WARNING("received link message with invalid target");
-          return;
-        }
-        case unlink_atom::uint_value(): {
-          if (ptr != nullptr)
-            static_cast<actor_proxy*>(ptr->get())->remove_link(dst->get());
-          else
-            CAF_LOG_DEBUG("received unlink message with invalid target");
-          return;
-        }
-      }
+    if (auto view
+        = make_const_typed_message_view<link_atom, strong_actor_ptr>(msg)) {
+      const auto& ptr = get<1>(view);
+      if (ptr != nullptr)
+        static_cast<actor_proxy*>(ptr->get())->add_link(dst->get());
+      else
+        CAF_LOG_WARNING("received link message with invalid target");
+      return;
+    }
+    if (auto view
+        = make_const_typed_message_view<unlink_atom, strong_actor_ptr>(msg)) {
+      const auto& ptr = get<1>(view);
+      if (ptr != nullptr)
+        static_cast<actor_proxy*>(ptr->get())->remove_link(dst->get());
+      else
+        CAF_LOG_DEBUG("received unlink message with invalid target");
+      return;
     }
     // Ship the message.
     guard.disable();

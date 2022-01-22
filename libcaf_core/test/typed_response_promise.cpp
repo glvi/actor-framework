@@ -1,225 +1,177 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
-
-#include <map>
-
-#include "caf/config.hpp"
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE typed_response_promise
-#include "caf/test/unit_test.hpp"
 
-#include "caf/all.hpp"
+#include "caf/typed_response_promise.hpp"
+
+#include "core-test.hpp"
 
 using namespace caf;
 
 namespace {
 
-using foo_actor = typed_actor<replies_to<int>::with<int>,
-                              replies_to<get_atom, int>::with<int>,
-                              replies_to<get_atom, int, int>::with<int, int>,
-                              replies_to<get_atom, double>::with<double>,
-                              replies_to<get_atom, double, double>
-                              ::with<double, double>,
-                              reacts_to<put_atom, int, int>,
-                              reacts_to<put_atom, int, int, int>>;
+using testee_actor = typed_actor<result<int>(int, int), result<void>(ok_atom)>;
 
-using foo_promise = typed_response_promise<int>;
-using foo2_promise = typed_response_promise<int, int>;
-using foo3_promise = typed_response_promise<double>;
+testee_actor::behavior_type adder() {
+  return {
+    [](int x, int y) { return x + y; },
+    [](ok_atom) {},
+  };
+}
 
-using get1_helper = typed_actor<replies_to<int, int>::with<put_atom, int, int>>;
-using get2_helper = typed_actor<replies_to<int, int, int>::with<put_atom, int, int, int>>;
+testee_actor::behavior_type delegator(testee_actor::pointer self,
+                                      testee_actor worker) {
+  return {
+    [=](int x, int y) {
+      auto promise = self->make_response_promise<int>();
+      return promise.delegate(worker, x, y);
+    },
+    [=](ok_atom) {
+      auto promise = self->make_response_promise<void>();
+      return promise.delegate(worker, ok_atom_v);
+    },
+  };
+}
 
-class foo_actor_impl : public foo_actor::base {
-public:
-  foo_actor_impl(actor_config& cfg) : foo_actor::base(cfg) {
-    // nop
-  }
+testee_actor::behavior_type requester_v1(testee_actor::pointer self,
+                                         testee_actor worker) {
+  return {
+    [=](int x, int y) {
+      auto rp = self->make_response_promise<int>();
+      self->request(worker, infinite, x, y)
+        .then(
+          [rp](int result) mutable {
+            CHECK(rp.pending());
+            rp.deliver(result);
+          },
+          [rp](error err) mutable {
+            CHECK(rp.pending());
+            rp.deliver(std::move(err));
+          });
+      return rp;
+    },
+    [=](ok_atom) {
+      auto rp = self->make_response_promise<void>();
+      self->request(worker, infinite, ok_atom_v)
+        .then(
+          [rp]() mutable {
+            CHECK(rp.pending());
+            rp.deliver();
+          },
+          [rp](error err) mutable {
+            CHECK(rp.pending());
+            rp.deliver(std::move(err));
+          });
+      return rp;
+    },
+  };
+}
 
-  behavior_type make_behavior() override {
-    return {
-      [=](int x) -> foo_promise {
-         auto resp = response(x * 2);
-         CAF_CHECK(!resp.pending());
-         return resp.deliver(x * 4); // has no effect
-      },
-      [=](get_atom, int x) -> foo_promise {
-        auto calculator = spawn([]() -> get1_helper::behavior_type {
-          return {
-            [](int promise_id, int value) -> result<put_atom, int, int> {
-              return {put_atom::value, promise_id, value * 2};
-            }
-          };
-        });
-        send(calculator, next_id_, x);
-        auto& entry = promises_[next_id_++];
-        entry = make_response_promise<foo_promise>();
-        return entry;
-      },
-      [=](get_atom, int x, int y) -> foo2_promise {
-        auto calculator = spawn([]() -> get2_helper::behavior_type {
-          return {
-            [](int promise_id, int v0, int v1) -> result<put_atom, int, int, int> {
-              return {put_atom::value, promise_id, v0 * 2, v1 * 2};
-            }
-          };
-        });
-        send(calculator, next_id_, x, y);
-        auto& entry = promises2_[next_id_++];
-        entry = make_response_promise<foo2_promise>();
-        // verify move semantics
-        CAF_CHECK(entry.pending());
-        foo2_promise tmp(std::move(entry));
-        CAF_CHECK(!entry.pending());
-        CAF_CHECK(tmp.pending());
-        entry = std::move(tmp);
-        CAF_CHECK(entry.pending());
-        CAF_CHECK(!tmp.pending());
-        return entry;
-      },
-      [=](get_atom, double) -> foo3_promise {
-        auto resp = make_response_promise<double>();
-        return resp.deliver(make_error(sec::unexpected_message));
-      },
-      [=](get_atom, double x, double y) {
-        return response(x * 2, y * 2);
-      },
-      [=](put_atom, int promise_id, int x) {
-        auto i = promises_.find(promise_id);
-        if (i == promises_.end())
-          return;
-        i->second.deliver(x);
-        promises_.erase(i);
-      },
-      [=](put_atom, int promise_id, int x, int y) {
-        auto i = promises2_.find(promise_id);
-        if (i == promises2_.end())
-          return;
-        i->second.deliver(x, y);
-        promises2_.erase(i);
-      }
-    };
-  }
-
-private:
-  int next_id_ = 0;
-  std::map<int, foo_promise> promises_;
-  std::map<int, foo2_promise> promises2_;
-};
-
-struct fixture {
-  fixture()
-      : system(cfg),
-        self(system, true),
-        foo(system.spawn<foo_actor_impl>()) {
-    // nop
-  }
-
-  actor_system_config cfg;
-  actor_system system;
-  scoped_actor self;
-  foo_actor foo;
-};
+testee_actor::behavior_type requester_v2(testee_actor::pointer self,
+                                         testee_actor worker) {
+  return {
+    [=](int x, int y) {
+      auto rp = self->make_response_promise<int>();
+      auto deliver = [rp](expected<int> x) mutable {
+        CHECK(rp.pending());
+        rp.deliver(std::move(x));
+      };
+      self->request(worker, infinite, x, y)
+        .then([deliver](int result) mutable { deliver(result); },
+              [deliver](error err) mutable { deliver(std::move(err)); });
+      return rp;
+    },
+    [=](ok_atom) {
+      auto rp = self->make_response_promise<void>();
+      auto deliver = [rp](expected<void> x) mutable {
+        CHECK(rp.pending());
+        rp.deliver(std::move(x));
+      };
+      self->request(worker, infinite, ok_atom_v)
+        .then([deliver]() mutable { deliver({}); },
+              [deliver](error err) mutable { deliver(std::move(err)); });
+      return rp;
+    },
+  };
+}
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(typed_spawn_tests, fixture)
+BEGIN_FIXTURE_SCOPE(test_coordinator_fixture<>)
 
-CAF_TEST(typed_response_promise) {
-  typed_response_promise<int> resp;
-  CAF_MESSAGE("trigger 'invalid response promise' error");
-  resp.deliver(1); // delivers on an invalid promise has no effect
-  auto f = make_function_view(foo);
-  CAF_CHECK_EQUAL(f(get_atom::value, 42), 84);
-  CAF_CHECK_EQUAL(f(get_atom::value, 42, 52), std::make_tuple(84, 104));
-  CAF_CHECK_EQUAL(f(get_atom::value, 3.14, 3.14), std::make_tuple(6.28, 6.28));
-}
-
-CAF_TEST(typed_response_promise_chained) {
-  auto f = make_function_view(foo * foo * foo);
-  CAF_CHECK_EQUAL(f(1), 8);
-}
-
-// verify that only requests get an error response message
-CAF_TEST(error_response_message) {
-  auto f = make_function_view(foo);
-  CAF_CHECK_EQUAL(f(get_atom::value, 3.14), sec::unexpected_message);
-  self->send(foo, get_atom::value, 42);
-  self->receive(
-    [](int x) {
-      CAF_CHECK_EQUAL(x, 84);
-    },
-    [](double x) {
-      CAF_ERROR("unexpected ordinary response message received: " << x);
-    }
-  );
-  self->send(foo, get_atom::value, 3.14);
-  self->receive(
-    [&](error& err) {
-      CAF_CHECK_EQUAL(err, sec::unexpected_message);
-      self->send(self, message{});
-    }
-  );
-}
-
-// verify that delivering to a satisfied promise has no effect
-CAF_TEST(satisfied_promise) {
-  self->send(foo, 1);
-  self->send(foo, get_atom::value, 3.14, 3.14);
-  int i = 0;
-  self->receive_for(i, 2) (
-    [](int x) {
-      CAF_CHECK_EQUAL(x, 1 * 2);
-    },
-    [](double x, double y) {
-      CAF_CHECK_EQUAL(x, 3.14 * 2);
-      CAF_CHECK_EQUAL(y, 3.14 * 2);
-    }
-  );
-}
-
-CAF_TEST(delegating_promises) {
-  using task = std::pair<typed_response_promise<int>, int>;
-  struct state {
-    std::vector<task> tasks;
-  };
-  using bar_actor = typed_actor<replies_to<int>::with<int>, reacts_to<ok_atom>>;
-  auto bar_fun = [](bar_actor::stateful_pointer<state> self, foo_actor worker)
-                 -> bar_actor::behavior_type {
-    return {
-      [=](int x) -> typed_response_promise<int> {
-        auto& tasks = self->state.tasks;
-        tasks.emplace_back(self->make_response_promise<int>(), x);
-        self->send(self, ok_atom::value);
-        return tasks.back().first;
-      },
-      [=](ok_atom) {
-        auto& tasks = self->state.tasks;
-        if (!tasks.empty()) {
-          auto& task = tasks.back();
-          task.first.delegate(worker, task.second);
-          tasks.pop_back();
+SCENARIO("response promises allow delaying of response messages") {
+  auto adder_hdl = sys.spawn(adder);
+  std::map<std::string, testee_actor> impls;
+  impls["with a value or an error"] = sys.spawn(requester_v1, adder_hdl);
+  impls["with an expected<T>"] = sys.spawn(requester_v2, adder_hdl);
+  for (auto& [desc, hdl] : impls) {
+    GIVEN("a dispatcher that calls deliver " << desc << " on its promise") {
+      WHEN("sending a request with two integers to the dispatcher") {
+        inject((int, int), from(self).to(hdl).with(3, 4));
+        THEN("clients receive the response from the dispatcher") {
+          expect((int, int), from(hdl).to(adder_hdl).with(3, 4));
+          expect((int), from(adder_hdl).to(hdl).with(7));
+          expect((int), from(hdl).to(self).with(7));
         }
       }
-    };
-  };
-  auto f = make_function_view(system.spawn(bar_fun, foo));
-  CAF_CHECK_EQUAL(f(42), 84);
+      WHEN("sending ok_atom to the dispatcher synchronously") {
+        auto res = self->request(hdl, infinite, ok_atom_v);
+        auto fetch_result = [&] {
+          message result;
+          res.receive([] {}, // void result
+                      [&](const error& reason) {
+                        result = make_message(reason);
+                      });
+          return result;
+        };
+        THEN("clients receive an empty response from the dispatcher") {
+          expect((ok_atom), from(self).to(hdl));
+          expect((ok_atom), from(hdl).to(adder_hdl));
+          expect((void), from(adder_hdl).to(hdl));
+          CHECK(fetch_result().empty());
+        }
+      }
+      WHEN("sending ok_atom to the dispatcher asynchronously") {
+        THEN("clients receive no response from the dispatcher") {
+          inject((ok_atom), from(self).to(hdl).with(ok_atom_v));
+          expect((ok_atom), from(hdl).to(adder_hdl));
+          expect((void), from(adder_hdl).to(hdl));
+          CHECK(self->mailbox().empty());
+        }
+      }
+    }
+  }
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+SCENARIO("response promises send errors when broken") {
+  auto adder_hdl = sys.spawn(adder);
+  auto hdl = sys.spawn(requester_v1, adder_hdl);
+  GIVEN("a dispatcher, and adder and a client") {
+    WHEN("the dispatcher terminates before calling deliver on its promise") {
+      inject((int, int), from(self).to(hdl).with(3, 4));
+      inject((exit_msg),
+             to(hdl).with(exit_msg{hdl.address(), exit_reason::kill}));
+      THEN("clients receive a broken_promise error") {
+        expect((error), from(hdl).to(self).with(sec::broken_promise));
+      }
+    }
+  }
+}
+
+SCENARIO("response promises allow delegation") {
+  GIVEN("a dispatcher that calls delegate on its promise") {
+    auto adder_hdl = sys.spawn(adder);
+    auto hdl = sys.spawn(delegator, adder_hdl);
+    WHEN("sending a request to the dispatcher") {
+      inject((int, int), from(self).to(hdl).with(3, 4));
+      THEN("clients receive the response from the adder") {
+        expect((int, int), from(self).to(adder_hdl).with(3, 4));
+        expect((int), from(adder_hdl).to(self).with(7));
+      }
+    }
+  }
+}
+
+END_FIXTURE_SCOPE()

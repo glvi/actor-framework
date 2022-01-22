@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -262,22 +248,22 @@ public:
   void flush_runnables();
 
   /// Executes the next `num` enqueued runnables immediately.
-  inline void inline_next_runnables(size_t num) {
+  void inline_next_runnables(size_t num) {
     inline_runnables_ += num;
   }
 
   /// Executes the next enqueued runnable immediately.
-  inline void inline_next_runnable() {
+  void inline_next_runnable() {
     inline_next_runnables(1);
   }
 
   /// Resets the counter for the next inlined runnables.
-  inline void reset_inlining() {
+  void reset_inlining() {
     inline_runnables_ = 0;
   }
 
   /// Installs a callback that is triggered on the next inlined runnable.
-  inline void after_next_inlined_runnable(std::function<void()> f) {
+  void after_next_inlined_runnable(std::function<void()> f) {
     inline_runnable_callback_ = std::move(f);
   }
 

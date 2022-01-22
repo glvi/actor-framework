@@ -1,31 +1,16 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE selective_streaming
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
 
 #include <memory>
 #include <numeric>
 
 #include "caf/actor_system.hpp"
 #include "caf/actor_system_config.hpp"
-#include "caf/atom.hpp"
 #include "caf/attach_continuous_stream_stage.hpp"
 #include "caf/attach_stream_sink.hpp"
 #include "caf/attach_stream_source.hpp"
@@ -33,15 +18,11 @@
 #include "caf/event_based_actor.hpp"
 #include "caf/stateful_actor.hpp"
 
-using std::string;
-
 using namespace caf;
 
 namespace {
 
-enum class level { all, trace, debug, warning, error };
-
-using value_type = std::pair<level, string>;
+using value_type = std::pair<level, std::string>;
 
 struct select {
   static bool apply(level x, const value_type& y) noexcept {
@@ -60,7 +41,7 @@ buf make_log(level lvl) {
   buf result{{level::trace, "trace1"},
              {level::trace, "trace2"},
              {level::debug, "debug1"},
-             {level::error, "errro1"},
+             {level::error, "error1"},
              {level::trace, "trace3"}};
   auto predicate = [=](const value_type& x) { return !select::apply(lvl, x); };
   auto e = result.end();
@@ -73,34 +54,36 @@ buf make_log(level lvl) {
 TESTEE_SETUP();
 
 TESTEE(log_producer) {
-  return {[=](level lvl) -> result<stream<value_type>> {
-    auto res = attach_stream_source(
-      self,
-      // initialize state
-      [=](buf& xs) { xs = make_log(lvl); },
-      // get next element
-      [](buf& xs, downstream<value_type>& out, size_t num) {
-        CAF_MESSAGE("push " << num << " messages downstream");
-        auto n = std::min(num, xs.size());
-        for (size_t i = 0; i < n; ++i)
-          out.push(xs[i]);
-        xs.erase(xs.begin(), xs.begin() + static_cast<ptrdiff_t>(n));
-      },
-      // check whether we reached the end
-      [=](const buf& xs) {
-        if (xs.empty()) {
-          CAF_MESSAGE(self->name() << " is done");
-          return true;
-        }
-        return false;
-      },
-      unit, policy::arg<manager_type>::value);
-    auto& out = res.ptr()->out();
-    static_assert(std::is_same<decltype(out), manager_type&>::value,
-                  "source has wrong manager_type type");
-    out.set_filter(res.outbound_slot(), lvl);
-    return res;
-  }};
+  return {
+    [=](level lvl) -> result<stream<value_type>> {
+      auto res = attach_stream_source(
+        self,
+        // initialize state
+        [=](buf& xs) { xs = make_log(lvl); },
+        // get next element
+        [](buf& xs, downstream<value_type>& out, size_t num) {
+          MESSAGE("push " << num << " messages downstream");
+          auto n = std::min(num, xs.size());
+          for (size_t i = 0; i < n; ++i)
+            out.push(xs[i]);
+          xs.erase(xs.begin(), xs.begin() + static_cast<ptrdiff_t>(n));
+        },
+        // check whether we reached the end
+        [=](const buf& xs) {
+          if (xs.empty()) {
+            MESSAGE(self->name() << " is done");
+            return true;
+          }
+          return false;
+        },
+        unit, policy::arg<manager_type>::value);
+      auto& out = res.ptr()->out();
+      static_assert(std::is_same<decltype(out), manager_type&>::value,
+                    "source has wrong manager_type type");
+      out.set_filter(res.outbound_slot(), lvl);
+      return res;
+    },
+  };
 }
 
 TESTEE_STATE(log_dispatcher) {
@@ -119,18 +102,20 @@ TESTEE(log_dispatcher) {
       out.push(std::move(x));
     },
     // cleanup
-    [=](unit_t&, const error&) { CAF_MESSAGE(self->name() << " is done"); },
+    [=](unit_t&, const error&) { MESSAGE(self->name() << " is done"); },
     policy::arg<manager_type>::value);
-  return {[=](join_atom, level lvl) {
-            auto& stg = self->state.stage;
-            CAF_MESSAGE("received 'join' request");
-            auto result = stg->add_outbound_path();
-            stg->out().set_filter(result, lvl);
-            return result;
-          },
-          [=](const stream<value_type>& in) {
-            self->state.stage->add_inbound_path(in);
-          }};
+  return {
+    [=](join_atom, level lvl) {
+      auto& stg = self->state.stage;
+      MESSAGE("received 'join' request");
+      auto result = stg->add_outbound_path();
+      stg->out().set_filter(result, lvl);
+      return result;
+    },
+    [=](const stream<value_type>& in) {
+      self->state.stage->add_inbound_path(in);
+    },
+  };
 }
 
 TESTEE_STATE(log_consumer) {
@@ -138,58 +123,50 @@ TESTEE_STATE(log_consumer) {
 };
 
 TESTEE(log_consumer) {
-  return {[=](stream<value_type>& in) {
-    return attach_stream_sink(
-      self,
-      // input stream
-      in,
-      // initialize state
-      [=](unit_t&) {
-        // nop
-      },
-      // processing step
-      [=](unit_t&, value_type x) {
-        self->state.log.emplace_back(std::move(x));
-      },
-      // cleanup and produce result message
-      [=](unit_t&, const error&) { CAF_MESSAGE(self->name() << " is done"); });
-  }};
+  return {
+    [=](stream<value_type>& in) {
+      return attach_stream_sink(
+        self,
+        // input stream
+        in,
+        // initialize state
+        [=](unit_t&) {
+          // nop
+        },
+        // processing step
+        [=](unit_t&, value_type x) {
+          self->state.log.emplace_back(std::move(x));
+        },
+        // cleanup and produce result message
+        [=](unit_t&, const error&) { MESSAGE(self->name() << " is done"); });
+    },
+  };
 }
-
-struct config : actor_system_config {
-  config() {
-    add_message_type<value_type>("value_type");
-  }
-};
-
-using fixture = test_coordinator_fixture<config>;
 
 } // namespace
 
 // -- unit tests ---------------------------------------------------------------
 
-CAF_TEST_FIXTURE_SCOPE(selective_streaming_tests, fixture)
+BEGIN_FIXTURE_SCOPE(test_coordinator_fixture<>)
 
 CAF_TEST(select_all) {
   auto src = sys.spawn(log_producer);
   auto snk = sys.spawn(log_consumer);
-  CAF_MESSAGE(CAF_ARG(self) << CAF_ARG(src) << CAF_ARG(snk));
-  CAF_MESSAGE("initiate stream handshake");
+  MESSAGE(CAF_ARG(self) << CAF_ARG(src) << CAF_ARG(snk));
+  MESSAGE("initiate stream handshake");
   self->send(snk * src, level::all);
   run();
-  CAF_CHECK_EQUAL(deref<log_consumer_actor>(snk).state.log,
-                  make_log(level::all));
+  CHECK_EQ(deref<log_consumer_actor>(snk).state.log, make_log(level::all));
 }
 
 CAF_TEST(select_trace) {
   auto src = sys.spawn(log_producer);
   auto snk = sys.spawn(log_consumer);
-  CAF_MESSAGE(CAF_ARG(self) << CAF_ARG(src) << CAF_ARG(snk));
-  CAF_MESSAGE("initiate stream handshake");
+  MESSAGE(CAF_ARG(self) << CAF_ARG(src) << CAF_ARG(snk));
+  MESSAGE("initiate stream handshake");
   self->send(snk * src, level::trace);
   run();
-  CAF_CHECK_EQUAL(deref<log_consumer_actor>(snk).state.log,
-                  make_log(level::trace));
+  CHECK_EQ(deref<log_consumer_actor>(snk).state.log, make_log(level::trace));
 }
 
 CAF_TEST(forking) {
@@ -199,18 +176,16 @@ CAF_TEST(forking) {
   auto snk2 = sys.spawn(log_consumer);
   sched.run();
   self->send(stg * src, level::all);
-  self->send(snk1 * stg, join_atom::value, level::trace);
-  self->send(snk2 * stg, join_atom::value, level::error);
+  self->send(snk1 * stg, join_atom_v, level::trace);
+  self->send(snk2 * stg, join_atom_v, level::error);
   sched.run();
   auto& st = deref<log_dispatcher_actor>(stg).state;
   run_until([&] {
     return st.stage->inbound_paths().empty() && st.stage->out().clean();
   });
-  CAF_CHECK_EQUAL(deref<log_consumer_actor>(snk1).state.log,
-                  make_log(level::trace));
-  CAF_CHECK_EQUAL(deref<log_consumer_actor>(snk2).state.log,
-                  make_log(level::error));
+  CHECK_EQ(deref<log_consumer_actor>(snk1).state.log, make_log(level::trace));
+  CHECK_EQ(deref<log_consumer_actor>(snk2).state.log, make_log(level::error));
   self->send(stg, exit_reason::kill);
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

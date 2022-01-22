@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/string_algorithms.hpp"
 
@@ -73,13 +59,11 @@ void replace_all(std::string& str, string_view what, string_view with) {
   };
   auto i = next(str.begin());
   while (i != str.end()) {
-    auto before = std::distance(str.begin(), i);
-    CAF_ASSERT(before >= 0);
-    auto ws = static_cast<decltype(before)>(what.size());
-    str.replace(i, i + ws, with.begin(), with.end());
+    auto before = static_cast<size_t>(std::distance(str.begin(), i));
+    str.replace(i, i + what.size(), with.begin(), with.end());
     // Iterator i became invalidated -> use new iterator pointing to the first
     // character after the replaced text.
-    i = next(str.begin() + before + ws);
+    i = next(str.begin() + before + with.size());
   }
 }
 

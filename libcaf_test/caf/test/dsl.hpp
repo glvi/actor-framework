@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -25,7 +11,7 @@
 #include "caf/byte_buffer.hpp"
 #include "caf/config.hpp"
 #include "caf/detail/gcd.hpp"
-#include "caf/meta/annotation.hpp"
+#include "caf/init_global_meta_objects.hpp"
 #include "caf/test/unit_test.hpp"
 
 CAF_PUSH_WARNINGS
@@ -100,55 +86,42 @@ T get(const has_outer_type<U>&);
 template <class T, class U>
 bool is(const has_outer_type<U>&);
 
-template <class Tup>
+template <class Tuple>
 class elementwise_compare_inspector {
 public:
   using result_type = bool;
 
-  template <size_t X>
-  using pos = std::integral_constant<size_t, X>;
+  static constexpr size_t num_values = std::tuple_size_v<Tuple>;
 
-  explicit elementwise_compare_inspector(const Tup& xs) : xs_(xs) {
+  explicit elementwise_compare_inspector(const Tuple& xs) : xs_(xs) {
     // nop
   }
 
   template <class... Ts>
-  bool operator()(const Ts&... xs) {
-    return iterate(pos<0>{}, xs...);
+  bool operator()(const Ts&... xs) const {
+    static_assert(sizeof...(Ts) == num_values);
+    return apply(std::forward_as_tuple(xs...),
+                 std::index_sequence_for<Ts...>{});
   }
 
 private:
-  template <size_t X>
-  bool iterate(pos<X>) {
-    // end of recursion
-    return true;
-  }
-
-  template <size_t X, class T, class... Ts>
-  typename std::enable_if<caf::meta::is_annotation<T>::value, bool>::type
-  iterate(pos<X> pos, const T&, const Ts&... ys) {
-    return iterate(pos, ys...);
-  }
-
-  template <size_t X, class T, class... Ts>
-  typename std::enable_if<!caf::meta::is_annotation<T>::value, bool>::type
-  iterate(pos<X>, const T& y, const Ts&... ys) {
-    std::integral_constant<size_t, X + 1> next;
-    check(y, get<X>(xs_));
-    return iterate(next, ys...);
+  template <class OtherTuple, size_t... Is>
+  bool apply(OtherTuple values, std::index_sequence<Is...>) const {
+    using std::get;
+    return (check(get<Is>(values), get<Is>(xs_)) && ...);
   }
 
   template <class T, class U>
-  static void check(const T& x, const U& y) {
-    CAF_CHECK_EQUAL(x, y);
+  static bool check(const T& x, const U& y) {
+    return x == y;
   }
 
   template <class T>
-  static void check(const T&, const wildcard&) {
-    // nop
+  static bool check(const T&, const wildcard&) {
+    return true;
   }
 
-  const Tup& xs_;
+  const Tuple& xs_;
 };
 
 // -- unified access to all actor handles in CAF -------------------------------
@@ -232,9 +205,11 @@ private:
 template <class... Ts>
 caf::optional<std::tuple<Ts...>> default_extract(caf_handle x) {
   auto ptr = x->peek_at_next_mailbox_element();
-  if (ptr == nullptr || !ptr->content().template match_elements<Ts...>())
+  if (ptr == nullptr)
     return caf::none;
-  return ptr->content().template get_as_tuple<Ts...>();
+  if (auto view = caf::make_const_typed_message_view<Ts...>(ptr->content()))
+    return to_tuple(view);
+  return caf::none;
 }
 
 /// @private
@@ -276,16 +251,18 @@ caf::optional<std::tuple<T, Ts...>> try_extract(caf_handle x) {
 /// the mailbox. Fails on an empty mailbox or if the content of the next
 /// element does not match `<T, Ts...>`.
 template <class T, class... Ts>
-std::tuple<T, Ts...> extract(caf_handle x) {
-  auto result = try_extract<T, Ts...>(x);
-  if (result == caf::none) {
+std::tuple<T, Ts...> extract(caf_handle x, int src_line) {
+  if (auto result = try_extract<T, Ts...>(x); result != caf::none) {
+    return std::move(*result);
+  } else {
     auto ptr = x->peek_at_next_mailbox_element();
     if (ptr == nullptr)
-      CAF_FAIL("Mailbox is empty");
-    CAF_FAIL(
-      "Message does not match expected pattern: " << to_string(ptr->content()));
+      CAF_FAIL("cannot peek at the next message: mailbox is empty", src_line);
+    else
+      CAF_FAIL("message does not match expected types: "
+                 << to_string(ptr->content()),
+               src_line);
   }
-  return std::move(*result);
 }
 
 template <class T, class... Ts>
@@ -296,22 +273,25 @@ bool received(caf_handle x) {
 template <class... Ts>
 class expect_clause {
 public:
-  explicit expect_clause(caf::scheduler::test_coordinator& sched)
-    : sched_(sched), dest_(nullptr) {
-    peek_ = [=] {
+  explicit expect_clause(caf::scheduler::test_coordinator& sched, int src_line)
+    : sched_(sched), src_line_(src_line) {
+    peek_ = [this] {
       /// The extractor will call CAF_FAIL on a type mismatch, essentially
       /// performing a type check when ignoring the result.
-      extract<Ts...>(dest_);
+      extract<Ts...>(dest_, src_line_);
     };
   }
 
   expect_clause(expect_clause&& other) = default;
 
-  ~expect_clause() {
-    if (peek_ != nullptr) {
-      peek_();
-      run_once();
-    }
+  void eval(const char* type_str, const char* fields_str) {
+    using namespace caf;
+    test::logger::instance().verbose()
+      << term::yellow << "  -> " << term::reset
+      << test::logger::stream::reset_flags_t{} << "expect " << type_str << "."
+      << fields_str << " [line " << src_line_ << "]\n";
+    peek_();
+    run_once();
   }
 
   expect_clause& from(const wildcard&) {
@@ -326,34 +306,35 @@ public:
 
   template <class Handle>
   expect_clause& to(const Handle& whom) {
-    CAF_REQUIRE(sched_.prioritize(whom));
+    if (!sched_.prioritize(whom))
+      CAF_FAIL("there is no message for the designated receiver", src_line_);
     dest_ = &sched_.next_job<caf::abstract_actor>();
     auto ptr = dest_->peek_at_next_mailbox_element();
-    CAF_REQUIRE(ptr != nullptr);
-    if (src_)
-      CAF_REQUIRE_EQUAL(ptr->sender, src_);
+    if (ptr == nullptr)
+      CAF_FAIL("the designated receiver has no message in its mailbox",
+               src_line_);
+    if (src_ && ptr->sender != src_)
+      CAF_FAIL("the found message is not from the expected sender", src_line_);
     return *this;
   }
 
   expect_clause& to(const caf::scoped_actor& whom) {
-    dest_ = whom.ptr();
+    dest_ = caf::actor_cast<caf::abstract_actor*>(whom);
     return *this;
   }
 
   template <class... Us>
-  void with(Us&&... xs) {
-    // TODO: replace this workaround with the make_tuple() line when dropping
-    //       support for GCC 4.8.
-    std::tuple<typename std::decay<Us>::type...> tmp{std::forward<Us>(xs)...};
-    // auto tmp = std::make_tuple(std::forward<Us>(xs)...);
-    // TODO: move tmp into lambda when switching to C++14
-    peek_ = [=] {
-      using namespace caf::detail;
-      elementwise_compare_inspector<decltype(tmp)> inspector{tmp};
-      auto ys = extract<Ts...>(dest_);
-      auto ys_indices = get_indices(ys);
-      CAF_REQUIRE(apply_args(inspector, ys_indices, ys));
+  expect_clause& with(Us&&... xs) {
+    peek_ = [this, tmp = std::make_tuple(std::forward<Us>(xs)...)] {
+      auto inspector = elementwise_compare_inspector<decltype(tmp)>{tmp};
+      auto content = extract<Ts...>(dest_, src_line_);
+      if (!std::apply(inspector, content))
+        CAF_FAIL("message does not match expected content: "
+                   << caf::deep_to_string(tmp) << " vs "
+                   << caf::deep_to_string(content),
+                 src_line_);
     };
+    return *this;
   }
 
 protected:
@@ -367,26 +348,33 @@ protected:
 
   caf::scheduler::test_coordinator& sched_;
   caf::strong_actor_ptr src_;
-  caf::abstract_actor* dest_;
+  caf::abstract_actor* dest_ = nullptr;
   std::function<void()> peek_;
+  int src_line_;
 };
 
 template <>
 class expect_clause<void> {
 public:
-  explicit expect_clause(caf::scheduler::test_coordinator& sched)
-    : sched_(sched), dest_(nullptr) {
+  explicit expect_clause(caf::scheduler::test_coordinator& sched, int src_line)
+    : sched_(sched), src_line_(src_line) {
     // nop
   }
 
   expect_clause(expect_clause&& other) = default;
 
-  ~expect_clause() {
+  void eval(const char* type_str, const char* fields_str) {
+    using namespace caf;
+    test::logger::instance().verbose()
+      << term::yellow << "  -> " << term::reset
+      << test::logger::stream::reset_flags_t{} << "expect(void)." << fields_str
+      << " [line " << src_line_ << "]\n";
     auto ptr = dest_->peek_at_next_mailbox_element();
     if (ptr == nullptr)
-      CAF_FAIL("no message found");
+      CAF_FAIL("no message found", src_line_);
     if (!ptr->content().empty())
-      CAF_FAIL("non-empty message found: " << to_string(ptr->content()));
+      CAF_FAIL("non-empty message found: " << to_string(ptr->content()),
+               src_line_);
     run_once();
   }
 
@@ -412,7 +400,7 @@ public:
   }
 
   expect_clause& to(const caf::scoped_actor& whom) {
-    dest_ = whom.ptr();
+    dest_ = caf::actor_cast<caf::abstract_actor*>(whom);
     return *this;
   }
 
@@ -427,14 +415,15 @@ protected:
 
   caf::scheduler::test_coordinator& sched_;
   caf::strong_actor_ptr src_;
-  caf::abstract_actor* dest_;
+  caf::abstract_actor* dest_ = nullptr;
+  int src_line_;
 };
 
 template <class... Ts>
 class inject_clause {
 public:
-  explicit inject_clause(caf::scheduler::test_coordinator& sched)
-    : sched_(sched), dest_(nullptr) {
+  explicit inject_clause(caf::scheduler::test_coordinator& sched, int src_line)
+    : sched_(sched), src_line_(src_line) {
     // nop
   }
 
@@ -452,31 +441,39 @@ public:
     return *this;
   }
 
-  inject_clause& to(const caf::scoped_actor& whom) {
-    dest_ = whom.ptr();
+  inject_clause& with(Ts... xs) {
+    msg_ = caf::make_message(std::move(xs)...);
     return *this;
   }
 
-  void with(Ts... xs) {
-    if (src_ == nullptr)
-      CAF_FAIL("missing .from() in inject() statement");
+  void eval(const char* type_str, const char* fields_str) {
+    using namespace caf;
+    test::logger::instance().verbose()
+      << term::yellow << "  -> " << term::reset
+      << test::logger::stream::reset_flags_t{} << "inject" << type_str << "."
+      << fields_str << " [line " << src_line_ << "]\n";
     if (dest_ == nullptr)
-      CAF_FAIL("missing .to() in inject() statement");
-    caf::send_as(caf::actor_cast<caf::actor>(src_),
-                 caf::actor_cast<caf::actor>(dest_), xs...);
-    CAF_REQUIRE(sched_.prioritize(dest_));
+      CAF_FAIL("missing .to() in inject() statement", src_line_);
+    else if (src_ == nullptr)
+      caf::anon_send(caf::actor_cast<caf::actor>(dest_), msg_);
+    else
+      caf::send_as(caf::actor_cast<caf::actor>(src_),
+                   caf::actor_cast<caf::actor>(dest_), msg_);
+    if (!sched_.prioritize(dest_))
+      CAF_FAIL("inject: failed to schedule destination actor", src_line_);
     auto dest_ptr = &sched_.next_job<caf::abstract_actor>();
     auto ptr = dest_ptr->peek_at_next_mailbox_element();
-    CAF_REQUIRE(ptr != nullptr);
-    CAF_REQUIRE_EQUAL(ptr->sender, src_);
-    // TODO: replace this workaround with the make_tuple() line when dropping
-    //       support for GCC 4.8.
-    std::tuple<Ts...> tmp{std::move(xs)...};
-    using namespace caf::detail;
-    elementwise_compare_inspector<decltype(tmp)> inspector{tmp};
-    auto ys = extract<Ts...>(dest_);
-    auto ys_indices = get_indices(ys);
-    CAF_REQUIRE(apply_args(inspector, ys_indices, ys));
+    if (ptr == nullptr)
+      CAF_FAIL("inject: failed to get next message from destination actor",
+               src_line_);
+    if (ptr->sender != src_)
+      CAF_FAIL("inject: found unexpected sender for the next message",
+               src_line_);
+    if (ptr->payload.cptr() != msg_.cptr())
+      CAF_FAIL("inject: found unexpected message => " << ptr->payload << " !! "
+                                                      << msg_,
+               src_line_);
+    msg_.reset(); // drop local reference before running the actor
     run_once();
   }
 
@@ -493,25 +490,24 @@ protected:
   caf::scheduler::test_coordinator& sched_;
   caf::strong_actor_ptr src_;
   caf::strong_actor_ptr dest_;
+  caf::message msg_;
+  int src_line_;
 };
 
 template <class... Ts>
 class allow_clause {
 public:
-  explicit allow_clause(caf::scheduler::test_coordinator& sched)
-    : sched_(sched), dest_(nullptr) {
-    peek_ = [=] {
+  explicit allow_clause(caf::scheduler::test_coordinator& sched, int src_line)
+    : sched_(sched), src_line_(src_line) {
+    peek_ = [this] {
       if (dest_ != nullptr)
         return try_extract<Ts...>(dest_) != caf::none;
-      return false;
+      else
+        return false;
     };
   }
 
   allow_clause(allow_clause&& other) = default;
-
-  ~allow_clause() {
-    eval();
-  }
 
   allow_clause& from(const wildcard&) {
     return *this;
@@ -527,40 +523,46 @@ public:
   allow_clause& to(const Handle& whom) {
     if (sched_.prioritize(whom))
       dest_ = &sched_.next_job<caf::abstract_actor>();
-    return *this;
-  }
-
-  allow_clause& to(const caf::scoped_actor& whom) {
-    dest_ = whom.ptr();
+    else if (auto ptr = caf::actor_cast<caf::abstract_actor*>(whom))
+      dest_ = dynamic_cast<caf::blocking_actor*>(ptr);
     return *this;
   }
 
   template <class... Us>
-  void with(Us&&... xs) {
-    // TODO: replace this workaround with make_tuple() when dropping support
-    //       for GCC 4.8.
-    std::tuple<typename std::decay<Us>::type...> tmp{std::forward<Us>(xs)...};
-    // TODO: move tmp into lambda when switching to C++14
-    peek_ = [=] {
+  allow_clause& with(Us&&... xs) {
+    peek_ = [this, tmp = std::make_tuple(std::forward<Us>(xs)...)] {
       using namespace caf::detail;
-      elementwise_compare_inspector<decltype(tmp)> inspector{tmp};
-      auto ys = try_extract<Ts...>(dest_);
-      if (ys != caf::none) {
-        auto ys_indices = get_indices(*ys);
-        return apply_args(inspector, ys_indices, *ys);
+      if (dest_ != nullptr) {
+        if (auto ys = try_extract<Ts...>(dest_); ys != caf::none) {
+          elementwise_compare_inspector<decltype(tmp)> inspector{tmp};
+          auto ys_indices = get_indices(*ys);
+          return apply_args(inspector, ys_indices, *ys);
+        }
       }
       return false;
     };
+    return *this;
   }
 
-  bool eval() {
-    if (peek_ != nullptr) {
-      if (peek_()) {
-        run_once();
-        return true;
-      }
+  bool eval(const char* type_str, const char* fields_str) {
+    using namespace caf;
+    test::logger::instance().verbose()
+      << term::yellow << "  -> " << term::reset
+      << test::logger::stream::reset_flags_t{} << "allow" << type_str << "."
+      << fields_str << " [line " << src_line_ << "]\n";
+    if (!dest_) {
+      return false;
     }
-    return false;
+    if (auto msg_ptr = dest_->peek_at_next_mailbox_element(); !msg_ptr) {
+      return false;
+    } else if (src_ && msg_ptr->sender != src_) {
+      return false;
+    } else if (peek_()) {
+      run_once();
+      return true;
+    } else {
+      return false;
+    }
   }
 
 protected:
@@ -574,15 +576,16 @@ protected:
 
   caf::scheduler::test_coordinator& sched_;
   caf::strong_actor_ptr src_;
-  caf::abstract_actor* dest_;
+  caf::abstract_actor* dest_ = nullptr;
   std::function<bool()> peek_;
+  int src_line_;
 };
 
 template <class... Ts>
 class disallow_clause {
 public:
-  disallow_clause() {
-    check_ = [=] {
+  disallow_clause(int src_line) : src_line_(src_line) {
+    check_ = [this] {
       auto ptr = dest_->peek_at_next_mailbox_element();
       if (ptr == nullptr)
         return;
@@ -590,16 +593,12 @@ public:
         return;
       auto res = try_extract<Ts...>(dest_);
       if (res != caf::none)
-        CAF_FAIL("received disallowed message: " << caf::deep_to_string(*ptr));
+        CAF_FAIL("received disallowed message: " << caf::deep_to_string(*ptr),
+                 src_line_);
     };
   }
 
   disallow_clause(disallow_clause&& other) = default;
-
-  ~disallow_clause() {
-    if (check_ != nullptr)
-      check_();
-  }
 
   disallow_clause& from(const wildcard&) {
     return *this;
@@ -616,12 +615,8 @@ public:
   }
 
   template <class... Us>
-  void with(Us&&... xs) {
-    // TODO: replace this workaround with make_tuple() when dropping support
-    //       for GCC 4.8.
-    std::tuple<typename std::decay<Us>::type...> tmp{std::forward<Us>(xs)...};
-    // TODO: move tmp into lambda when switching to C++14
-    check_ = [=] {
+  disallow_clause& with(Us&&... xs) {
+    check_ = [this, tmp = std::make_tuple(std::forward<Us>(xs)...)] {
       auto ptr = dest_->peek_at_next_mailbox_element();
       if (ptr == nullptr)
         return;
@@ -634,15 +629,26 @@ public:
         auto& ys = *res;
         auto ys_indices = get_indices(ys);
         if (apply_args(inspector, ys_indices, ys))
-          CAF_FAIL("received disallowed message: " << CAF_ARG(*res));
+          CAF_FAIL("received disallowed message: " << CAF_ARG(*res), src_line_);
       }
     };
+    return *this;
+  }
+
+  void eval(const char* type_str, const char* fields_str) {
+    using namespace caf;
+    test::logger::instance().verbose()
+      << term::yellow << "  -> " << term::reset
+      << test::logger::stream::reset_flags_t{} << "disallow" << type_str << "."
+      << fields_str << " [line " << src_line_ << "]\n";
+    check_();
   }
 
 protected:
   caf_handle src_;
   caf_handle dest_;
   std::function<void()> check_;
+  int src_line_;
 };
 
 template <class... Ts>
@@ -652,9 +658,7 @@ struct test_coordinator_fixture_fetch_helper {
   operator()(caf::response_handle<Self, Policy<Interface>>& from) const {
     std::tuple<Ts...> result;
     from.receive([&](Ts&... xs) { result = std::make_tuple(std::move(xs)...); },
-                 [&](caf::error& err) {
-                   FAIL(from.self()->system().render(err));
-                 });
+                 [&](caf::error& err) { CAF_FAIL(err); });
     return result;
   }
 };
@@ -665,9 +669,7 @@ struct test_coordinator_fixture_fetch_helper<T> {
   T operator()(caf::response_handle<Self, Policy<Interface>>& from) const {
     T result;
     from.receive([&](T& x) { result = std::move(x); },
-                 [&](caf::error& err) {
-                   FAIL(from.self()->system().render(err));
-                 });
+                 [&](caf::error& err) { CAF_FAIL(err); });
     return result;
   }
 };
@@ -684,16 +686,20 @@ public:
   // -- constructors, destructors, and assignment operators --------------------
 
   static Config& init_config(Config& cfg) {
-    cfg.set("logger.file-verbosity", caf::atom("quiet"));
     if (auto err = cfg.parse(caf::test::engine::argc(),
                              caf::test::engine::argv()))
       CAF_FAIL("failed to parse config: " << to_string(err));
-    cfg.set("scheduler.policy", caf::atom("testing"));
-    cfg.set("logger.inline-output", true);
-    cfg.set("middleman.network-backend", caf::atom("testing"));
-    cfg.set("middleman.manual-multiplexing", true);
-    cfg.set("middleman.workers", size_t{0});
-    cfg.set("stream.credit-policy", caf::atom("testing"));
+    cfg.set("caf.scheduler.policy", "testing");
+    cfg.set("caf.logger.inline-output", true);
+    if (cfg.custom_options().has_category("caf.middleman")) {
+      cfg.set("caf.middleman.network-backend", "testing");
+      cfg.set("caf.middleman.manual-multiplexing", true);
+      cfg.set("caf.middleman.workers", size_t{0});
+      cfg.set("caf.middleman.heartbeat-interval", caf::timespan{0});
+    }
+    cfg.set("caf.stream.credit-policy", "token-based");
+    cfg.set("caf.stream.token-based-policy.batch-size", 50);
+    cfg.set("caf.stream.token-based-policy.buffer-size", 200);
     return cfg;
   }
 
@@ -703,9 +709,6 @@ public:
       sys(init_config(cfg)),
       self(sys, true),
       sched(dynamic_cast<scheduler_type&>(sys.scheduler())) {
-    // Configure the clock to measure each batch item with 1us.
-    sched.clock().time_per_unit.emplace(caf::atom("batch"),
-                                        caf::timespan{1000});
     // Make sure the current time isn't 0.
     sched.clock().current_time += std::chrono::hours(1);
   }
@@ -791,6 +794,7 @@ public:
       size_t progress = 0;
       while (consume_message()) {
         ++progress;
+        ++events;
         if (predicate()) {
           CAF_LOG_DEBUG("stop due to predicate:" << CAF_ARG(events));
           return events;
@@ -798,18 +802,20 @@ public:
       }
       while (handle_io_event()) {
         ++progress;
+        ++events;
         if (predicate()) {
           CAF_LOG_DEBUG("stop due to predicate:" << CAF_ARG(events));
           return events;
         }
       }
-      if (trigger_timeout())
+      if (trigger_timeout()) {
         ++progress;
+        ++events;
+      }
       if (progress == 0) {
         CAF_LOG_DEBUG("no activity left:" << CAF_ARG(events));
         return events;
       }
-      events += progress;
     }
   }
 
@@ -853,16 +859,16 @@ public:
   caf::byte_buffer serialize(const Ts&... xs) {
     caf::byte_buffer buf;
     caf::binary_serializer sink{sys, buf};
-    if (auto err = sink(xs...))
-      CAF_FAIL("serialization failed: " << sys.render(err));
+    if (!(sink.apply(xs) && ...))
+      CAF_FAIL("serialization failed: " << sink.get_error());
     return buf;
   }
 
   template <class... Ts>
   void deserialize(const caf::byte_buffer& buf, Ts&... xs) {
     caf::binary_deserializer source{sys, buf};
-    if (auto err = source(xs...))
-      CAF_FAIL("deserialization failed: " << sys.render(err));
+    if (!(source.apply(xs) && ...))
+      CAF_FAIL("deserialization failed: " << source.get_error());
   }
 
   template <class T>
@@ -919,32 +925,22 @@ T unbox(T* x) {
 
 /// Convenience macro for defining expect clauses.
 #define expect(types, fields)                                                  \
-  do {                                                                         \
-    CAF_MESSAGE("expect" << #types << "." << #fields);                         \
-    expect_clause<CAF_EXPAND(CAF_DSL_LIST types)>{sched}.fields;               \
-  } while (false)
+  (expect_clause<CAF_EXPAND(CAF_DSL_LIST types)>{sched, __LINE__}.fields.eval( \
+    #types, #fields))
 
 #define inject(types, fields)                                                  \
-  do {                                                                         \
-    CAF_MESSAGE("inject" << #types << "." << #fields);                         \
-    inject_clause<CAF_EXPAND(CAF_DSL_LIST types)>{sched}.fields;               \
-  } while (false)
+  (inject_clause<CAF_EXPAND(CAF_DSL_LIST types)>{sched, __LINE__}.fields.eval( \
+    #types, #fields))
 
 /// Convenience macro for defining allow clauses.
 #define allow(types, fields)                                                   \
-  ([&] {                                                                       \
-    CAF_MESSAGE("allow" << #types << "." << #fields);                          \
-    allow_clause<CAF_EXPAND(CAF_DSL_LIST types)> x{sched};                     \
-    x.fields;                                                                  \
-    return x.eval();                                                           \
-  })()
+  (allow_clause<CAF_EXPAND(CAF_DSL_LIST types)>{sched, __LINE__}.fields.eval(  \
+    #types, #fields))
 
 /// Convenience macro for defining disallow clauses.
 #define disallow(types, fields)                                                \
-  do {                                                                         \
-    CAF_MESSAGE("disallow" << #types << "." << #fields);                       \
-    disallow_clause<CAF_EXPAND(CAF_DSL_LIST types)>{}.fields;                  \
-  } while (false)
+  (disallow_clause<CAF_EXPAND(CAF_DSL_LIST types)>{__LINE__}.fields.eval(      \
+    #types, #fields))
 
 /// Defines the required base type for testee states in the current namespace.
 #define TESTEE_SETUP()                                                         \
@@ -960,9 +956,8 @@ T unbox(T* x) {
 /// Implementation detail for `TESTEE` and `VARARGS_TESTEE`.
 #define TESTEE_SCAFFOLD(tname)                                                 \
   struct tname##_state : testee_state_base<tname##_state> {                    \
-    static const char* name;                                                   \
+    static inline const char* name = #tname;                                   \
   };                                                                           \
-  const char* tname##_state::name = #tname;                                    \
   using tname##_actor = stateful_actor<tname##_state>
 
 /// Convenience macro for defining an actor named `tname`.

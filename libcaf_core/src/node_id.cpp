@@ -1,25 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/node_id.hpp"
 
 #include <cstdio>
 #include <cstring>
+#include <ctype.h>
 #include <iterator>
 #include <random>
 #include <sstream>
@@ -28,31 +15,20 @@
 #include "caf/binary_serializer.hpp"
 #include "caf/config.hpp"
 #include "caf/deserializer.hpp"
+#include "caf/detail/append_hex.hpp"
 #include "caf/detail/get_mac_addresses.hpp"
 #include "caf/detail/get_process_id.hpp"
 #include "caf/detail/get_root_uuid.hpp"
+#include "caf/detail/parse.hpp"
 #include "caf/detail/parser/ascii_to_int.hpp"
 #include "caf/detail/ripemd_160.hpp"
+#include "caf/expected.hpp"
 #include "caf/logger.hpp"
 #include "caf/make_counted.hpp"
+#include "caf/parser_state.hpp"
 #include "caf/sec.hpp"
 #include "caf/serializer.hpp"
 #include "caf/string_algorithms.hpp"
-
-namespace caf {
-
-node_id::data::~data() {
-  // nop
-}
-
-node_id::default_data::default_data() : pid_(0) {
-  memset(host_.data(), 0, host_.size());
-}
-
-node_id::default_data::default_data(uint32_t pid, const host_id_type& host)
-  : pid_(pid), host_(host) {
-  // nop
-}
 
 namespace {
 
@@ -60,7 +36,63 @@ std::atomic<uint8_t> system_id;
 
 } // namespace
 
-node_id node_id::default_data::local(const actor_system_config&) {
+namespace caf {
+
+hashed_node_id::hashed_node_id() noexcept : process_id(0) {
+  memset(host.data(), 0, host.size());
+}
+
+hashed_node_id::hashed_node_id(uint32_t pid, const host_id_type& host) noexcept
+  : process_id(pid), host(host) {
+  // nop
+}
+
+bool hashed_node_id::valid() const noexcept {
+  return process_id != 0 && valid(host);
+}
+
+int hashed_node_id::compare(const hashed_node_id& other) const noexcept {
+  if (this == &other)
+    return 0;
+  if (process_id != other.process_id)
+    return process_id < other.process_id ? -1 : 1;
+  return memcmp(host.data(), other.host.data(), host.size());
+}
+
+void hashed_node_id::print(std::string& dst) const {
+  if (!valid()) {
+    dst += "invalid-node";
+    return;
+  }
+  detail::append_hex(dst, host);
+  dst += '#';
+  dst += std::to_string(process_id);
+}
+
+bool hashed_node_id::valid(const host_id_type& x) noexcept {
+  auto is_zero = [](uint8_t x) { return x == 0; };
+  return !std::all_of(x.begin(), x.end(), is_zero);
+}
+
+bool hashed_node_id::can_parse(string_view str) noexcept {
+  // Our format is "<20-byte-hex>#<pid>". With 2 characters per byte, this means
+  // a valid node ID has at least 42 characters.
+  if (str.size() < 42)
+    return false;
+  string_parser_state ps{str.begin(), str.end()};
+  for (size_t i = 0; i < 40; ++i)
+    if (!ps.consume_strict_if(isxdigit))
+      return false;
+  if (!ps.consume_strict('#'))
+    return false;
+  // We don't care for the value, but we invoke the actual number parser to make
+  // sure the value is in bounds.
+  uint32_t dummy;
+  detail::parse(ps, dummy);
+  return ps.code == pec::success;
+}
+
+node_id hashed_node_id::local(const actor_system_config&) {
   CAF_LOG_TRACE("");
   auto ifs = detail::get_mac_addresses();
   std::vector<std::string> macs;
@@ -88,115 +120,8 @@ node_id node_id::default_data::local(const actor_system_config&) {
   return make_node_id(detail::get_process_id(), hid);
 }
 
-bool node_id::default_data::valid(const host_id_type& x) noexcept {
-  auto is_zero = [](uint8_t x) { return x == 0; };
-  return !std::all_of(x.begin(), x.end(), is_zero);
-}
-
-bool node_id::default_data::valid() const noexcept {
-  return pid_ != 0 && valid(host_);
-}
-
-size_t node_id::default_data::hash_code() const noexcept {
-  // XOR the first few bytes from the node ID and the process ID.
-  auto x = static_cast<size_t>(pid_);
-  size_t y;
-  memcpy(&y, host_.data(), sizeof(size_t));
-  return x ^ y;
-}
-
-atom_value node_id::default_data::implementation_id() const noexcept {
-  return class_id;
-}
-
-int node_id::default_data::compare(const data& other) const noexcept {
-  if (this == &other)
-    return 0;
-  auto other_id = other.implementation_id();
-  if (class_id != other_id)
-    return caf::compare(class_id, other_id);
-  auto& x = static_cast<const default_data&>(other);
-  if (pid_ != x.pid_)
-    return pid_ < x.pid_ ? -1 : 1;
-  return memcmp(host_.data(), x.host_.data(), host_.size());
-}
-
-void node_id::default_data::print(std::string& dst) const {
-  if (!valid()) {
-    dst += "invalid-node";
-    return;
-  }
-  detail::append_hex(dst, host_);
-  dst += '#';
-  dst += std::to_string(pid_);
-}
-
-error node_id::default_data::serialize(serializer& sink) const {
-  return sink(pid_, host_);
-}
-
-error node_id::default_data::deserialize(deserializer& source) {
-  return source(pid_, host_);
-}
-
-error_code<sec>
-node_id::default_data::serialize(binary_serializer& sink) const {
-  return sink(pid_, host_);
-}
-
-error_code<sec>
-node_id::default_data::deserialize(binary_deserializer& source) {
-  return source(pid_, host_);
-}
-
-node_id::uri_data::uri_data(uri value) : value_(std::move(value)) {
+node_id_data::~node_id_data() {
   // nop
-}
-
-bool node_id::uri_data::valid() const noexcept {
-  return !value_.empty();
-}
-
-size_t node_id::uri_data::hash_code() const noexcept {
-  std::hash<uri> f;
-  return f(value_);
-}
-
-atom_value node_id::uri_data::implementation_id() const noexcept {
-  return class_id;
-}
-
-int node_id::uri_data::compare(const data& other) const noexcept {
-  if (this == &other)
-    return 0;
-  auto other_id = other.implementation_id();
-  if (class_id != other_id)
-    return caf::compare(class_id, other_id);
-  return value_.compare(static_cast<const uri_data&>(other).value_);
-}
-
-void node_id::uri_data::print(std::string& dst) const {
-  if (!valid()) {
-    dst += "invalid-node";
-    return;
-  }
-  dst += to_string(value_);
-}
-
-error node_id::uri_data::serialize(serializer& sink) const {
-  return sink(value_);
-}
-
-error node_id::uri_data::deserialize(deserializer& source) {
-  return source(value_);
-}
-
-error_code<sec> node_id::uri_data::serialize(binary_serializer& sink) const {
-  return sink(value_);
-}
-
-error_code<sec> node_id::uri_data::deserialize(binary_deserializer& source) {
-  return source(value_);
 }
 
 node_id& node_id::operator=(const none_t&) {
@@ -204,87 +129,48 @@ node_id& node_id::operator=(const none_t&) {
   return *this;
 }
 
-node_id::node_id(intrusive_ptr<data> data) : data_(std::move(data)) {
-  // nop
-}
-
-node_id::~node_id() {
-  // nop
-}
-
-node_id::operator bool() const {
-  return static_cast<bool>(data_);
-}
-
 int node_id::compare(const node_id& other) const noexcept {
+  struct {
+    int operator()(const uri&, const hashed_node_id&) const noexcept {
+      return -1;
+    }
+    int operator()(const hashed_node_id&, const uri&) const noexcept {
+      return 1;
+    }
+    int operator()(const uri& x, const uri& y) const noexcept {
+      return x.compare(y);
+    }
+    int operator()(const hashed_node_id& x,
+                   const hashed_node_id& y) const noexcept {
+      return x.compare(y);
+    }
+  } comparator;
   if (this == &other || data_ == other.data_)
     return 0;
   if (data_ == nullptr)
     return other.data_ == nullptr ? 0 : -1;
-  return other.data_ == nullptr ? 1 : data_->compare(*other.data_);
+  return other.data_ == nullptr
+           ? 1
+           : visit(comparator, data_->content, other.data_->content);
 }
 
-void node_id::swap(node_id& x) {
+void node_id::swap(node_id& x) noexcept {
   data_.swap(x.data_);
 }
 
-namespace {
-
-template <class Serializer>
-auto serialize_data(Serializer& sink, const intrusive_ptr<node_id::data>& ptr) {
-  if (ptr && ptr->valid()) {
-    if (auto err = sink(ptr->implementation_id()))
-      return err;
-    return ptr->serialize(sink);
-  }
-  return sink(atom(""));
-}
-
-template <class Deserializer>
-auto deserialize_data(Deserializer& source, intrusive_ptr<node_id::data>& ptr) {
-  using result_type = typename Deserializer::result_type;
-  auto impl = static_cast<atom_value>(0);
-  if (auto err = source(impl))
-    return err;
-  if (impl == atom("")) {
-    ptr.reset();
-    return result_type{};
-  }
-  if (impl == node_id::default_data::class_id) {
-    if (ptr == nullptr
-        || ptr->implementation_id() != node_id::default_data::class_id)
-      ptr = make_counted<node_id::default_data>();
-    return ptr->deserialize(source);
-  } else if (impl == node_id::uri_data::class_id) {
-    if (ptr == nullptr
-        || ptr->implementation_id() != node_id::uri_data::class_id)
-      ptr = make_counted<node_id::uri_data>();
-    return ptr->deserialize(source);
-  }
-  return result_type{sec::unknown_type};
-}
-
-} // namespace
-
-error inspect(serializer& sink, node_id& x) {
-  return serialize_data(sink, x.data_);
-}
-
-error inspect(deserializer& source, node_id& x) {
-  return deserialize_data(source, x.data_);
-}
-
-error_code<sec> inspect(binary_serializer& sink, node_id& x) {
-  return serialize_data(sink, x.data_);
-}
-
-error_code<sec> inspect(binary_deserializer& source, node_id& x) {
-  return deserialize_data(source, x.data_);
+bool node_id::can_parse(string_view str) noexcept {
+  return default_data::can_parse(str) || uri::can_parse(str);
 }
 
 void append_to_string(std::string& str, const node_id& x) {
-  if (x != none)
-    x->print(str);
+  auto f = [&str](auto& x) {
+    if constexpr (std::is_same<std::decay_t<decltype(x)>, uri>::value)
+      str.insert(str.end(), x.str().begin(), x.str().end());
+    else
+      x.print(str);
+  };
+  if (x)
+    visit(f, x->content);
   else
     str += "invalid-node";
 }
@@ -296,23 +182,20 @@ std::string to_string(const node_id& x) {
 }
 
 node_id make_node_id(uri from) {
-  auto ptr = make_counted<node_id::uri_data>(std::move(from));
-  return node_id{std::move(ptr)};
+  return node_id{std::move(from)};
 }
 
 node_id make_node_id(uint32_t process_id,
-                     const node_id::default_data::host_id_type& host_id) {
-  auto ptr = make_counted<node_id::default_data>(process_id, host_id);
-  return node_id{std::move(ptr)};
+                     const hashed_node_id::host_id_type& host_id) {
+  return node_id{node_id::default_data{process_id, host_id}};
 }
 
-optional<node_id> make_node_id(uint32_t process_id,
-                               const std::string& host_hash) {
-  using node_data = node_id::default_data;
-  if (host_hash.size() != node_data::host_id_size * 2)
+optional<node_id> make_node_id(uint32_t process_id, string_view host_hash) {
+  using id_type = hashed_node_id::host_id_type;
+  if (host_hash.size() != std::tuple_size<id_type>::value * 2)
     return none;
   detail::parser::ascii_to_int<16, uint8_t> xvalue;
-  node_data::host_id_type host_id;
+  id_type host_id;
   auto in = host_hash.begin();
   for (auto& byte : host_id) {
     if (!isxdigit(*in))
@@ -322,9 +205,32 @@ optional<node_id> make_node_id(uint32_t process_id,
       return none;
     byte = static_cast<uint8_t>(first_nibble | xvalue(*in++));
   }
-  if (!node_data::valid(host_id))
+  if (!hashed_node_id::valid(host_id))
     return none;
   return make_node_id(process_id, host_id);
+}
+
+error parse(string_view str, node_id& dest) {
+  if (node_id::default_data::can_parse(str)) {
+    CAF_ASSERT(str.size() >= 42);
+    auto host_hash = str.substr(0, 40);
+    auto pid_str = str.substr(41);
+    uint32_t pid_val = 0;
+    if (auto err = detail::parse(pid_str, pid_val))
+      return err;
+    if (auto nid = make_node_id(pid_val, host_hash)) {
+      dest = std::move(*nid);
+      return none;
+    }
+    CAF_LOG_ERROR("make_node_id failed after can_parse returned true");
+    return sec::invalid_argument;
+  }
+  if (auto nid_uri = make_uri(str)) {
+    dest = make_node_id(std::move(*nid_uri));
+    return none;
+  } else {
+    return std::move(nid_uri.error());
+  }
 }
 
 } // namespace caf

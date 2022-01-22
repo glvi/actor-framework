@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -24,6 +10,10 @@
 #include "caf/sum_type_token.hpp"
 
 namespace caf {
+
+/// @defgroup SumType Sum Types
+/// Opt-in sum type concept for `variant`-style types.
+/// @{
 
 /// Concept for checking whether `T` supports the sum type API by specializing
 /// `sum_type_access`.
@@ -61,7 +51,6 @@ make_sum_type_token() {
 
 /// Returns a reference to the value of a sum type.
 /// @pre `holds_alternative<T>(x)`
-/// @relates SumType
 template <class T, class U, class Trait = sum_type_access<U>>
 auto get(U& x) -> decltype(Trait::get(x, make_sum_type_token<Trait, T>())) {
   return Trait::get(x, make_sum_type_token<Trait, T>());
@@ -69,7 +58,6 @@ auto get(U& x) -> decltype(Trait::get(x, make_sum_type_token<Trait, T>())) {
 
 /// Returns a reference to the value of a sum type.
 /// @pre `holds_alternative<T>(x)`
-/// @relates SumType
 template <class T, class U, class Trait = sum_type_access<U>>
 auto get(const U& x)
 -> decltype(Trait::get(x, make_sum_type_token<Trait, T>())) {
@@ -78,7 +66,6 @@ auto get(const U& x)
 
 /// Returns a pointer to the value of a sum type if it is of type `T`,
 /// `nullptr` otherwise.
-/// @relates SumType
 template <class T, class U, class Trait = sum_type_access<U>>
 auto get_if(U* x)
 -> decltype(Trait::get_if(x, make_sum_type_token<Trait, T>())) {
@@ -87,7 +74,6 @@ auto get_if(U* x)
 
 /// Returns a pointer to the value of a sum type if it is of type `T`,
 /// `nullptr` otherwise.
-/// @relates SumType
 template <class T, class U, class Trait = sum_type_access<U>>
 auto get_if(const U* x)
 -> decltype(Trait::get_if(x, make_sum_type_token<Trait, T>())) {
@@ -95,7 +81,6 @@ auto get_if(const U* x)
 }
 
 /// Returns whether a sum type has a value of type `T`.
-/// @relates SumType
 template <class T, class U>
 bool holds_alternative(const U& x) {
   using namespace detail;
@@ -155,7 +140,6 @@ struct visit_impl_continuation {
 };
 
 /// Applies the values of any number of sum types to the visitor.
-/// @relates SumType
 template <class Visitor, class T, class... Ts,
           class Result = sum_type_visit_result_t<Visitor, T, Ts...>>
 detail::enable_if_t<SumTypes<T, Ts...>(), Result>
@@ -164,5 +148,7 @@ visit(Visitor&& f, T&& x, Ts&&... xs) {
                                                       std::forward<T>(x),
                                                       std::forward<Ts>(xs)...);
 }
+
+/// @}
 
 } // namespace caf

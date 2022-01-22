@@ -1,21 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright (C) 2011 - 2017                                                  *
- * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -93,6 +78,12 @@ public:
 
   pointer peek() noexcept {
     return peek_recursion<0>();
+  }
+
+  /// Tries to find an element in the queue that matches the given predicate.
+  template <class Predicate>
+  pointer find_if(Predicate pred) {
+    return find_if_recursion<0>(pred);
   }
 
   /// Applies `f` to each element in the queue.
@@ -186,7 +177,7 @@ private:
   template <size_t I, class F>
   detail::enable_if_t<I == num_queues, new_round_result>
   new_round_recursion(deficit_type, F&) noexcept {
-    return {false, false};
+    return {0, false};
   }
 
   template <size_t I, class F>
@@ -202,7 +193,8 @@ private:
       inc_deficit_recursion<I + 1>(quantum);
       return res;
     }
-    return res | new_round_recursion<I + 1>(quantum, f);
+    auto sub = new_round_recursion<I + 1>(quantum, f);
+    return {res.consumed_items + sub.consumed_items, sub.stop_all};
   }
 
   template <size_t I>
@@ -216,6 +208,20 @@ private:
     if (ptr != nullptr)
       return ptr;
     return peek_recursion<I + 1>();
+  }
+
+  template <size_t I, class Predicate>
+  detail::enable_if_t<I == num_queues, pointer> find_if_recursion(Predicate) {
+    return nullptr;
+  }
+
+  template <size_t I, class Predicate>
+  detail::enable_if_t<I != num_queues, pointer>
+  find_if_recursion(Predicate pred) {
+    if (auto ptr = std::get<I>(qs_).find_if(pred))
+      return ptr;
+    else
+      return find_if_recursion<I + 1>(std::move(pred));
   }
 
   template <size_t I, class F>

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/logger.hpp"
 
@@ -28,18 +14,19 @@
 #include <unordered_map>
 #include <utility>
 
-#include "caf/config.hpp"
-
 #include "caf/actor_proxy.hpp"
 #include "caf/actor_system.hpp"
 #include "caf/actor_system_config.hpp"
+#include "caf/config.hpp"
 #include "caf/defaults.hpp"
 #include "caf/detail/get_process_id.hpp"
+#include "caf/detail/meta_object.hpp"
 #include "caf/detail/pretty_type_name.hpp"
 #include "caf/detail/set_thread_name.hpp"
 #include "caf/intrusive/task_result.hpp"
 #include "caf/local_actor.hpp"
 #include "caf/locks.hpp"
+#include "caf/message.hpp"
 #include "caf/string_algorithms.hpp"
 #include "caf/term.hpp"
 #include "caf/timestamp.hpp"
@@ -88,24 +75,19 @@ constexpr string_view anon_ns[] = {
   "`anonymous-namespace'", // MSVC
 };
 
-/// Converts a verbosity atom to its integer counterpart.
-unsigned to_level_int(atom_value x) {
-  switch (atom_uint(to_lowercase(x))) {
-    default:
-      return CAF_LOG_LEVEL_QUIET;
-    case atom_uint("quiet"):
-      return CAF_LOG_LEVEL_QUIET;
-    case atom_uint("error"):
-      return CAF_LOG_LEVEL_ERROR;
-    case atom_uint("warning"):
-      return CAF_LOG_LEVEL_WARNING;
-    case atom_uint("info"):
-      return CAF_LOG_LEVEL_INFO;
-    case atom_uint("debug"):
-      return CAF_LOG_LEVEL_DEBUG;
-    case atom_uint("trace"):
-      return CAF_LOG_LEVEL_TRACE;
-  }
+/// Converts a verbosity level to its integer counterpart.
+unsigned to_level_int(string_view x) {
+  if (x == "error")
+    return CAF_LOG_LEVEL_ERROR;
+  if (x == "warning")
+    return CAF_LOG_LEVEL_WARNING;
+  if (x == "info")
+    return CAF_LOG_LEVEL_INFO;
+  if (x == "debug")
+    return CAF_LOG_LEVEL_DEBUG;
+  if (x == "trace")
+    return CAF_LOG_LEVEL_TRACE;
+  return CAF_LOG_LEVEL_QUIET;
 }
 
 // Reduces symbol by printing all prefixes to `out` and returning the
@@ -206,20 +188,20 @@ logger::config::config()
   // nop
 }
 
-logger::event::event(unsigned lvl, unsigned line, atom_value cat,
+logger::event::event(unsigned lvl, unsigned line, string_view cat,
                      string_view full_fun, string_view fun, string_view fn,
                      std::string msg, std::thread::id t, actor_id a,
                      timestamp ts)
-    : level(lvl),
-      line_number(line),
-      category_name(cat),
-      pretty_fun(full_fun),
-      simple_fun(fun),
-      file_name(fn),
-      message(std::move(msg)),
-      tid(std::move(t)),
-      aid(a),
-      tstamp(ts) {
+  : level(lvl),
+    line_number(line),
+    category_name(cat),
+    pretty_fun(full_fun),
+    simple_fun(fun),
+    file_name(fn),
+    message(std::move(msg)),
+    tid(std::move(t)),
+    aid(a),
+    tstamp(ts) {
   // nop
 }
 
@@ -285,11 +267,11 @@ logger* logger::current_logger() {
   return current_logger_ptr.get();
 }
 
-bool logger::accepts(unsigned level, atom_value cname) {
+bool logger::accepts(unsigned level, string_view cname) {
   if (level > cfg_.verbosity)
     return false;
-  return !std::any_of(component_blacklist.begin(), component_blacklist.end(),
-                      [=](atom_value name) { return name == cname; });
+  return std::none_of(global_filter_.begin(), global_filter_.end(),
+                      [=](string_view name) { return name == cname; });
 }
 
 logger::logger(actor_system& sys) : system_(sys), t0_(make_timestamp()) {
@@ -307,36 +289,48 @@ logger::~logger() {
 void logger::init(actor_system_config& cfg) {
   CAF_IGNORE_UNUSED(cfg);
   namespace lg = defaults::logger;
-  using atom_list = std::vector<atom_value>;
-  auto blacklist = get_if<atom_list>(&cfg, "logger.component-blacklist");
-  if (blacklist)
-    component_blacklist = move_if_optional(blacklist);
-  // Parse the configured log level.
-  auto verbosity = get_if<atom_value>(&cfg, "logger.verbosity");
-  auto file_verbosity = verbosity ? *verbosity : lg::file_verbosity;
-  auto console_verbosity = verbosity ? *verbosity : lg::console_verbosity;
-  file_verbosity = get_or(cfg, "logger.file-verbosity", file_verbosity);
-  console_verbosity =
-    get_or(cfg, "logger.console-verbosity", console_verbosity);
-  cfg_.file_verbosity = to_level_int(file_verbosity);
-  cfg_.console_verbosity = to_level_int(console_verbosity);
+  using std::string;
+  using string_list = std::vector<std::string>;
+  auto get_verbosity = [&cfg](string_view key) -> unsigned {
+    if (auto str = get_if<string>(&cfg, key))
+      return to_level_int(*str);
+    return CAF_LOG_LEVEL_QUIET;
+  };
+  auto read_filter = [&cfg](string_list& var, string_view key) {
+    if (auto lst = get_as<string_list>(cfg, key))
+      var = std::move(*lst);
+  };
+  cfg_.file_verbosity = get_verbosity("caf.logger.file.verbosity");
+  cfg_.console_verbosity = get_verbosity("caf.logger.console.verbosity");
   cfg_.verbosity = std::max(cfg_.file_verbosity, cfg_.console_verbosity);
-  // Parse the format string.
-  file_format_ =
-    parse_format(get_or(cfg, "logger.file-format", lg::file_format));
-  console_format_ = parse_format(get_or(cfg,"logger.console-format",
-                                        lg::console_format));
-  // Set flags.
-  if (get_or(cfg, "logger.inline-output", false))
-    cfg_.inline_output = true;
-  auto con_atm = get_or(cfg, "logger.console", lg::console);
-  if (to_lowercase(con_atm) == atom("colored")) {
-    cfg_.console_coloring = true;
-  } else if (to_lowercase(con_atm) != atom("uncolored")) {
-    // Disable console output if neither 'colored' nor 'uncolored' are present.
-    cfg_.console_verbosity = CAF_LOG_LEVEL_QUIET;
-    cfg_.verbosity = cfg_.file_verbosity;
+  if (cfg_.verbosity == CAF_LOG_LEVEL_QUIET)
+    return;
+  if (cfg_.file_verbosity > CAF_LOG_LEVEL_QUIET
+      && cfg_.console_verbosity > CAF_LOG_LEVEL_QUIET) {
+    read_filter(file_filter_, "caf.logger.file.excluded-components");
+    read_filter(console_filter_, "caf.logger.console.excluded-components");
+    std::sort(file_filter_.begin(), file_filter_.end());
+    std::sort(console_filter_.begin(), console_filter_.end());
+    std::set_intersection(file_filter_.begin(), file_filter_.end(),
+                          console_filter_.begin(), console_filter_.end(),
+                          std::back_inserter(global_filter_));
+  } else if (cfg_.file_verbosity > CAF_LOG_LEVEL_QUIET) {
+    read_filter(file_filter_, "caf.logger.file.excluded-components");
+    global_filter_ = file_filter_;
+  } else {
+    read_filter(console_filter_, "caf.logger.console.excluded-components");
+    global_filter_ = console_filter_;
   }
+  // Parse the format string.
+  file_format_
+    = parse_format(get_or(cfg, "caf.logger.file.format", lg::file::format));
+  console_format_ = parse_format(
+    get_or(cfg, "caf.logger.console.format", lg::console::format));
+  // Set flags.
+  if (get_or(cfg, "caf.logger.inline-output", false))
+    cfg_.inline_output = true;
+  // If not set to `false`, CAF enables colored output when writing to TTYs.
+  cfg_.console_coloring = get_or(cfg, "caf.logger.console.colored", true);
 }
 
 bool logger::open_file() {
@@ -408,34 +402,56 @@ void logger::render_fun_name(std::ostream& out, const event& e) {
   out << e.simple_fun;
 }
 
-void logger::render_time_diff(std::ostream& out, timestamp t0, timestamp tn) {
-  out << std::chrono::duration_cast<std::chrono::milliseconds>(tn - t0).count();
-}
+namespace {
+
+struct print_adapter {
+  std::ostream& out;
+  void push_back(char c) {
+    out.put(c);
+  }
+  int end() {
+    return 0;
+  }
+  template <class Iterator, class Sentinel>
+  void insert(int, Iterator iter, Sentinel sentinel) {
+    while (iter != sentinel)
+      out.put(*iter++);
+  }
+};
+
+} // namespace
 
 void logger::render_date(std::ostream& out, timestamp x) {
-  out << deep_to_string(x);
+  print_adapter adapter{out};
+  detail::print(adapter, x);
 }
 
 void logger::render(std::ostream& out, const line_format& lf,
                     const event& x) const {
+  auto ms_time_diff = [](timestamp t0, timestamp tn) {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(tn - t0).count();
+  };
+  // clang-format off
   for (auto& f : lf)
     switch (f.kind) {
-      case category_field: out << to_string(x.category_name); break;
-      case class_name_field: render_fun_prefix(out, x); break;
-      case date_field: render_date(out, x.tstamp); break;
-      case file_field: out << x.file_name; break;
-      case line_field: out << x.line_number; break;
-      case message_field: out << x.message; break;
-      case method_field: render_fun_name(out, x); break;
-      case newline_field: out << std::endl; break;
-      case priority_field: out << log_level_name[x.level]; break;
-      case runtime_field: render_time_diff(out, t0_, x.tstamp); break;
-      case thread_field: out << x.tid; break;
-      case actor_field: out << "actor" << x.aid; break;
-      case percent_sign_field: out << '%'; break;
-      case plain_text_field: out << f.text; break;
+      case category_field:     out << x.category_name;             break;
+      case class_name_field:   render_fun_prefix(out, x);          break;
+      case date_field:         render_date(out, x.tstamp);         break;
+      case file_field:         out << x.file_name;                 break;
+      case line_field:         out << x.line_number;               break;
+      case message_field:      out << x.message;                   break;
+      case method_field:       render_fun_name(out, x);            break;
+      case newline_field:      out << std::endl;                   break;
+      case priority_field:     out << log_level_name[x.level];     break;
+      case runtime_field:      out << ms_time_diff(t0_, x.tstamp); break;
+      case thread_field:       out << x.tid;                       break;
+      case actor_field:        out << "actor" << x.aid;            break;
+      case percent_sign_field: out << '%';                         break;
+      case plain_text_field:   out << f.text;                      break;
       default: ; // nop
     }
+  // clang-format on
 }
 
 logger::line_format logger::parse_format(const std::string& format_str) {
@@ -446,25 +462,27 @@ logger::line_format logger::parse_format(const std::string& format_str) {
   for (; i != format_str.end(); ++i) {
     if (read_percent_sign) {
       field_type ft;
+      // clang-format off
       switch (*i) {
-        case 'c': ft = category_field; break;
-        case 'C': ft = class_name_field; break;
-        case 'd': ft = date_field; break;
-        case 'F': ft =  file_field; break;
-        case 'L': ft = line_field; break;
-        case 'm': ft = message_field; break;
-        case 'M': ft = method_field; break;
-        case 'n': ft = newline_field; break;
-        case 'p': ft = priority_field; break;
-        case 'r': ft = runtime_field; break;
-        case 't': ft = thread_field; break;
-        case 'a': ft = actor_field; break;
+        case 'c': ft = category_field;     break;
+        case 'C': ft = class_name_field;   break;
+        case 'd': ft = date_field;         break;
+        case 'F': ft =  file_field;        break;
+        case 'L': ft = line_field;         break;
+        case 'm': ft = message_field;      break;
+        case 'M': ft = method_field;       break;
+        case 'n': ft = newline_field;      break;
+        case 'p': ft = priority_field;     break;
+        case 'r': ft = runtime_field;      break;
+        case 't': ft = thread_field;       break;
+        case 'a': ft = actor_field;        break;
         case '%': ft = percent_sign_field; break;
         default:
           ft = invalid_field;
           std::cerr << "invalid field specifier in format string: "
                     << *i << std::endl;
       }
+      // clang-format on
       if (ft != invalid_field)
         res.emplace_back(field{ft, std::string{}});
       plain_text_first = i + 1;
@@ -516,12 +534,17 @@ void logger::run() {
 
 void logger::handle_file_event(const event& x) {
   // Print to file if available.
-  if (file_ && x.level <= file_verbosity())
+  if (file_ && x.level <= file_verbosity()
+      && none_of(file_filter_.begin(), file_filter_.end(),
+                 [&x](string_view name) { return name == x.category_name; }))
     render(file_, file_format_, x);
 }
 
 void logger::handle_console_event(const event& x) {
   if (x.level > console_verbosity())
+    return;
+  if (std::any_of(console_filter_.begin(), console_filter_.end(),
+                  [&x](string_view name) { return name == x.category_name; }))
     return;
   if (cfg_.console_coloring) {
     switch (x.level) {
@@ -558,19 +581,21 @@ void logger::handle_event(const event& x) {
 
 void logger::log_first_line() {
   auto e = CAF_LOG_MAKE_EVENT(0, CAF_LOG_COMPONENT, CAF_LOG_LEVEL_DEBUG, "");
-  auto make_message = [&](string_view config_name, atom_value default_value) {
-    std::string msg = "level = ";
-    msg += to_string(get_or(system_.config(), config_name, default_value));
+  auto make_message = [&](int level, const auto& filter) {
+    auto lvl_str = log_level_name[level];
+    std::string msg = "verbosity = ";
+    msg.insert(msg.end(), lvl_str.begin(), lvl_str.end());
     msg += ", node = ";
     msg += to_string(system_.node());
-    msg += ", component-blacklist = ";
-    msg += deep_to_string(component_blacklist);
+    msg += ", excluded-components = ";
+    detail::stringification_inspector f{msg};
+    detail::save(f, filter);
     return msg;
   };
   namespace lg = defaults::logger;
-  e.message = make_message("logger.file-verbosity", lg::file_verbosity);
+  e.message = make_message(cfg_.file_verbosity, file_filter_);
   handle_file_event(e);
-  e.message = make_message("logger.console-verbosity", lg::console_verbosity);
+  e.message = make_message(cfg_.console_verbosity, console_filter_);
   handle_console_event(e);
 }
 
@@ -583,8 +608,8 @@ void logger::start() {
   parent_thread_ = std::this_thread::get_id();
   if (verbosity() == CAF_LOG_LEVEL_QUIET)
     return;
-  file_name_ = get_or(system_.config(), "logger.file-name",
-                  defaults::logger::file_name);
+  file_name_ = get_or(system_.config(), "caf.logger.file.path",
+                      defaults::logger::file::path);
   if (file_name_.empty()) {
     // No need to continue if console and log file are disabled.
     if (console_verbosity() == CAF_LOG_LEVEL_QUIET)
@@ -618,12 +643,16 @@ void logger::start() {
     open_file();
     log_first_line();
   } else {
-    thread_ = std::thread{[this] {
+    // Note: we don't call system_->launch_thread here since we don't want to
+    //       set a logger context in the logger thread.
+    auto f = [this](auto guard) {
+      CAF_IGNORE_UNUSED(guard);
       detail::set_thread_name("caf.logger");
-      this->system_.thread_started();
-      this->run();
-      this->system_.thread_terminates();
-    }};
+      system_.thread_started();
+      run();
+      system_.thread_terminates();
+    };
+    thread_ = std::thread{f, detail::global_meta_objects_guard()};
   }
 }
 

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -50,26 +36,39 @@ struct response_type<detail::type_list<>, Xs...> {
 };
 
 // case #1: no match
-template <class In, class Out, class... Ts, class... Xs>
-struct response_type<detail::type_list<typed_mpi<In, Out>, Ts...>, Xs...>
-  : response_type<detail::type_list<Ts...>, Xs...> {};
+template <class Out, class... In, class... Fs, class... Xs>
+struct response_type<detail::type_list<Out(In...), Fs...>, Xs...>
+  : response_type<detail::type_list<Fs...>, Xs...> {};
 
-// case #2: match
-template <class... Out, class... Ts, class... Xs>
-struct response_type<
-  detail::type_list<typed_mpi<detail::type_list<Xs...>, output_tuple<Out...>>,
-                    Ts...>,
-  Xs...> {
+// case #2.a: match `result<Out...>(In...)`
+template <class... Out, class... In, class... Fs>
+struct response_type<detail::type_list<result<Out...>(In...), Fs...>, In...> {
   static constexpr bool valid = true;
   using type = detail::type_list<Out...>;
   using tuple_type = std::tuple<Out...>;
   using delegated_type = delegated<Out...>;
 };
 
-/// Computes the response message for input `Xs...` from the list
-/// of message passing interfaces `Ts`.
-template <class Ts, class... Xs>
-using response_type_t = typename response_type<Ts, Xs...>::type;
+// case #2.b: match `Out(In...)`
+template <class Out, class... In, class... Fs>
+struct response_type<detail::type_list<Out(In...), Fs...>, In...> {
+  static constexpr bool valid = true;
+  using type = detail::type_list<Out>;
+  using tuple_type = std::tuple<Out>;
+  using delegated_type = delegated<Out>;
+};
+
+/// Computes the response message type for input `In...` from the list of
+/// message passing interfaces `Fs`.
+template <class Fs, class... In>
+using response_type_t = typename response_type<Fs, In...>::type;
+
+/// Computes the response message type for input `In...` from the list of
+/// message passing interfaces `Fs` and returns the corresponding
+/// `delegated<T>`.
+template <class Fs, class... In>
+using delegated_response_type_t =
+  typename response_type<Fs, In...>::delegated_type;
 
 /// Unboxes `Xs` and calls `response_type`.
 template <class Ts, class Xs>

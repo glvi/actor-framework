@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/string_view.hpp"
 
@@ -102,16 +88,18 @@ string_view string_view::substr(size_type pos, size_type n) const noexcept {
 }
 
 int string_view::compare(string_view str) const noexcept {
-  auto s0 = size();
-  auto s1 = str.size();
-  auto fallback = [](int x, int y) {
-    return x == 0 ? y : x;
-  };
-  if (s0 == s1)
-    return strncmp(data(), str.data(), s0);
-  else if (s0 < s1)
-    return fallback(strncmp(data(), str.data(), s0), -1);
-  return fallback(strncmp(data(), str.data(), s1), 1);
+  // TODO: use lexicographical_compare_three_way when switching to C++20
+  auto i0 = begin();
+  auto e0 = end();
+  auto i1 = str.begin();
+  auto e1 = str.end();
+  while (i0 != e0 && i1 != e1)
+    if (auto diff = *i0++ - *i1++; diff != 0)
+      return diff;
+  if (i0 == e0)
+    return i1 != e1 ? -1 : 0;
+  else
+    return i1 == e1 ? 1 : 0;
 }
 
 int string_view::compare(size_type pos1, size_type n1,

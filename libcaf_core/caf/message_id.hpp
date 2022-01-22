@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -26,8 +12,8 @@
 #include "caf/detail/comparable.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/error.hpp"
+#include "caf/inspector_access.hpp"
 #include "caf/message_priority.hpp"
-#include "caf/meta/type_name.hpp"
 
 namespace caf {
 
@@ -191,13 +177,6 @@ public:
     return *this;
   }
 
-  // -- friend functions ------------------------------------------------------
-
-  template <class Inspector>
-  friend typename Inspector::result_type inspect(Inspector& f, message_id& x) {
-    return f(meta::type_name("message_id"), x.value_);
-  }
-
 private:
   // -- member variables -------------------------------------------------------
 
@@ -231,6 +210,18 @@ constexpr message_id make_message_id(uint64_t value = 0) {
 /// @relates message_id
 constexpr message_id make_message_id(message_priority p) {
   return message_id{static_cast<uint64_t>(p) << message_id::category_offset};
+}
+
+// -- inspection support -------------------------------------------------------
+
+template <class Inspector>
+bool inspect(Inspector& f, message_id& x) {
+  auto get = [&x] { return x.integer_value(); };
+  auto set = [&x](uint64_t val) {
+    x = message_id{val};
+    return true;
+  };
+  return f.apply(get, set);
 }
 
 } // namespace caf

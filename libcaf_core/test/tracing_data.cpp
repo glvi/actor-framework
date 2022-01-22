@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE tracing_data
 
 #include "caf/tracing_data.hpp"
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
 
 #include <vector>
 
@@ -46,38 +32,36 @@ public:
     // nop
   }
 
-  error serialize(serializer& sink) const override {
-    return sink(value);
+  bool serialize(serializer& sink) const override {
+    return sink.apply(value);
   }
 
-  error_code<sec> serialize(binary_serializer& sink) const override {
-    return sink(value);
+  bool serialize(binary_serializer& sink) const override {
+    return sink.apply(value);
   }
 };
 
 class dummy_tracing_data_factory : public tracing_data_factory {
 public:
-  error deserialize(deserializer& source,
-                    std::unique_ptr<tracing_data>& dst) const override {
+  bool deserialize(deserializer& source,
+                   std::unique_ptr<tracing_data>& dst) const override {
     return deserialize_impl(source, dst);
   }
 
-  error_code<sec>
-  deserialize(binary_deserializer& source,
-              std::unique_ptr<tracing_data>& dst) const override {
+  bool deserialize(binary_deserializer& source,
+                   std::unique_ptr<tracing_data>& dst) const override {
     return deserialize_impl(source, dst);
   }
 
 private:
   template <class Deserializer>
-  typename Deserializer::result_type
-  deserialize_impl(Deserializer& source,
-                   std::unique_ptr<tracing_data>& dst) const {
+  bool deserialize_impl(Deserializer& source,
+                        std::unique_ptr<tracing_data>& dst) const {
     string value;
-    if (auto err = source(value))
-      return err;
+    if (!source.apply(value))
+      return false;
     dst.reset(new dummy_tracing_data(std::move(value)));
-    return {};
+    return true;
   }
 };
 
@@ -99,14 +83,14 @@ public:
     // nop
   }
 
-  void
-  before_sending(const local_actor& self, mailbox_element& element) override {
+  void before_sending(const local_actor& self,
+                      mailbox_element& element) override {
     element.tracing_id.reset(new dummy_tracing_data(self.name()));
   }
 
-  void
-  before_sending_scheduled(const local_actor& self, actor_clock::time_point,
-                           mailbox_element& element) override {
+  void before_sending_scheduled(const local_actor& self,
+                                actor_clock::time_point,
+                                mailbox_element& element) override {
     element.tracing_id.reset(new dummy_tracing_data(self.name()));
   }
 };
@@ -154,7 +138,7 @@ const std::string& tracing_id(local_actor* self) {
 
 #  define NAMED_ACTOR_STATE(type)                                              \
     struct type##_state {                                                      \
-      const char* name = #type;                                                \
+      static inline const char* name = #type;                                  \
     }
 
 NAMED_ACTOR_STATE(alice);
@@ -163,23 +147,23 @@ NAMED_ACTOR_STATE(carl);
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(actor_profiler_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(profilers inject tracing data into asynchronous messages) {
-  CAF_MESSAGE("spawn a foo and a bar");
+  MESSAGE("spawn a foo and a bar");
   auto carl_fun = [](stateful_actor<carl_state>* self) -> behavior {
     return {
       [=](const string& str) {
-        CAF_CHECK_EQUAL(str, "hello carl");
-        CAF_CHECK_EQUAL(tracing_id(self), "bob");
+        CHECK_EQ(str, "hello carl");
+        CHECK_EQ(tracing_id(self), "bob");
       },
     };
   };
   auto bob_fun = [](stateful_actor<bob_state>* self, actor carl) -> behavior {
     return {
       [=](const string& str) {
-        CAF_CHECK_EQUAL(str, "hello bob");
-        CAF_CHECK_EQUAL(tracing_id(self), "alice");
+        CHECK_EQ(str, "hello bob");
+        CHECK_EQ(tracing_id(self), "alice");
         self->send(carl, "hello carl");
       },
     };
@@ -194,16 +178,15 @@ CAF_TEST(profilers inject tracing data into asynchronous messages) {
 CAF_TEST(tracing data is serializable) {
   byte_buffer buf;
   binary_serializer sink{sys, buf};
-  tracing_data_ptr data;
-  tracing_data_ptr copy;
-  data.reset(new dummy_tracing_data("iTrace"));
-  CAF_CHECK_EQUAL(sink(data), none);
+  tracing_data_ptr data{new dummy_tracing_data("iTrace")};
+  CHECK(sink.apply(data));
   binary_deserializer source{sys, buf};
-  CAF_CHECK_EQUAL(source(copy), none);
+  tracing_data_ptr copy;
+  CHECK(source.apply(copy));
   CAF_REQUIRE_NOT_EQUAL(copy.get(), nullptr);
-  CAF_CHECK_EQUAL(dynamic_cast<dummy_tracing_data&>(*copy).value, "iTrace");
+  CHECK_EQ(dynamic_cast<dummy_tracing_data&>(*copy).value, "iTrace");
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()
 
 #endif // CAF_ENABLE_ACTOR_PROFILER

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -31,7 +17,7 @@
 namespace caf {
 
 /// Interface for user-defined multicast implementations.
-class CAF_CORE_EXPORT group_module {
+class CAF_CORE_EXPORT group_module : public ref_counted {
 public:
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -41,7 +27,7 @@ public:
 
   group_module& operator=(const group_module&) = delete;
 
-  virtual ~group_module();
+  ~group_module() override;
 
   // -- pure virtual member functions ------------------------------------------
 
@@ -52,27 +38,23 @@ public:
   /// @threadsafe
   virtual expected<group> get(const std::string& group_name) = 0;
 
-  /// Loads a group of this module from `source` and stores it in `storage`.
-  virtual error load(deserializer& source, group& storage) = 0;
-
-  /// Loads a group of this module from `source` and stores it in `storage`.
-  virtual error_code<sec> load(binary_deserializer& source, group& storage) = 0;
-
   // -- observers --------------------------------------------------------------
 
   /// Returns the hosting actor system.
-  inline actor_system& system() const {
-    return system_;
+  actor_system& system() const noexcept {
+    return *system_;
   }
 
   /// Returns the name of this module implementation.
-  inline const std::string& name() const {
+  const std::string& name() const noexcept {
     return name_;
   }
 
 private:
-  actor_system& system_;
+  actor_system* system_;
   std::string name_;
 };
+
+using group_module_ptr = intrusive_ptr<group_module>;
 
 } // namespace caf

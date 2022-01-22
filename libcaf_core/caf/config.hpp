@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -36,7 +22,7 @@
 /// Denotes version of CAF in the format {MAJOR}{MINOR}{PATCH},
 /// whereas each number is a two-digit decimal number without
 /// leading zeros (e.g. 900 is version 0.9.0).
-#define CAF_VERSION 1703
+#define CAF_VERSION 1805
 
 /// Defined to the major version number of CAF.
 #define CAF_MAJOR_VERSION (CAF_VERSION / 10000)
@@ -205,8 +191,13 @@
 #  endif
 #elif defined(__FreeBSD__)
 #  define CAF_BSD
+#  define CAF_FREE_BSD
+#elif defined(__NetBSD__)
+#  define CAF_BSD
+#  define CAF_NET_BSD
 #elif defined(__OpenBSD__)
 #  define CAF_BSD
+#  define CAF_OPEN_BSD
 #elif defined(__CYGWIN__)
 #  define CAF_CYGWIN
 #elif defined(WIN32) || defined(_WIN32)
@@ -215,7 +206,7 @@
 #  error Platform and/or compiler not supported
 #endif
 #if defined(CAF_MACOS) || defined(CAF_LINUX) || defined(CAF_BSD)               \
-  || defined(CAF_CYGWIN)
+  || defined(CAF_CYGWIN) || defined(CAF_NET_BSD)
 #  define CAF_POSIX
 #endif
 
@@ -254,9 +245,18 @@ struct IUnknown;
 // Convenience macros.
 #define CAF_IGNORE_UNUSED(x) static_cast<void>(x)
 
+/// Prints `error` to `stderr` and aborts program execution.
 #define CAF_CRITICAL(error)                                                    \
   do {                                                                         \
-    fprintf(stderr, "[FATAL] %s:%u: critical error: '%s'\n", __FILE__,         \
+    fprintf(stderr, "[FATAL] critical error (%s:%d): %s\n", __FILE__,          \
             __LINE__, error);                                                  \
+    ::abort();                                                                 \
+  } while (false)
+
+/// Prints `error` to `stderr` and aborts program execution.
+#define CAF_CRITICAL_FMT(fmt_str, ...)                                         \
+  do {                                                                         \
+    fprintf(stderr, "[FATAL] critical error (%s:%d): " fmt_str "\n", __FILE__, \
+            __LINE__, __VA_ARGS__);                                            \
     ::abort();                                                                 \
   } while (false)

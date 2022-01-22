@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -104,14 +90,18 @@ public:
 
   // -- utility functions ------------------------------------------------------
 
+  /// Sends `node_down_msg` to all registered observers.
+  void emit_node_down_msg(const node_id& node, const error& reason);
+
   /// Performs bookkeeping such as managing `spawn_servers`.
   void learned_new_node(const node_id& nid);
 
   /// Sets `this_context` by either creating or accessing state for `hdl`.
+  /// Automatically sets `endpoint_context::last_seen` to `clock().now()`.
   void set_context(connection_handle hdl);
 
   /// Cleans up any state for `hdl`.
-  void connection_cleanup(connection_handle hdl);
+  void connection_cleanup(connection_handle hdl, sec code);
 
   /// Sends a basp::down_message message to a remote node.
   void send_basp_down_message(const node_id& nid, actor_id aid, error err);
@@ -146,6 +136,10 @@ public:
   /// spawned whenever the broker learns a new node ID and tries to get a
   /// 'SpawnServ' instance on the remote side.
   std::unordered_map<node_id, actor> spawn_servers;
+
+  /// Keeps track of actors that wish to receive a `node_down_msg` if a
+  /// particular node fails.
+  std::unordered_map<node_id, std::vector<actor_addr>> node_observers;
 
   /// Configures whether BASP automatically open new connections to optimize
   /// routing paths by forming a mesh between all nodes.

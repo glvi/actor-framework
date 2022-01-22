@@ -1,35 +1,21 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright (C) 2011 - 2017                                                  *
- * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE broadcast_downstream_manager
 
 #include <cstdint>
 #include <memory>
+#include <numeric>
+
+#include "core-test.hpp"
 
 #include "caf/actor_system.hpp"
 #include "caf/actor_system_config.hpp"
 #include "caf/broadcast_downstream_manager.hpp"
-#include "caf/scheduled_actor.hpp"
-
+#include "caf/detail/meta_object.hpp"
 #include "caf/mixin/sender.hpp"
-
-#include "caf/test/unit_test.hpp"
+#include "caf/scheduled_actor.hpp"
 
 using namespace caf;
 
@@ -74,15 +60,13 @@ public:
   using behavior_type = behavior;
 
   entity(actor_config& cfg, const char* cstr)
-      : super(cfg),
-        cstr_name(cstr),
-        mgr(this),
-        next_slot(1) {
+    : super(cfg), cstr_name(cstr), mgr(this), next_slot(1) {
     // nop
   }
 
-  void enqueue(mailbox_element_ptr what, execution_unit*) override {
-    mbox.push_back(what->move_content_to_message());
+  bool enqueue(mailbox_element_ptr what, execution_unit*) override {
+    mbox.push_back(std::move(what->payload));
+    return true;
   }
 
   void attach(attachable_ptr) override {
@@ -122,9 +106,7 @@ public:
   }
 
   size_t credit_for(entity& x) {
-    auto pred = [&](outbound_path* ptr) {
-      return ptr->hdl == &x;
-    };
+    auto pred = [&](outbound_path* ptr) { return ptr->hdl == &x; };
     auto i = std::find_if(paths.begin(), paths.end(), pred);
     CAF_REQUIRE(i != paths.end());
     return static_cast<size_t>((*i)->open_credit);
@@ -195,13 +177,13 @@ struct fixture {
   }
 
   fixture()
-      : sys(cfg),
-        alice_hdl(spawn(sys, 0, "alice")),
-        bob_hdl(spawn(sys, 1, "bob")),
-        carl_hdl(spawn(sys, 2, "carl")),
-        alice(fetch(alice_hdl)),
-        bob(fetch(bob_hdl)),
-        carl(fetch(carl_hdl)) {
+    : sys(cfg),
+      alice_hdl(spawn(sys, 0, "alice")),
+      bob_hdl(spawn(sys, 1, "bob")),
+      carl_hdl(spawn(sys, 2, "carl")),
+      alice(fetch(alice_hdl)),
+      bob(fetch(bob_hdl)),
+      carl(fetch(carl_hdl)) {
     // nop
   }
 
@@ -240,10 +222,10 @@ struct receive_checker {
   }
 
   receive_checker(receive_checker&& x)
-      : f(x.f),
-        xs(std::move(x.xs)),
-        moved_from(false),
-        check_not_empty(x.check_not_empty) {
+    : f(x.f),
+      xs(std::move(x.xs)),
+      moved_from(false),
+      check_not_empty(x.check_not_empty) {
     x.moved_from = true;
   }
 
@@ -292,16 +274,18 @@ receive_checker<F> operator<<(receive_checker<F> xs, not_empty_t) {
   ;                                                                            \
   make_receive_checker([&](fixture::batches_type& xs, bool check_not_empty) {  \
     if (!check_not_empty)                                                      \
-      CAF_CHECK_EQUAL(batches(CONCAT(who, __LINE__)), xs);                     \
+      CHECK_EQ(batches(CONCAT(who, __LINE__)), xs);                            \
     else                                                                       \
-      CAF_CHECK(!batches(CONCAT(who, __LINE__)).empty());                      \
+      CHECK(!batches(CONCAT(who, __LINE__)).empty());                          \
   }) <<
 
 #define ENTITY auto& CONCAT(who, __LINE__) =
 
 #define AFTER
 
-#define HAS ; size_t CONCAT(amount, __LINE__) =
+#define HAS                                                                    \
+  ;                                                                            \
+  size_t CONCAT(amount, __LINE__) =
 
 #define CREDIT ;
 
@@ -319,16 +303,15 @@ receive_checker<F> operator<<(receive_checker<F> xs, not_empty_t) {
   ;                                                                            \
   CONCAT(who, __LINE__)                                                        \
     .new_round(CONCAT(amount, __LINE__), CONCAT(force, __LINE__));             \
-  CAF_MESSAGE(CONCAT(who, __LINE__).name()                                     \
-              << " tried sending " << CONCAT(amount, __LINE__)                 \
-              << " elements");
+  MESSAGE(CONCAT(who, __LINE__).name()                                         \
+          << " tried sending " << CONCAT(amount, __LINE__) << " elements");
 
 #define FOR                                                                    \
   struct CONCAT(for_helper_, __LINE__) {                                       \
     entity& who;                                                               \
     size_t amount;                                                             \
     void operator<<(entity& x) const {                                         \
-      CAF_CHECK_EQUAL(who.credit_for(x), amount);                              \
+      CHECK_EQ(who.credit_for(x), amount);                                     \
     }                                                                          \
   };                                                                           \
   CONCAT(for_helper_, __LINE__){CONCAT(who, __LINE__),                         \
@@ -336,16 +319,16 @@ receive_checker<F> operator<<(receive_checker<F> xs, not_empty_t) {
     <<
 
 #define TOTAL                                                                  \
-  CAF_CHECK_EQUAL(CONCAT(who, __LINE__).mgr.out().total_credit(),              \
-                  CONCAT(amount, __LINE__))
+  CHECK_EQ(CONCAT(who, __LINE__).mgr.out().total_credit(),                     \
+           CONCAT(amount, __LINE__))
 
 #define BATCH(first, last) make_batch(first, last)
 
-#define AND <<
+#define AND_RECEIVED <<
 
 // -- unit tests ---------------------------------------------------------------
 
-CAF_TEST_FIXTURE_SCOPE(broadcast_downstream_manager, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(one_path_force) {
   // Give alice 100 elements to send and a path to bob with desired batch size
@@ -366,7 +349,7 @@ CAF_TEST(one_path_force) {
   }
   // Give 11 credit (more than 10).
   AFTER ENTITY alice TRIED FORCE_SENDING 11 ELEMENTS {
-    ENTITY bob RECEIVED BATCH(14, 23) AND BATCH(24, 24);
+    ENTITY bob RECEIVED BATCH(14, 23) AND_RECEIVED BATCH(24, 24);
     ENTITY alice HAS 0u CREDIT FOR bob;
   }
   // Drain all elements except the last 5.
@@ -443,15 +426,15 @@ CAF_TEST(two_paths_different_sizes_force) {
   // Give exactly 10 credit.
   AFTER ENTITY alice TRIED FORCE_SENDING 10 ELEMENTS {
     ENTITY bob RECEIVED BATCH(4, 13);
-    ENTITY carl RECEIVED BATCH(4, 10) AND BATCH(11, 13);
+    ENTITY carl RECEIVED BATCH(4, 10) AND_RECEIVED BATCH(11, 13);
     ENTITY alice HAS 0u CREDIT FOR bob;
     ENTITY alice HAS 0u CREDIT FOR carl;
     ENTITY alice HAS 0u CREDIT TOTAL;
   }
   // Give 11 credit (more than 10).
   AFTER ENTITY alice TRIED FORCE_SENDING 11 ELEMENTS {
-    ENTITY bob RECEIVED BATCH(14, 23) AND BATCH(24, 24);
-    ENTITY carl RECEIVED BATCH(14, 20) AND BATCH(21, 24);
+    ENTITY bob RECEIVED BATCH(14, 23) AND_RECEIVED BATCH(24, 24);
+    ENTITY carl RECEIVED BATCH(14, 20) AND_RECEIVED BATCH(21, 24);
     ENTITY alice HAS 0u CREDIT TOTAL;
   }
   // Drain all elements except the last 5.
@@ -510,11 +493,11 @@ CAF_TEST(two_paths_different_sizes_without_force) {
   // Give 11 credit.
   AFTER ENTITY alice TRIED SENDING 11 ELEMENTS {
     ENTITY bob RECEIVED BATCH(11, 20);
-    ENTITY carl RECEIVED BATCH(8, 14) AND BATCH(15, 21);
+    ENTITY carl RECEIVED BATCH(8, 14) AND_RECEIVED BATCH(15, 21);
     ENTITY alice HAS 1u CREDIT FOR bob;
     ENTITY alice HAS 0u CREDIT FOR carl;
     ENTITY alice HAS 1u CREDIT TOTAL;
   }
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

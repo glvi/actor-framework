@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -51,14 +37,7 @@ public:
 
   void start() {
     CAF_ASSERT(this_thread_.get_id() == std::thread::id{});
-    auto this_worker = this;
-    this_thread_ = std::thread{[this_worker] {
-      CAF_SET_LOGGER_SYS(&this_worker->system());
-      detail::set_thread_name("caf.worker");
-      this_worker->system().thread_started();
-      this_worker->run();
-      this_worker->system().thread_terminates();
-    }};
+    this_thread_ = system().launch_thread("caf.worker", [this] { run(); });
   }
 
   worker(const worker&) = delete;
@@ -113,7 +92,6 @@ private:
       auto job = policy_.dequeue(this);
       CAF_ASSERT(job != nullptr);
       CAF_ASSERT(job->subtype() != resumable::io_actor);
-      CAF_PUSH_AID_FROM_PTR(dynamic_cast<abstract_actor*>(job));
       policy_.before_resume(this, job);
       auto res = job->resume(this, max_throughput_);
       policy_.after_resume(this, job);

@@ -1,24 +1,9 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/actor.hpp"
 #include "caf/actor_cast.hpp"
-#include "caf/atom.hpp"
 #include "caf/config.hpp"
 #include "caf/exit_reason.hpp"
 #include "caf/mailbox_element.hpp"
@@ -43,8 +28,10 @@ void sync_request_bouncer::operator()(const strong_actor_ptr& sender,
                     nullptr);
 }
 
-void sync_request_bouncer::operator()(const mailbox_element& e) const {
+intrusive::task_result
+sync_request_bouncer::operator()(const mailbox_element& e) const {
   (*this)(e.sender, e.mid);
+  return intrusive::task_result::resume;
 }
 
 } // namespace caf::detail

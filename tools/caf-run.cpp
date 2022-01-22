@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include <unistd.h>
 
@@ -26,6 +12,7 @@
 #include <vector>
 
 #include "caf/all.hpp"
+#include "caf/detail/base64.hpp"
 #include "caf/io/all.hpp"
 
 using namespace caf;
@@ -36,38 +23,6 @@ using std::endl;
 using std::string;
 using std::vector;
 
-static constexpr const char base64_tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                           "abcdefghijklmnopqrstuvwxyz"
-                                           "0123456789+/";
-
-std::string encode_base64(const string& str) {
-  std::string result;
-  // consumes three characters from input
-  auto consume = [&](const char* i) {
-    int buf[]{
-      (i[0] & 0xfc) >> 2,
-      ((i[0] & 0x03) << 4) + ((i[1] & 0xf0) >> 4),
-      ((i[1] & 0x0f) << 2) + ((i[2] & 0xc0) >> 6),
-      i[2] & 0x3f,
-    };
-    for (auto x : buf)
-      result += base64_tbl[x];
-  };
-  // iterate string in chunks of three characters
-  auto i = str.begin();
-  for (; std::distance(i, str.end()) >= 3; i += 3)
-    consume(&(*i));
-  if (i != str.end()) {
-    // "fill" string with 0s
-    char cbuf[] = {0, 0, 0};
-    std::copy(i, str.end(), cbuf);
-    consume(cbuf);
-    // override filled characters (garbage) with '='
-    for (auto j = result.end() - (3 - (str.size() % 3)); j != result.end(); ++j)
-      *j = '=';
-  }
-  return result;
-}
 
 class host_desc {
 public:
@@ -117,7 +72,7 @@ bool run_ssh(actor_system& system, const string& wdir, const string& cmd,
   full_cmd += wdir;
   full_cmd += '\n';
   full_cmd += cmd;
-  auto packed = encode_base64(full_cmd);
+  auto packed = detail::base64::encode(full_cmd);
   std::ostringstream oss;
   oss << "ssh -Y -o ServerAliveInterval=60 " << host << R"( "echo )" << packed
       << R"( | base64 --decode | /bin/sh")";
@@ -161,8 +116,8 @@ void bootstrap(actor_system& system, const string& wdir,
   // possible addresses slaves can use to connect to us
   auto port_res = system.middleman().publish(self, 0);
   if (!port_res) {
-    cerr << "fatal: unable to publish actor: "
-         << system.render(port_res.error()) << endl;
+    cerr << "fatal: unable to publish actor: " << to_string(port_res.error())
+         << endl;
     return;
   }
   auto port = *port_res;
@@ -176,10 +131,10 @@ void bootstrap(actor_system& system, const string& wdir,
                   std::ostringstream oss;
                   oss << cmd;
                   if (slave.cpu_slots > 0)
-                    oss << " --caf#scheduler.max-threads=" << slave.cpu_slots;
-                  oss << " --caf#slave-mode"
-                      << " --caf#slave-name=" << slave.host
-                      << " --caf#bootstrap-node=";
+                    oss << " --caf.scheduler.max-threads=" << slave.cpu_slots;
+                  oss << " --caf.slave-mode"
+                      << " --caf.slave-name=" << slave.host
+                      << " --caf.bootstrap-node=";
                   bool is_first = true;
                   interfaces::traverse({protocol::ipv4, protocol::ipv6},
                                        [&](const char*, protocol::network,
@@ -216,14 +171,14 @@ void bootstrap(actor_system& system, const string& wdir,
   }
   // run (and wait for) master
   std::ostringstream oss;
-  oss << cmd << " --caf#slave-nodes=" << slaveslist << " " << join(args, " ");
+  oss << cmd << " --caf.slave-nodes=" << slaveslist << " " << join(args, " ");
   run_ssh(system, wdir, oss.str(), master.host);
 }
 
 #define RETURN_WITH_ERROR(output)                                              \
   do {                                                                         \
     ::std::cerr << output << ::std::endl;                                      \
-    return 1;                                                                  \
+    return EXIT_FAILURE;                                                       \
   } while (true)
 
 namespace {
@@ -242,9 +197,12 @@ struct config : actor_system_config {
 
 int main(int argc, char** argv) {
   config cfg;
-  cfg.parse(argc, argv);
+  if (auto err = cfg.parse(argc, argv)) {
+    std::cerr << "error parsing command line: " << to_string(err) << '\n';
+    return EXIT_FAILURE;
+  }
   if (cfg.cli_helptext_printed)
-    return 0;
+    return EXIT_SUCCESS;
   if (cfg.slave_mode)
     RETURN_WITH_ERROR("cannot use slave mode in caf-run tool");
   std::unique_ptr<char, void (*)(void*)> pwd{getcwd(nullptr, 0), ::free};
@@ -265,4 +223,5 @@ int main(int argc, char** argv) {
   hosts.erase(hosts.begin());
   bootstrap(system, (cfg.wdir.empty()) ? pwd.get() : cfg.wdir.c_str(), master,
             std::move(hosts), cmd, xs);
+  return EXIT_SUCCESS;
 }

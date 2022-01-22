@@ -1,29 +1,17 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <memory>
 #include <vector>
 
+#include "caf/actor_clock.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
 #include "caf/stream_slot.hpp"
+#include "caf/timespan.hpp"
 
 namespace caf {
 
@@ -31,7 +19,7 @@ namespace caf {
 /// manager owns the `outbound_path` objects, has a buffer for storing pending
 /// output and is responsible for the dispatching policy (broadcasting, for
 /// example). The default implementation terminates the stream and never
-/// accepts any pahts.
+/// accepts any paths.
 class CAF_CORE_EXPORT downstream_manager {
 public:
   // -- member types -----------------------------------------------------------
@@ -47,6 +35,9 @@ public:
 
   /// Unique pointer to an outbound path.
   using unique_path_ptr = std::unique_ptr<path_type>;
+
+  /// Discrete point in time, as reported by the actor clock.
+  using time_point = typename actor_clock::time_point;
 
   /// Function object for iterating over all paths.
   struct CAF_CORE_EXPORT path_visitor {
@@ -83,6 +74,11 @@ public:
   /// stream and never has outbound paths.
   virtual bool terminal() const noexcept;
 
+  // -- time management --------------------------------------------------------
+
+  /// Forces underful batches after reaching the maximum delay.
+  void tick(time_point now, timespan max_batch_delay);
+
   // -- path management --------------------------------------------------------
 
   /// Applies `f` to each path.
@@ -99,6 +95,24 @@ public:
     };
     impl g{std::move(f)};
     for_each_path_impl(g);
+  }
+
+  /// Applies `f` to each path.
+  template <class F>
+  void for_each_path(F f) const {
+    struct impl : path_visitor {
+      F fun;
+      impl(F x) : fun(std::move(x)) {
+        // nop
+      }
+      void operator()(outbound_path& x) override {
+        fun(const_cast<const outbound_path&>(x));
+      }
+    };
+    impl g{std::move(f)};
+    // This const_cast is safe, because we restore the const in our overload for
+    // operator() above.
+    const_cast<downstream_manager*>(this)->for_each_path_impl(g);
   }
 
   /// Returns all used slots.
@@ -163,7 +177,7 @@ public:
   virtual void abort(error reason);
 
   /// Returns `num_paths() == 0`.
-  inline bool empty() const noexcept {
+  bool empty() const noexcept {
     return num_paths() == 0;
   }
 
@@ -192,9 +206,6 @@ public:
 
   /// Queries an estimate of the size of the output buffer for `slot`.
   virtual size_t buffered(stream_slot slot) const noexcept;
-
-  /// Computes the maximum available downstream capacity.
-  virtual int32_t max_capacity() const noexcept;
 
   /// Queries whether the manager cannot make any progress, because its buffer
   /// is full and no more credit is available.
@@ -244,6 +255,9 @@ protected:
   // -- member variables -------------------------------------------------------
 
   stream_manager* parent_;
+
+  /// Stores the time stamp of our last batch.
+  time_point last_send_;
 };
 
 } // namespace caf

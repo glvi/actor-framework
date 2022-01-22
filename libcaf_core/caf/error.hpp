@@ -1,62 +1,23 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
 #include <cstdint>
-#include <functional>
+#include <memory>
 #include <utility>
 
-#include "caf/atom.hpp"
 #include "caf/detail/comparable.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/error_code.hpp"
 #include "caf/fwd.hpp"
-#include "caf/meta/omittable_if_empty.hpp"
-#include "caf/meta/type_name.hpp"
+#include "caf/is_error_code_enum.hpp"
+#include "caf/message.hpp"
 #include "caf/none.hpp"
+#include "caf/type_id.hpp"
 
 namespace caf {
-
-class error;
-
-/// Evaluates to true if `T` is an enum with a free function
-/// `make_error` for converting it to an `error`.
-template <class T>
-struct has_make_error {
-private:
-  template <class U>
-  static auto test_make_error(U* x) -> decltype(make_error(*x));
-
-  template <class U>
-  static auto test_make_error(...) -> void;
-
-  using type = decltype(test_make_error<T>(nullptr));
-
-public:
-  static constexpr bool value = std::is_enum<T>::value
-                                && std::is_same<error, type>::value;
-};
-
-/// Convenience alias for `std::enable_if<has_make_error<T>::value, U>::type`.
-template <class T, class U = void>
-using enable_if_has_make_error_t =
-  typename std::enable_if<has_make_error<T>::value, U>::type;
 
 /// A serializable type for storing error codes with category and optional,
 /// human-readable context information. Unlike error handling classes from
@@ -82,107 +43,121 @@ using enable_if_has_make_error_t =
 ///
 /// # Why is there no `string()` member function?
 ///
-/// The C++ standard library uses category singletons and virtual dispatching
-/// to correlate error codes to descriptive strings. However, singletons are
-/// a poor choice when it comes to serialization. CAF uses atoms for
-/// categories instead and requires users to register custom error categories
-/// to the actor system. This makes the actor system the natural instance for
-/// rendering error messages via `actor_system::render(const error&)`.
+/// The C++ standard library uses category singletons and virtual dispatching to
+/// correlate error codes to descriptive strings. However, singletons are a poor
+/// choice when it comes to serialization. CAF uses type IDs and meta objects
+/// instead.
 class CAF_CORE_EXPORT error : detail::comparable<error> {
 public:
-  // -- member types -----------------------------------------------------------
+  // -- nested classes ---------------------------------------------------------
 
-  using inspect_fun
-    = std::function<error(meta::type_name_t, uint8_t&, atom_value&,
-                          meta::omittable_if_empty_t, message&)>;
+  struct data {
+    uint8_t code;
+    type_id_t category;
+    message context;
+
+    template <class Inspector>
+    friend bool inspect(Inspector& f, data& x) {
+      return f.object(x).fields(f.field("code", x.code),
+                                f.field("category", x.category),
+                                f.field("context", x.context));
+    }
+  };
 
   // -- constructors, destructors, and assignment operators --------------------
 
-  error() noexcept;
+  error() noexcept = default;
 
   error(none_t) noexcept;
 
-  error(error&&) noexcept;
+  error(error&&) noexcept = default;
 
-  error& operator=(error&&) noexcept;
+  error& operator=(error&&) noexcept = default;
 
   error(const error&);
 
   error& operator=(const error&);
 
-  error(uint8_t x, atom_value y);
+  template <class Enum, class = std::enable_if_t<is_error_code_enum_v<Enum>>>
+  error(Enum code) : error(static_cast<uint8_t>(code), type_id_v<Enum>) {
+    // nop
+  }
 
-  error(uint8_t x, atom_value y, message z);
+  template <class Enum, class = std::enable_if_t<is_error_code_enum_v<Enum>>>
+  error(Enum code, message context)
+    : error(static_cast<uint8_t>(code), type_id_v<Enum>, std::move(context)) {
+    // nop
+  }
 
-  template <class E, class = enable_if_has_make_error_t<E>>
-  error(E error_value) : error(make_error(error_value)) {
+  template <class Enum>
+  error(error_code<Enum> code) : error(to_integer(code), type_id_v<Enum>) {
     // nop
   }
 
   template <class E>
-  error(error_code<E> code) : error(code.value()) {
-    // nop
-  }
-
-  template <class E, class = enable_if_has_make_error_t<E>>
   error& operator=(E error_value) {
-    auto tmp = make_error(error_value);
+    error tmp{error_value};
     std::swap(data_, tmp.data_);
     return *this;
   }
 
   template <class E>
   error& operator=(error_code<E> code) {
-    auto tmp = make_error(code.value());
-    std::swap(data_, tmp.data_);
-    return *this;
+    return *this = code.value();
   }
 
-  ~error();
-
-  // -- observers --------------------------------------------------------------
+  // -- properties -------------------------------------------------------------
 
   /// Returns the category-specific error code, whereas `0` means "no error".
   /// @pre `*this != none`
-  uint8_t code() const noexcept;
+  uint8_t code() const noexcept {
+    return data_->code;
+  }
 
-  /// Returns the category of this error.
+  /// Returns the ::type_id of the category for this error.
   /// @pre `*this != none`
-  atom_value category() const noexcept;
+  type_id_t category() const noexcept {
+    return data_->category;
+  }
 
   /// Returns context information to this error.
   /// @pre `*this != none`
-  const message& context() const noexcept;
+  const message& context() const noexcept {
+    return data_->context;
+  }
 
   /// Returns `*this != none`.
-  inline explicit operator bool() const noexcept {
+  explicit operator bool() const noexcept {
     return data_ != nullptr;
   }
 
   /// Returns `*this == none`.
-  inline bool operator!() const noexcept {
+  bool operator!() const noexcept {
+    return data_ == nullptr;
+  }
+
+  /// Returns whether this error was default-constructed.
+  bool empty() const noexcept {
     return data_ == nullptr;
   }
 
   int compare(const error&) const noexcept;
 
-  int compare(uint8_t x, atom_value y) const noexcept;
+  int compare(uint8_t code, type_id_t category) const noexcept;
 
   // -- modifiers --------------------------------------------------------------
 
-  /// Returns context information to this error.
-  /// @pre `*this != none`
-  message& context() noexcept;
-
-  /// Sets the error code to 0.
-  void clear() noexcept;
+  /// Reverts this error to "not an error" as if calling `*this = error{}`.
+  void reset() noexcept {
+    data_.reset();
+  }
 
   // -- static convenience functions -------------------------------------------
 
   /// @cond PRIVATE
 
-  static inline error eval() {
-    return none;
+  static error eval() {
+    return error{};
   }
 
   template <class F, class... Fs>
@@ -196,52 +171,37 @@ public:
   // -- friend functions -------------------------------------------------------
 
   template <class Inspector>
-  friend auto inspect(Inspector& f, error& x) {
-    using result_type = typename Inspector::result_type;
-    if constexpr (Inspector::reads_state) {
-      if (!x) {
-        uint8_t code = 0;
-        return f(code);
-      }
-      return f(x.code(), x.category(), x.context());
-    } else {
-      uint8_t code = 0;
-      auto cb = meta::load_callback([&] {
-        if (code == 0) {
-          x.clear();
-          if constexpr (std::is_same<result_type, void>::value)
-            return;
-          else
-            return result_type{};
-        }
-        x.init();
-        x.code_ref() = code;
-        return f(x.category_ref(), x.context());
-      });
-      return f(code, cb);
-    }
+  friend bool inspect(Inspector& f, error& x) {
+    return f.object(x).fields(f.field("data", x.data_));
   }
 
 private:
-  // -- inspection support -----------------------------------------------------
+  // -- constructors, destructors, and assignment operators --------------------
 
-  uint8_t& code_ref() noexcept;
+  error(uint8_t code, type_id_t category);
 
-  atom_value& category_ref() noexcept;
-
-  void init();
-
-  // -- nested classes ---------------------------------------------------------
-
-  struct data;
+  error(uint8_t code, type_id_t category, message context);
 
   // -- member variables -------------------------------------------------------
 
-  data* data_;
+  std::unique_ptr<data> data_;
 };
 
 /// @relates error
 CAF_CORE_EXPORT std::string to_string(const error& x);
+
+/// @relates error
+template <class Enum>
+std::enable_if_t<is_error_code_enum_v<Enum>, error> make_error(Enum code) {
+  return error{code};
+}
+
+/// @relates error
+template <class Enum, class T, class... Ts>
+std::enable_if_t<is_error_code_enum_v<Enum>, error>
+make_error(Enum code, T&& x, Ts&&... xs) {
+  return error{code, make_message(std::forward<T>(x), std::forward<Ts>(xs)...)};
+}
 
 /// @relates error
 inline bool operator==(const error& x, none_t) {
@@ -254,15 +214,19 @@ inline bool operator==(none_t, const error& x) {
 }
 
 /// @relates error
-template <class E, class = enable_if_has_make_error_t<E>>
-bool operator==(const error& x, E y) {
-  return x == make_error(y);
+template <class Enum>
+std::enable_if_t<is_error_code_enum_v<Enum>, bool>
+operator==(const error& x, Enum y) {
+  auto code = static_cast<uint8_t>(y);
+  return code == 0 ? !x
+                   : x && x.code() == code && x.category() == type_id_v<Enum>;
 }
 
 /// @relates error
-template <class E, class = enable_if_has_make_error_t<E>>
-bool operator==(E x, const error& y) {
-  return make_error(x) == y;
+template <class Enum>
+std::enable_if_t<is_error_code_enum_v<Enum>, bool>
+operator==(Enum x, const error& y) {
+  return y == x;
 }
 
 /// @relates error
@@ -276,14 +240,16 @@ inline bool operator!=(none_t, const error& x) {
 }
 
 /// @relates error
-template <class E, class = enable_if_has_make_error_t<E>>
-bool operator!=(const error& x, E y) {
+template <class Enum>
+std::enable_if_t<is_error_code_enum_v<Enum>, bool>
+operator!=(const error& x, Enum y) {
   return !(x == y);
 }
 
 /// @relates error
-template <class E, class = enable_if_has_make_error_t<E>>
-bool operator!=(E x, const error& y) {
+template <class Enum>
+std::enable_if_t<is_error_code_enum_v<Enum>, bool>
+operator!=(Enum x, const error& y) {
   return !(x == y);
 }
 

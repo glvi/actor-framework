@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/io/network/native_socket.hpp"
 
@@ -25,6 +11,7 @@
 
 #include "caf/io/network/protocol.hpp"
 
+// clang-format off
 #ifdef CAF_WINDOWS
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
@@ -47,12 +34,14 @@
 #  include <arpa/inet.h>
 #  include <cerrno>
 #  include <fcntl.h>
+#  include <sys/types.h>
 #  include <netinet/in.h>
 #  include <netinet/ip.h>
 #  include <netinet/tcp.h>
 #  include <sys/socket.h>
 #  include <unistd.h>
 #endif
+// clang-format on
 
 using std::string;
 
@@ -92,7 +81,7 @@ const int ec_interrupted_syscall = EINTR;
 #endif
 
 // Platform-dependent setup for suppressing SIGPIPE.
-#if defined(CAF_MACOS) || defined(CAF_IOS) || defined(__FreeBSD__)
+#if defined(CAF_MACOS) || defined(CAF_IOS) || defined(CAF_FREE_BSD)
 // Set the SO_NOSIGPIPE socket option on macOS, iOS and FreeBSD.
 const int no_sigpipe_socket_flag = SO_NOSIGPIPE;
 const int no_sigpipe_io_flag = 0;
@@ -101,7 +90,7 @@ const int no_sigpipe_io_flag = 0;
 const int no_sigpipe_socket_flag = 0;
 const int no_sigpipe_io_flag = 0;
 #else
-// Pass MSG_NOSIGNAL to recv/send on Linux/Android/OpenBSD.
+// Pass MSG_NOSIGNAL to recv/send on Linux/Android/OpenBSD/NetBSD.
 const int no_sigpipe_socket_flag = 0;
 const int no_sigpipe_io_flag = MSG_NOSIGNAL;
 #endif
@@ -117,7 +106,11 @@ void close_socket(native_socket fd) {
 }
 
 bool would_block_or_temporarily_unavailable(int errcode) {
+#  if EAGAIN != EWOULDBLOCK
   return errcode == EAGAIN || errcode == EWOULDBLOCK;
+#  else
+  return errcode == EAGAIN;
+#  endif
 }
 
 string last_socket_error_as_string() {

@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -25,7 +11,6 @@
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
 #include "caf/ipv6_address.hpp"
-#include "caf/meta/type_name.hpp"
 
 namespace caf {
 
@@ -82,9 +67,9 @@ public:
   long compare(ipv4_endpoint x) const noexcept;
 
   template <class Inspector>
-  friend typename Inspector::result_type
-  inspect(Inspector& f, ipv6_endpoint& x) {
-    return f(meta::type_name("ipv6_endpoint"), x.address_, x.port_);
+  friend bool inspect(Inspector& f, ipv6_endpoint& x) {
+    return f.object(x).fields(f.field("address", x.address_),
+                              f.field("port", x.port_));
   }
 
 private:

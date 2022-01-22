@@ -1,25 +1,11 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #include "caf/config.hpp"
 
 #define CAF_SUITE io_http_broker
-#include "caf/test/unit_test.hpp"
+#include "io-test.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -165,10 +151,10 @@ behavior http_worker(http_broker* self, connection_handle hdl) {
 }
 
 behavior server(broker* self) {
-  CAF_MESSAGE("server up and running");
+  MESSAGE("server up and running");
   return {
     [=](const new_connection_msg& ncm) {
-      CAF_MESSAGE("fork on new connection");
+      MESSAGE("fork on new connection");
       self->fork(http_worker, ncm.handle);
     },
   };
@@ -199,7 +185,7 @@ public:
     mpx_->flush_runnables();
   }
 
-  // helper class for a nice-and-easy "mock(...).expect(...)" syntax
+  // helper class for a nice-and-easy "mock(...).check_response(...)" syntax
   class mock_t {
   public:
     mock_t(fixture* thisptr) : this_(thisptr) {
@@ -208,13 +194,13 @@ public:
 
     mock_t(const mock_t&) = default;
 
-    mock_t& expect(const std::string& x) {
+    mock_t& check_response(const std::string& x) {
       auto bytes = as_bytes(make_span(x));
       auto& buf = this_->mpx_->output_buffer(this_->connection_);
-      CAF_REQUIRE(buf.size() >= x.size());
-      CAF_REQUIRE(std::equal(buf.begin(),
-                             buf.begin() + static_cast<ptrdiff_t>(x.size()),
-                             bytes.begin()));
+      REQUIRE_GE(buf.size(), x.size());
+      REQUIRE(std::equal(buf.begin(),
+                         buf.begin() + static_cast<ptrdiff_t>(x.size()),
+                         bytes.begin()));
       buf.erase(buf.begin(), buf.begin() + static_cast<ptrdiff_t>(x.size()));
       return *this;
     }
@@ -242,16 +228,16 @@ public:
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(http_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(valid_response) {
-  // write a GET message and expect an OK message as result
-  mock(http_get).expect(http_ok);
+  // write a GET message and check_response an OK message as result
+  mock(http_get).check_response(http_ok);
 }
 
 CAF_TEST(invalid_response) {
-  // write a GET with invalid path and expect a 404 message as result
-  mock("GET /kitten.gif HTTP/1.1\r\n\r\n").expect(http_error);
+  // write a GET with invalid path and check_response a 404 message as result
+  mock("GET /kitten.gif HTTP/1.1\r\n\r\n").check_response(http_error);
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

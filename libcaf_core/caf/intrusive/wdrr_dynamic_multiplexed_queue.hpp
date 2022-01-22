@@ -1,21 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright (C) 2011 - 2017                                                  *
- * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -55,6 +40,11 @@ public:
     // nop
   }
 
+  ~wdrr_dynamic_multiplexed_queue() noexcept {
+    for (auto& kvp : qs_)
+      policy_.cleanup(kvp.second);
+  }
+
   policy_type& policy() noexcept {
     return policy_;
   }
@@ -64,10 +54,8 @@ public:
   }
 
   bool push_back(mapped_type* ptr) noexcept {
-    auto i = qs_.find(policy_.id_of(*ptr));
-    if (i != qs_.end()) {
-      i->second.push_back(ptr);
-      return true;
+    if (auto i = qs_.find(policy_.id_of(*ptr)); i != qs_.end()) {
+      return policy_.push_back(i->second, ptr);
     } else {
       typename unique_pointer::deleter_type d;
       d(ptr);
@@ -110,7 +98,7 @@ public:
   /// @returns `true` if at least one item was consumed, `false` otherwise.
   template <class F>
   new_round_result new_round(deficit_type quantum, F& f) {
-    bool result = false;
+    size_t consumed = 0;
     bool stopped = false;
     for (auto& kvp : qs_) {
       if (policy_.enabled(kvp.second)) {
@@ -118,7 +106,7 @@ public:
         if (!stopped) {
           new_round_helper<F> g{kvp.first, q, f};
           auto res = q.new_round(policy_.quantum(q, quantum), g);
-          result = res.consumed_items;
+          consumed += res.consumed_items;
           if (res.stop_all)
             stopped = true;
         } else {
@@ -129,14 +117,18 @@ public:
       }
     }
     cleanup();
-    return {result, stopped};
+    return {consumed, stopped};
   }
 
   /// Erases all keys previously marked via `erase_later`.
   void cleanup() {
     if (!erase_list_.empty()) {
-      for (auto& k : erase_list_)
-        qs_.erase(k);
+      for (auto& k : erase_list_) {
+        if (auto i = qs_.find(k); i != qs_.end()) {
+          policy_.cleanup(i->second);
+          qs_.erase(i);
+        }
+      }
       erase_list_.clear();
     }
   }
@@ -160,6 +152,15 @@ public:
   void peek_all(F f) const {
     for (auto& kvp : qs_)
       kvp.second.peek_all(f);
+  }
+
+  /// Tries to find an element in the queue that matches the given predicate.
+  template <class Predicate>
+  pointer find_if(Predicate pred) {
+    for (auto& kvp : qs_)
+      if (auto ptr = kvp.second.find_if(pred))
+        return ptr;
+    return nullptr;
   }
 
   /// Returns `true` if all queues are empty, `false` otherwise.
@@ -191,9 +192,8 @@ public:
   }
 
   void lifo_append(pointer ptr) noexcept {
-    auto i = qs_.find(policy_.id_of(*ptr));
-    if (i != qs_.end()) {
-      i->second.lifo_append(ptr);
+    if (auto i = qs_.find(policy_.id_of(*ptr)); i != qs_.end()) {
+      policy_.lifo_append(i->second, ptr);
     } else {
       typename unique_pointer::deleter_type d;
       d(ptr);
@@ -202,7 +202,7 @@ public:
 
   void stop_lifo_append() noexcept {
     for (auto& kvp : qs_)
-      kvp.second.stop_lifo_append();
+      policy_.stop_lifo_append(kvp.second);
   }
 
 private:

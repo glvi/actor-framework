@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -31,31 +17,38 @@
 
 namespace caf::detail {
 
-template <class Self, class Sender, class Handle, class... Ts>
-void profiled_send(Self* self, Sender&& sender, const Handle& receiver,
+template <class Self, class SelfHandle, class Handle, class... Ts>
+void profiled_send(Self* self, SelfHandle&& src, const Handle& dst,
                    message_id msg_id, std::vector<strong_actor_ptr> stages,
                    execution_unit* context, Ts&&... xs) {
-  CAF_IGNORE_UNUSED(self);
-  if (receiver) {
-    auto element = make_mailbox_element(std::forward<Sender>(sender), msg_id,
+  if (dst) {
+    auto element = make_mailbox_element(std::forward<SelfHandle>(src), msg_id,
                                         std::move(stages),
                                         std::forward<Ts>(xs)...);
     CAF_BEFORE_SENDING(self, *element);
-    receiver->enqueue(std::move(element), context);
+    dst->enqueue(std::move(element), context);
+  } else {
+    self->home_system().base_metrics().rejected_messages->inc();
   }
 }
 
-template <class Self, class Sender, class Handle, class... Ts>
-void profiled_send(Self* self, Sender&& sender, const Handle& receiver,
+template <class Self, class SelfHandle, class Handle, class... Ts>
+void profiled_send(Self* self, SelfHandle&& src, const Handle& dst,
                    actor_clock& clock, actor_clock::time_point timeout,
-                   message_id msg_id, Ts&&... xs) {
-  CAF_IGNORE_UNUSED(self);
-  if (receiver) {
-    auto element = make_mailbox_element(std::forward<Sender>(sender), msg_id,
-                                        no_stages, std::forward<Ts>(xs)...);
-    CAF_BEFORE_SENDING_SCHEDULED(self, timeout, *element);
-    clock.schedule_message(timeout, actor_cast<strong_actor_ptr>(receiver),
-                           std::move(element));
+                   [[maybe_unused]] message_id msg_id, Ts&&... xs) {
+  if (dst) {
+    if constexpr (std::is_same<Handle, group>::value) {
+      clock.schedule_message(timeout, dst, std::forward<SelfHandle>(src),
+                             make_message(std::forward<Ts>(xs)...));
+    } else {
+      auto element = make_mailbox_element(std::forward<SelfHandle>(src), msg_id,
+                                          no_stages, std::forward<Ts>(xs)...);
+      CAF_BEFORE_SENDING_SCHEDULED(self, timeout, *element);
+      clock.schedule_message(timeout, actor_cast<strong_actor_ptr>(dst),
+                             std::move(element));
+    }
+  } else {
+    self->home_system().base_metrics().rejected_messages->inc();
   }
 }
 

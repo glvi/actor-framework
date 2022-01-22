@@ -1,26 +1,12 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2019 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE actor_system_config
 
 #include "caf/actor_system_config.hpp"
 
-#include "caf/test/dsl.hpp"
+#include "core-test.hpp"
 
 #include <deque>
 #include <list>
@@ -33,13 +19,11 @@
 #include <vector>
 
 using namespace caf;
+using namespace caf::literals;
+
+using namespace std::string_literals;
 
 namespace {
-
-// TODO: switch to std::operator""s when switching to C++14
-std::string operator"" _s(const char* str, size_t size) {
-  return std::string{str, size};
-}
 
 timespan operator"" _ms(unsigned long long x) {
   return std::chrono::duration_cast<timespan>(std::chrono::milliseconds(x));
@@ -47,10 +31,6 @@ timespan operator"" _ms(unsigned long long x) {
 
 uri operator"" _u(const char* str, size_t size) {
   return unbox(make_uri(string_view{str, size}));
-}
-
-atom_value operator"" _a(const char* str, size_t size) {
-  return atom_from_string(string_view{str, size});
 }
 
 using string_list = std::vector<std::string>;
@@ -76,66 +56,120 @@ struct fixture {
   void parse(const char* file_content, string_list args = {}) {
     cfg.clear();
     cfg.remainder.clear();
-    std::istringstream ini{file_content};
-    if (auto err = cfg.parse(std::move(args), ini))
-      CAF_FAIL("parse() failed: " << cfg.render(err));
+    std::istringstream conf{file_content};
+    if (auto err = cfg.parse(std::move(args), conf))
+      CAF_FAIL("parse() failed: " << err);
   }
 };
 
 } // namespace
 
-CAF_TEST_FIXTURE_SCOPE(actor_system_config_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(parsing - without CLI arguments) {
-  auto text = "[foo]\nbar=\"hello\"";
+  auto text = "foo{\nbar=\"hello\"}";
   options("?foo").add<std::string>("bar,b", "some string parameter");
   parse(text);
-  CAF_CHECK(cfg.remainder.empty());
-  CAF_CHECK_EQUAL(get_or(cfg, "foo.bar", ""), "hello");
+  CHECK(cfg.remainder.empty());
+  CHECK_EQ(get_or(cfg, "foo.bar", ""), "hello");
+  auto [argc, argv] = cfg.c_args_remainder();
+  CAF_REQUIRE_EQUAL(argc, 1);
+  CHECK_EQ(argv[0], cfg.program_name);
 }
 
 CAF_TEST(parsing - without CLI cfg.remainder) {
-  auto text = "[foo]\nbar=\"hello\"";
+  auto text = "foo{\nbar=\"hello\"}";
   options("?foo").add<std::string>("bar,b", "some string parameter");
-  CAF_MESSAGE("CLI long name");
+  MESSAGE("CLI long name");
   parse(text, {"--foo.bar=test"});
-  CAF_CHECK(cfg.remainder.empty());
-  CAF_CHECK_EQUAL(get_or(cfg, "foo.bar", ""), "test");
-  CAF_MESSAGE("CLI abbreviated long name");
+  CHECK(cfg.remainder.empty());
+  CHECK_EQ(get_or(cfg, "foo.bar", ""), "test");
+  MESSAGE("CLI abbreviated long name");
   parse(text, {"--bar=test"});
-  CAF_CHECK(cfg.remainder.empty());
-  CAF_CHECK_EQUAL(get_or(cfg, "foo.bar", ""), "test");
-  CAF_MESSAGE("CLI short name");
+  CHECK(cfg.remainder.empty());
+  CHECK_EQ(get_or(cfg, "foo.bar", ""), "test");
+  MESSAGE("CLI short name");
   parse(text, {"-b", "test"});
-  CAF_CHECK(cfg.remainder.empty());
-  CAF_CHECK_EQUAL(get_or(cfg, "foo.bar", ""), "test");
-  CAF_MESSAGE("CLI short name without whitespace");
+  CHECK(cfg.remainder.empty());
+  CHECK_EQ(get_or(cfg, "foo.bar", ""), "test");
+  MESSAGE("CLI short name without whitespace");
   parse(text, {"-btest"});
-  CAF_CHECK(cfg.remainder.empty());
-  CAF_CHECK_EQUAL(get_or(cfg, "foo.bar", ""), "test");
+  CHECK(cfg.remainder.empty());
+  CHECK_EQ(get_or(cfg, "foo.bar", ""), "test");
 }
 
 CAF_TEST(parsing - with CLI cfg.remainder) {
-  auto text = "[foo]\nbar=\"hello\"";
+  auto text = "foo{\nbar=\"hello\"}";
   options("?foo").add<std::string>("bar,b", "some string parameter");
-  CAF_MESSAGE("valid cfg.remainder");
   parse(text, {"-b", "test", "hello", "world"});
-  CAF_CHECK_EQUAL(get_or(cfg, "foo.bar", ""), "test");
-  CAF_CHECK_EQUAL(cfg.remainder, string_list({"hello", "world"}));
-  CAF_MESSAGE("invalid cfg.remainder");
+  CAF_REQUIRE_EQUAL(cfg.remainder.size(), 2u);
+  CHECK_EQ(get_or(cfg, "foo.bar", ""), "test");
+  CHECK_EQ(cfg.remainder, string_list({"hello", "world"}));
+  auto [argc, argv] = cfg.c_args_remainder();
+  CAF_REQUIRE_EQUAL(argc, 3);
+  CHECK_EQ(argv[0], cfg.program_name);
+  CHECK_EQ(argv[1], cfg.remainder[0]);
+  CHECK_EQ(argv[2], cfg.remainder[1]);
+}
+
+CAF_TEST(file input overrides defaults but CLI args always win) {
+  const char* file_input = R"__(
+    group1 {
+      arg1 = 'foobar'
+    }
+    group2 {
+      arg1 = 'hello world'
+      arg2 = 2
+    }
+  )__";
+  struct grp {
+    std::string arg1 = "default";
+    int arg2 = 42;
+  };
+  grp grp1;
+  grp grp2;
+  config_option_adder{cfg.custom_options(), "group1"}
+    .add(grp1.arg1, "arg1", "")
+    .add(grp1.arg2, "arg2", "");
+  config_option_adder{cfg.custom_options(), "group2"}
+    .add(grp2.arg1, "arg1", "")
+    .add(grp2.arg2, "arg2", "");
+  string_list args{"--group1.arg2=123", "--group2.arg1=bye"};
+  std::istringstream input{file_input};
+  auto err = cfg.parse(std::move(args), input);
+  CHECK_EQ(err, error{});
+  CHECK_EQ(grp1.arg1, "foobar");
+  CHECK_EQ(grp1.arg2, 123);
+  CHECK_EQ(grp2.arg1, "bye");
+  CHECK_EQ(grp2.arg2, 2);
+  settings res;
+  put(res, "group1.arg1", "foobar");
+  put(res, "group1.arg2", 123);
+  put(res, "group2.arg1", "bye");
+  put(res, "group2.arg2", 2);
+  CHECK_EQ(content(cfg), res);
 }
 
 // Checks whether both a synced variable and the corresponding entry in
 // content(cfg) are equal to `value`.
-#define CHECK_SYNCED(var, value)                                               \
+#define CHECK_SYNCED(var, ...)                                                 \
   do {                                                                         \
-    CAF_CHECK_EQUAL(var, value);                                               \
-    CAF_CHECK_EQUAL(get_if<decltype(var)>(&cfg, #var), value);                 \
+    using ref_value_type = std::decay_t<decltype(var)>;                        \
+    ref_value_type value{__VA_ARGS__};                                         \
+    CHECK_EQ(var, value);                                                      \
+    if (auto maybe_val = get_as<decltype(var)>(cfg, #var)) {                   \
+      CHECK_EQ(*maybe_val, value);                                             \
+    } else {                                                                   \
+      auto cv = get_if(std::addressof(cfg.content), #var);                     \
+      CAF_ERROR("expected type "                                               \
+                << config_value::mapped_type_name<decltype(var)>()             \
+                << ", got: " << cv->type_name());                              \
+    }                                                                          \
   } while (false)
 
 // Checks whether an entry in content(cfg) is equal to `value`.
 #define CHECK_TEXT_ONLY(type, var, value)                                      \
-  CAF_CHECK_EQUAL(get_if<type>(&cfg, #var), value)
+  CHECK_EQ(get_as<type>(cfg, #var), value)
 
 #define ADD(var) add(var, #var, "...")
 
@@ -174,14 +208,12 @@ CAF_TEST(integers and integer containers options) {
   CHECK_SYNCED(some_int, 42);
   CHECK_SYNCED(some_other_int, 23);
   CHECK_TEXT_ONLY(int, yet_another_int, 123);
-  CHECK_SYNCED(some_int_list, int_list({1, 2, 3}));
-  CHECK_SYNCED(some_int_list_list, int_list_list({{1, 2, 3}, {4, 5, 6}}));
-  CHECK_SYNCED(some_int_map, int_map({{{"a", 1}, {"b", 2}, {"c", 3}}}));
-  CHECK_SYNCED(some_int_list_map,
-               int_list_map({{{"a", {1, 2, 3}}, {"b", {4, 5, 6}}}}));
-  CHECK_SYNCED(some_int_map_list,
-               int_map_list({{{"a", 1}, {"b", 2}, {"c", 3}},
-                             {{"d", 4}, {"e", 5}, {"f", 6}}}));
+  CHECK_SYNCED(some_int_list, 1, 2, 3);
+  CHECK_SYNCED(some_int_list_list, {1, 2, 3}, {4, 5, 6});
+  CHECK_SYNCED(some_int_map, {{"a", 1}, {"b", 2}, {"c", 3}});
+  CHECK_SYNCED(some_int_list_map, {{"a", {1, 2, 3}}, {"b", {4, 5, 6}}});
+  CHECK_SYNCED(some_int_map_list, {{"a", 1}, {"b", 2}, {"c", 3}},
+               {{"d", 4}, {"e", 5}, {"f", 6}});
 }
 
 CAF_TEST(basic and basic containers options) {
@@ -191,14 +223,12 @@ CAF_TEST(basic and basic containers options) {
   using int_list = vector<int>;
   using bool_list = vector<bool>;
   using double_list = vector<double>;
-  using atom_value_list = vector<atom_value>;
   using timespan_list = vector<timespan>;
   using uri_list = vector<uri>;
   using string_list = vector<string>;
   using int_map = map<string, int>;
   using bool_map = map<string, bool>;
   using double_map = map<string, double>;
-  using atom_value_map = map<string, atom_value>;
   using timespan_map = map<string, timespan>;
   using uri_map = map<string, uri>;
   using string_map = map<string, string>;
@@ -206,21 +236,18 @@ CAF_TEST(basic and basic containers options) {
     some_int = 42
     some_bool = true
     some_double = 1e23
-    some_atom_value = 'atom'
     some_timespan = 123ms
     some_uri = <foo:bar>
     some_string = "string"
     some_int_list = [1, 2, 3]
     some_bool_list = [false, true]
     some_double_list = [1., 2., 3.]
-    some_atom_value_list = ['a', 'b', 'c']
     some_timespan_list = [123ms, 234ms, 345ms]
     some_uri_list = [<foo:a>, <foo:b>, <foo:c>]
     some_string_list = ["a", "b", "c"]
     some_int_map = {a = 1, b = 2, c = 3}
     some_bool_map = {a = true, b = false}
     some_double_map = {a = 1., b = 2., c = 3.}
-    some_atom_value_map = {a = '1', b = '2', c = '3'}
     some_timespan_map = {a = 123ms, b = 234ms, c = 345ms}
     some_uri_map = {a = <foo:a>, b = <foo:b>, c = <foo:c>}
     some_string_map = {a = "1", b = "2", c = "3"}
@@ -228,53 +255,84 @@ CAF_TEST(basic and basic containers options) {
   VAR(int);
   VAR(bool);
   VAR(double);
-  VAR(atom_value);
   VAR(timespan);
   VAR(uri);
   VAR(string);
   VAR(int_list);
   VAR(bool_list);
   VAR(double_list);
-  VAR(atom_value_list);
   VAR(timespan_list);
   VAR(uri_list);
   VAR(string_list);
   VAR(int_map);
   VAR(bool_map);
   VAR(double_map);
-  VAR(atom_value_map);
   VAR(timespan_map);
   VAR(uri_map);
   VAR(string_map);
   parse(text);
-  CAF_MESSAGE("check primitive types");
+  MESSAGE("check primitive types");
   CHECK_SYNCED(some_int, 42);
   CHECK_SYNCED(some_bool, true);
   CHECK_SYNCED(some_double, 1e23);
-  CHECK_SYNCED(some_atom_value, "atom"_a);
   CHECK_SYNCED(some_timespan, 123_ms);
   CHECK_SYNCED(some_uri, "foo:bar"_u);
-  CHECK_SYNCED(some_string, "string"_s);
-  CAF_MESSAGE("check list types");
-  CHECK_SYNCED(some_int_list, int_list({1, 2, 3}));
-  CHECK_SYNCED(some_bool_list, bool_list({false, true}));
-  CHECK_SYNCED(some_double_list, double_list({1., 2., 3.}));
-  CHECK_SYNCED(some_atom_value_list, atom_value_list({"a"_a, "b"_a, "c"_a}));
-  CHECK_SYNCED(some_timespan_list, timespan_list({123_ms, 234_ms, 345_ms}));
-  CHECK_SYNCED(some_uri_list, uri_list({"foo:a"_u, "foo:b"_u, "foo:c"_u}));
-  CHECK_SYNCED(some_string_list, string_list({"a", "b", "c"}));
-  CAF_MESSAGE("check dictionary types");
-  CHECK_SYNCED(some_int_map, int_map({{"a", 1}, {"b", 2}, {"c", 3}}));
-  CHECK_SYNCED(some_bool_map, bool_map({{"a", true}, {"b", false}}));
-  CHECK_SYNCED(some_double_map, double_map({{"a", 1.}, {"b", 2.}, {"c", 3.}}));
-  CHECK_SYNCED(some_atom_value_map,
-               atom_value_map({{"a", "1"_a}, {"b", "2"_a}, {"c", "3"_a}}));
-  CHECK_SYNCED(some_timespan_map,
-               timespan_map({{"a", 123_ms}, {"b", 234_ms}, {"c", 345_ms}}));
-  CHECK_SYNCED(some_uri_map,
-               uri_map({{"a", "foo:a"_u}, {"b", "foo:b"_u}, {"c", "foo:c"_u}}));
-  CHECK_SYNCED(some_string_map,
-               string_map({{"a", "1"}, {"b", "2"}, {"c", "3"}}));
+  CHECK_SYNCED(some_string, "string"s);
+  MESSAGE("check list types");
+  CHECK_SYNCED(some_int_list, 1, 2, 3);
+  CHECK_SYNCED(some_bool_list, false, true);
+  CHECK_SYNCED(some_double_list, 1., 2., 3.);
+  CHECK_SYNCED(some_timespan_list, 123_ms, 234_ms, 345_ms);
+  CHECK_SYNCED(some_uri_list, "foo:a"_u, "foo:b"_u, "foo:c"_u);
+  CHECK_SYNCED(some_string_list, "a", "b", "c");
+  MESSAGE("check dictionary types");
+  CHECK_SYNCED(some_int_map, {"a", 1}, {"b", 2}, {"c", 3});
+  CHECK_SYNCED(some_bool_map, {"a", true}, {"b", false});
+  CHECK_SYNCED(some_double_map, {"a", 1.}, {"b", 2.}, {"c", 3.});
+  CHECK_SYNCED(some_timespan_map, {"a", 123_ms}, {"b", 234_ms}, {"c", 345_ms});
+  CHECK_SYNCED(some_uri_map, {"a", "foo:a"_u}, {"b", "foo:b"_u},
+               {"c", "foo:c"_u});
+  CHECK_SYNCED(some_string_map, {"a", "1"}, {"b", "2"}, {"c", "3"});
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+SCENARIO("config files allow both nested and dot-separated values") {
+  GIVEN("the option my.answer.value") {
+    config_option_adder{cfg.custom_options(), "my.answer"}
+      .add<int32_t>("first", "the first answer")
+      .add<int32_t>("second", "the second answer");
+    std::vector<std::string> allowed_input_strings{
+      "my { answer { first = 1, second = 2 } }",
+      "my.answer { first = 1, second = 2 }",
+      "my { answer.first = 1, answer.second = 2  }",
+      "my.answer.first = 1, my.answer.second = 2",
+      "my { answer { first = 1 }, answer.second = 2 }",
+      "my { answer.first = 1, answer { second = 2} }",
+      "my.answer.first = 1, my { answer { second = 2 } }",
+    };
+    auto make_result = [] {
+      settings answer;
+      answer["first"] = 1;
+      answer["second"] = 2;
+      settings my;
+      my["answer"] = std::move(answer);
+      settings result;
+      result["my"] = std::move(my);
+      return result;
+    };
+    auto result = make_result();
+    for (const auto& input_string : allowed_input_strings) {
+      WHEN("parsing the file input '" << input_string << "'") {
+        std::istringstream input{input_string};
+        auto err = cfg.parse(string_list{}, input);
+        THEN("the actor system contains values for my.answer.(first|second)") {
+          CHECK_EQ(err, error{});
+          CHECK_EQ(get_or(cfg, "my.answer.first", -1), 1);
+          CHECK_EQ(get_or(cfg, "my.answer.second", -1), 2);
+          CHECK_EQ(content(cfg), result);
+        }
+      }
+    }
+  }
+}
+
+END_FIXTURE_SCOPE()

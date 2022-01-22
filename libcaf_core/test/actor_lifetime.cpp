@@ -1,35 +1,16 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
-
-#include "caf/config.hpp"
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #define CAF_SUITE actor_lifetime
-#include "caf/test/unit_test.hpp"
 
-#include <mutex>
+#include "core-test.hpp"
+
 #include <atomic>
 #include <condition_variable>
+#include <mutex>
 
 #include "caf/all.hpp"
-
-#include "caf/test/dsl.hpp"
-
-using check_atom = caf::atom_constant<caf::atom("check")>;
 
 using namespace caf;
 
@@ -64,9 +45,7 @@ public:
 
   behavior make_behavior() override {
     return {
-      [=](int x) {
-        return x;
-      }
+      [=](int x) { return x; },
     };
   }
 };
@@ -76,21 +55,21 @@ behavior tester(event_based_actor* self, const actor& aut) {
   if (std::is_same<ExitMsgType, exit_msg>::value) {
     self->set_exit_handler([self](exit_msg& msg) {
       // must be still alive at this point
-      CAF_CHECK_EQUAL(s_testees.load(), 1);
-      CAF_CHECK_EQUAL(msg.reason, exit_reason::user_shutdown);
-      self->send(self, check_atom::value);
+      CHECK_EQ(s_testees.load(), 1);
+      CHECK_EQ(msg.reason, exit_reason::user_shutdown);
+      self->send(self, ok_atom_v);
     });
     self->link_to(aut);
   } else {
     self->set_down_handler([self](down_msg& msg) {
       // must be still alive at this point
-      CAF_CHECK_EQUAL(s_testees.load(), 1);
-      CAF_CHECK_EQUAL(msg.reason, exit_reason::user_shutdown);
+      CHECK_EQ(s_testees.load(), 1);
+      CHECK_EQ(msg.reason, exit_reason::user_shutdown);
       // testee might be still running its cleanup code in
       // another worker thread; by waiting some milliseconds, we make sure
       // testee had enough time to return control to the scheduler
       // which in turn destroys it by dropping the last remaining reference
-      self->send(self, check_atom::value);
+      self->send(self, ok_atom_v);
     });
     self->monitor(aut);
   }
@@ -101,24 +80,22 @@ behavior tester(event_based_actor* self, const actor& aut) {
     s_cv.notify_one();
   }
   return {
-    [self](check_atom) {
+    [self](ok_atom) {
       { // make sure aut's dtor and on_exit() have been called
         std::unique_lock<std::mutex> guard{s_mtx};
         while (!s_testee_cleanup_done.load())
           s_cv.wait(guard);
       }
-      CAF_CHECK_EQUAL(s_testees.load(), 0);
-      CAF_CHECK_EQUAL(s_pending_on_exits.load(), 0);
+      CHECK_EQ(s_testees.load(), 0);
+      CHECK_EQ(s_pending_on_exits.load(), 0);
       self->quit();
-    }
+    },
   };
 }
 
-
-
 struct config : actor_system_config {
   config() {
-    set("scheduler.policy", atom("testing"));
+    set("caf.scheduler.policy", "testing");
   }
 };
 
@@ -165,7 +142,7 @@ struct fixture {
       }
       // Run the exit_msg.
       sched.run_once();
-      //expect((exit_msg), from(tst_driver).to(tst_subject));
+      // expect((exit_msg), from(tst_driver).to(tst_subject));
       { // Resume driver.
         std::unique_lock<std::mutex> guard{s_mtx};
         s_testee_cleanup_done = true;
@@ -189,11 +166,11 @@ CAF_TEST(destructor_call) {
     actor_system system{cfg};
     system.spawn<testee>();
   }
-  CAF_CHECK_EQUAL(s_testees.load(), 0);
-  CAF_CHECK_EQUAL(s_pending_on_exits.load(), 0);
+  CHECK_EQ(s_testees.load(), 0);
+  CHECK_EQ(s_pending_on_exits.load(), 0);
 }
 
-CAF_TEST_FIXTURE_SCOPE(actor_lifetime_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(no_spawn_options_and_exit_msg) {
   tst<exit_msg, no_spawn_options, no_spawn_options>();
@@ -211,4 +188,4 @@ CAF_TEST(mixed_spawn_options_and_down_msg) {
   tst<down_msg, detached, no_spawn_options>();
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

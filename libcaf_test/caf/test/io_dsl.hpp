@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -69,10 +55,10 @@ public:
 
   /// @param fun A function object for delegating to the parent's `exec_all`.
   test_node_fixture(run_all_nodes_fun fun)
-      : mm(this->sys.middleman()),
-        mpx(dynamic_cast<caf::io::network::test_multiplexer&>(mm.backend())),
-        run_all_nodes(std::move(fun)) {
-    // nop
+    : mm(this->sys.middleman()),
+      mpx(dynamic_cast<caf::io::network::test_multiplexer&>(mm.backend())),
+      run_all_nodes(std::move(fun)) {
+    bb = mm.named_broker<caf::io::basp_broker>("BASP");
   }
 
   test_node_fixture() : test_node_fixture([=] { this->run(); }) {
@@ -109,6 +95,9 @@ public:
   /// Reference to the middleman's event multiplexer.
   caf::io::network::test_multiplexer& mpx;
 
+  /// Handle to the BASP broker.
+  caf::actor bb;
+
   /// Callback for triggering all nodes when simulating a network of CAF nodes.
   run_all_nodes_fun run_all_nodes;
 
@@ -135,9 +124,7 @@ void exec_all_fixtures(Iterator first, Iterator last) {
     return x->sched.try_run_once() || x->mpx.read_data()
            || x->mpx.try_exec_runnable() || x->mpx.try_accept_connection();
   };
-  auto trigger_timeouts = [](fixture_ptr x) {
-    x->sched.trigger_timeouts();
-  };
+  auto trigger_timeouts = [](fixture_ptr x) { x->sched.trigger_timeouts(); };
   for (;;) {
     // Exhaust all messages in the system.
     while (std::any_of(first, last, advance))
@@ -178,9 +165,8 @@ public:
   /// (calls `publish`).
   /// @returns randomly picked connection handles for the server and the client.
   std::pair<connection_handle, connection_handle>
-  prepare_connection(PlanetType& server, PlanetType& client,
-                     std::string host, uint16_t port,
-                     accept_handle server_accept_hdl) {
+  prepare_connection(PlanetType& server, PlanetType& client, std::string host,
+                     uint16_t port, accept_handle server_accept_hdl) {
     auto server_hdl = next_connection_handle();
     auto client_hdl = next_connection_handle();
     server.mpx.prepare_connection(server_accept_hdl, server_hdl, client.mpx,
@@ -192,8 +178,8 @@ public:
   /// (calls `publish`).
   /// @returns randomly picked connection handles for the server and the client.
   std::pair<connection_handle, connection_handle>
-  prepare_connection(PlanetType& server, PlanetType& client,
-                     std::string host, uint16_t port) {
+  prepare_connection(PlanetType& server, PlanetType& client, std::string host,
+                     uint16_t port) {
     return prepare_connection(server, client, std::move(host), port,
                               next_accept_handle());
   }
@@ -217,7 +203,7 @@ public:
   }
 
   /// Type-erased callback for calling `exec_all`.
-  std::function<void ()> exec_all_callback() {
+  std::function<void()> exec_all_callback() {
     return [&] { exec_all(); };
   }
 
@@ -284,9 +270,9 @@ public:
 };
 
 #define expect_on(where, types, fields)                                        \
-  CAF_MESSAGE(#where << ": expect" << #types << "." << #fields);               \
-  expect_clause< CAF_EXPAND(CAF_DSL_LIST types) >{where . sched} . fields
+  (expect_clause<CAF_EXPAND(CAF_DSL_LIST types)>{where.sched, __LINE__}        \
+     .fields.eval(#types, #fields))
 
 #define disallow_on(where, types, fields)                                      \
-  CAF_MESSAGE(#where << ": disallow" << #types << "." << #fields);             \
-  disallow_clause< CAF_EXPAND(CAF_DSL_LIST types) >{where . sched} . fields
+  (disallow_clause<CAF_EXPAND(CAF_DSL_LIST types)>{where.sched, __LINE__}      \
+     .fields.eval(#types, #fields))

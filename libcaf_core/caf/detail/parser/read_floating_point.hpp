@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -112,7 +98,8 @@ void read_floating_point(State& ps, Consumer&& consumer,
   start();
   unstable_state(init) {
     epsilon_if(start_value == none, regular_init)
-    epsilon(after_dec)
+    epsilon(after_dec, "eE.")
+    epsilon(after_dot, any_char)
   }
   state(regular_init) {
     transition(regular_init, " \t")
@@ -124,7 +111,7 @@ void read_floating_point(State& ps, Consumer&& consumer,
   state(has_sign) {
     transition(leading_dot, '.')
     transition(zero, '0')
-    epsilon(dec)
+    epsilon(dec, decimal_chars)
   }
   term_state(zero) {
     transition(trailing_dot, '.')
@@ -133,7 +120,7 @@ void read_floating_point(State& ps, Consumer&& consumer,
   term_state(dec) {
     transition(dec, decimal_chars, add_ascii<10>(result, ch),
                pec::integer_overflow)
-    epsilon(after_dec)
+    epsilon(after_dec, "eE.")
   }
   state(after_dec) {
     transition(has_e, "eE")

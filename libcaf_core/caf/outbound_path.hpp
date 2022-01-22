@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -29,7 +15,6 @@
 #include "caf/downstream_msg.hpp"
 #include "caf/fwd.hpp"
 #include "caf/logger.hpp"
-#include "caf/meta/type_name.hpp"
 #include "caf/stream_aborter.hpp"
 #include "caf/stream_slot.hpp"
 #include "caf/system_messages.hpp"
@@ -63,11 +48,6 @@ public:
   ~outbound_path();
 
   // -- downstream communication -----------------------------------------------
-
-  /// Sends an `open_stream_msg` handshake.
-  static void
-  emit_open(local_actor* self, stream_slot slot, strong_actor_ptr to,
-            message handshake_data, stream_priority prio);
 
   /// Sends a `downstream_msg::batch` on this path. Decrements `open_credit` by
   /// `xs_size` and increments `next_batch_id` by 1.
@@ -170,9 +150,6 @@ public:
   /// ACKs, i.e., receiving an ACK with a higher ID is not an error.
   int64_t next_ack_id;
 
-  /// Stores the maximum capacity of the downstream actor.
-  int32_t max_capacity;
-
   /// Stores whether an outbound path is marked for removal. The
   /// `downstream_manger` no longer sends new batches to a closing path, but
   /// buffered batches are still shipped. The owning `stream_manager` removes
@@ -183,9 +160,12 @@ public:
 
 /// @relates outbound_path
 template <class Inspector>
-typename Inspector::result_type inspect(Inspector& f, outbound_path& x) {
-  return f(meta::type_name("outbound_path"), x.slots, x.hdl, x.next_batch_id,
-           x.open_credit, x.desired_batch_size, x.next_ack_id);
+bool inspect(Inspector& f, outbound_path& x) {
+  return f.object(x).fields(f.field("slots", x.slots), f.field("hdl", x.hdl),
+                            f.field("next_batch_id", x.next_batch_id),
+                            f.field("open_credit", x.open_credit),
+                            f.field("desired_batch_size", x.desired_batch_size),
+                            f.field("next_ack_id", x.next_ack_id));
 }
 
 } // namespace caf

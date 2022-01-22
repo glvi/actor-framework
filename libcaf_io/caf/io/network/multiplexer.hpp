@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -96,7 +82,7 @@ public:
     void intrusive_ptr_release_impl() override;
   };
 
-  /// Makes sure the multipler does not exit its event loop until
+  /// Makes sure the multiplier does not exit its event loop until
   /// the destructor of `supervisor` has been called.
   class CAF_IO_EXPORT supervisor {
   public:
@@ -154,11 +140,11 @@ public:
   /// compiled using the default backend.
   virtual multiplexer_backend* pimpl();
 
-  inline const std::thread::id& thread_id() const {
+  const std::thread::id& thread_id() const {
     return tid_;
   }
 
-  inline void thread_id(std::thread::id tid) {
+  void thread_id(std::thread::id tid) {
     tid_ = std::move(tid);
   }
 

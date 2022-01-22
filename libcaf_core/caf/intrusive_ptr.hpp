@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -48,6 +34,8 @@ public:
   using const_pointer = const T*;
 
   using element_type = T;
+
+  using value_type = T;
 
   using reference = T&;
 
@@ -117,13 +105,23 @@ public:
       intrusive_ptr_release(old);
   }
 
+  template <class... Ts>
+  void emplace(Ts&&... xs) {
+    reset(new T(std::forward<Ts>(xs)...), false);
+  }
+
   intrusive_ptr& operator=(pointer ptr) noexcept {
     reset(ptr);
     return *this;
   }
 
-  intrusive_ptr& operator=(intrusive_ptr other) noexcept {
+  intrusive_ptr& operator=(intrusive_ptr&& other) noexcept {
     swap(other);
+    return *this;
+  }
+
+  intrusive_ptr& operator=(const intrusive_ptr& other) noexcept {
+    reset(other.ptr_);
     return *this;
   }
 
@@ -267,8 +265,7 @@ bool operator<(const T* x, const intrusive_ptr<T>& y) {
 template <class T>
 std::string to_string(const intrusive_ptr<T>& x) {
   std::string result;
-  auto v = reinterpret_cast<uintptr_t>(x.get());
-  detail::append_hex(result, reinterpret_cast<uint8_t*>(&v), sizeof(v));
+  detail::append_hex(result, reinterpret_cast<uintptr_t>(x.get()));
   return result;
 }
 

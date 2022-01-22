@@ -1,21 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright (C) 2011 - 2017                                                  *
- * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 // This test simulates a complex multiplexing over multiple layers of WDRR
 // scheduled queues. The goal is to reduce the complex mailbox management of
@@ -30,10 +15,10 @@
 
 #include <memory>
 
-#include "caf/variant.hpp"
 #include "caf/stream_slot.hpp"
+#include "caf/variant.hpp"
 
-#include "caf/test/unit_test.hpp"
+#include "core-test.hpp"
 
 #include "caf/intrusive/drr_queue.hpp"
 #include "caf/intrusive/singly_linked.hpp"
@@ -72,8 +57,8 @@ std::string collapse_args(const T& x, const Ts&... xs) {
 }
 
 #define TRACE(name, type, ...)                                                 \
-  CAF_MESSAGE(name << " received a " << #type << ": "                          \
-                   << collapse_args(__VA_ARGS__));
+  MESSAGE(name << " received a " << #type << ": "                              \
+               << collapse_args(__VA_ARGS__));
 
 // -- forward declarations -----------------------------------------------------
 
@@ -137,7 +122,7 @@ struct msg : intrusive::singly_linked<msg> {
   variant<handshake, umsg, dmsg> content;
 
   template <class T>
-  msg(entity* from ,T&& x) : sender(from), content(std::forward<T>(x)) {
+  msg(entity* from, T&& x) : sender(from), content(std::forward<T>(x)) {
     // nop
   }
 };
@@ -176,10 +161,7 @@ struct in {
   void operator()(msg& x);
 };
 
-struct out {
-
-};
-
+struct out {};
 
 // -- policies and queues ------------------------------------------------------
 
@@ -250,13 +232,33 @@ struct dmsg_queue_policy : policy_base {
   }
 
   template <class Queue>
-  static inline bool enabled(const Queue&) {
+  static inline bool enabled(const Queue&) noexcept {
     return true;
   }
 
   template <class Queue>
-  deficit_type quantum(const Queue&, deficit_type x) {
+  deficit_type quantum(const Queue&, deficit_type x) noexcept {
     return x;
+  }
+
+  template <class Queue>
+  static void cleanup(Queue&) noexcept {
+    // nop
+  }
+
+  template <class Queue, class T>
+  static void lifo_append(Queue& q, T* ptr) noexcept {
+    q.lifo_append(ptr);
+  }
+
+  template <class Queue>
+  static void stop_lifo_append(Queue& q) noexcept {
+    q.stop_lifo_append();
+  }
+
+  template <class Queue, class T>
+  static bool push_back(Queue& q, T* ptr) noexcept {
+    return q.push_back(ptr);
   }
 };
 
@@ -294,22 +296,20 @@ struct entity {
   mbox_queue mbox;
   const char* name;
   entity(const char* cstr_name)
-      : mbox(mbox_policy{}, handshake_queue_policy{},
-             umsg_queue_policy{nullptr}, dmsg_queue_policy{}),
-        name(cstr_name) {
+    : mbox(mbox_policy{}, handshake_queue_policy{}, umsg_queue_policy{nullptr},
+           dmsg_queue_policy{}),
+      name(cstr_name) {
     // nop
   }
 
   void start_streaming(entity& to, int num_messages) {
     CAF_REQUIRE_NOT_EQUAL(num_messages, 0);
     auto slot = next_slot++;
-    CAF_MESSAGE(name << " starts streaming to " << to.name
-                << " on slot " << slot);
+    MESSAGE(name << " starts streaming to " << to.name << " on slot " << slot);
     to.enqueue<handshake>(this, slot);
     auto ptr = std::make_shared<manager>(this, num_messages);
     ptr->output_paths += 1;
     pending_managers_.emplace(slot, std::move(ptr));
-
   }
 
   template <class T, class... Ts>
@@ -320,7 +320,7 @@ struct entity {
   void operator()(entity* sender, handshake& hs) {
     TRACE(name, handshake, CAF_ARG2("sender", sender->name));
     auto slot = next_slot++;
-    //stream_slots id{slot, hs.sender_slot};
+    // stream_slots id{slot, hs.sender_slot};
     stream_slots id{hs.sender_slot, slot};
     // Create required state.
     auto mgr = std::make_shared<manager>(this, 0);
@@ -367,7 +367,7 @@ struct entity {
     i->second->input_paths -= 1;
     get<2>(mbox.queues()).erase_later(slots.receiver);
     if (i->second->done()) {
-      CAF_MESSAGE(name << " cleans up path " << deep_to_string(slots));
+      MESSAGE(name << " cleans up path " << deep_to_string(slots));
       managers_.erase(i);
     }
   }
@@ -394,20 +394,18 @@ void manager::push(entity* to, stream_slots slots, int num) {
   if (x + num > num_messages)
     num = num_messages - x;
   if (num == 0) {
-    CAF_MESSAGE(self->name << " is done sending batches");
+    MESSAGE(self->name << " is done sending batches");
     to->enqueue<dmsg>(self, slots, dmsg::close{});
     output_paths -= 1;
     return;
   }
-  CAF_MESSAGE(self->name << " pushes "
-              << num << " new items to " << to->name
-              << " slots = " << deep_to_string(slots));
+  MESSAGE(self->name << " pushes " << num << " new items to " << to->name
+                     << " slots = " << deep_to_string(slots));
   for (int i = 0; i < num; ++i)
     xs.emplace_back(x++);
   CAF_REQUIRE_NOT_EQUAL(xs.size(), 0u);
-  auto emplace_res = to->enqueue<dmsg>(self, slots,
-                                       dmsg::batch{std::move(xs)});
-  CAF_CHECK_EQUAL(emplace_res, true);
+  auto emplace_res = to->enqueue<dmsg>(self, slots, dmsg::batch{std::move(xs)});
+  CHECK_EQ(emplace_res, true);
 }
 
 void manager::operator()(entity* sender, stream_slots slots, in*,
@@ -431,16 +429,11 @@ struct msg_visitor {
     auto sender = x.sender;
     auto& um = get<umsg>(x.content);
     auto f = detail::make_overload(
-      [&](umsg::ack_handshake& y) {
-        (*self)(sender, um.slots, y);
-      },
-      [&](umsg::ack_batch& y) {
-        (*self)(sender, um.slots, y);
-      },
+      [&](umsg::ack_handshake& y) { (*self)(sender, um.slots, y); },
+      [&](umsg::ack_batch& y) { (*self)(sender, um.slots, y); },
       [&](umsg::drop&) {
         //(*self)(sender, um.slots, y);
-      }
-    );
+      });
     visit(f, um.content);
     return intrusive::task_result::resume;
   }
@@ -449,12 +442,8 @@ struct msg_visitor {
     auto inptr = q.policy().handler.get();
     auto dm = get<dmsg>(x.content);
     auto f = detail::make_overload(
-      [&](dmsg::batch& y) {
-        (*inptr->mgr)(x.sender, dm.slots, inptr, y);
-      },
-      [&](dmsg::close& y) {
-        (*self)(x.sender, dm.slots, inptr, y);
-      });
+      [&](dmsg::batch& y) { (*inptr->mgr)(x.sender, dm.slots, inptr, y); },
+      [&](dmsg::close& y) { (*self)(x.sender, dm.slots, inptr, y); });
     visit(f, dm.content);
     return intrusive::task_result::resume;
   }
@@ -476,7 +465,7 @@ struct fixture {
 
 // -- unit tests ---------------------------------------------------------------
 
-CAF_TEST_FIXTURE_SCOPE(mock_streaming_classes_tests, fixture)
+BEGIN_FIXTURE_SCOPE(fixture)
 
 CAF_TEST(depth_2_pipeline) {
   alice.start_streaming(bob, 30);
@@ -487,12 +476,12 @@ CAF_TEST(depth_2_pipeline) {
     alice.mbox.new_round(1, g);
   }
   // Check whether bob and alice cleaned up their state properly.
-  CAF_CHECK(get<2>(bob.mbox.queues()).queues().empty());
-  CAF_CHECK(get<2>(alice.mbox.queues()).queues().empty());
-  CAF_CHECK(bob.pending_managers_.empty());
-  CAF_CHECK(alice.pending_managers_.empty());
-  CAF_CHECK(bob.managers_.empty());
-  CAF_CHECK(alice.managers_.empty());
+  CHECK(get<2>(bob.mbox.queues()).queues().empty());
+  CHECK(get<2>(alice.mbox.queues()).queues().empty());
+  CHECK(bob.pending_managers_.empty());
+  CHECK(alice.pending_managers_.empty());
+  CHECK(bob.managers_.empty());
+  CHECK(alice.managers_.empty());
 }
 
-CAF_TEST_FIXTURE_SCOPE_END()
+END_FIXTURE_SCOPE()

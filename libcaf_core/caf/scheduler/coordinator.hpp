@@ -1,20 +1,6 @@
-/******************************************************************************
- *                       ____    _    _____                                   *
- *                      / ___|  / \  |  ___|    C++                           *
- *                     | |     / _ \ | |_       Actor                         *
- *                     | |___ / ___ \|  _|      Framework                     *
- *                      \____/_/   \_|_|                                      *
- *                                                                            *
- * Copyright 2011-2018 Dominik Charousset                                     *
- *                                                                            *
- * Distributed under the terms and conditions of the BSD 3-Clause License or  *
- * (at your option) under the terms and conditions of the Boost Software      *
- * License 1.0. See accompanying files LICENSE and LICENSE_ALTERNATIVE.       *
- *                                                                            *
- * If you did not receive a copy of the license files, see                    *
- * http://opensource.org/licenses/BSD-3-Clause and                            *
- * http://www.boost.org/LICENSE_1_0.txt.                                      *
- ******************************************************************************/
+// This file is part of CAF, the C++ Actor Framework. See the file LICENSE in
+// the main distribution directory for license terms and copyright or visit
+// https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
 #pragma once
 
@@ -65,27 +51,20 @@ protected:
     // Prepare workers vector.
     auto num = num_workers();
     workers_.reserve(num);
-    // Create worker instanes.
+    // Create worker instances.
     for (size_t i = 0; i < num; ++i)
-      workers_.emplace_back(new worker_type(i, this, init, max_throughput_));
+      workers_.emplace_back(
+        std::make_unique<worker_type>(i, this, init, max_throughput_));
     // Start all workers.
     for (auto& w : workers_)
       w->start();
-    // Launch an additional background thread for dispatching timeouts and
-    // delayed messages.
-    timer_ = std::thread{[&] {
-      CAF_SET_LOGGER_SYS(&system());
-      detail::set_thread_name("caf.clock");
-      system().thread_started();
-      clock_.run_dispatch_loop();
-      system().thread_terminates();
-    }};
     // Run remaining startup code.
+    clock_.start_dispatch_loop(system());
     super::start();
   }
 
   void stop() override {
-    // shutdown workers
+    // Shutdown workers.
     class shutdown_helper : public resumable, public ref_counted {
     public:
       resumable::resume_result resume(execution_unit* ptr, size_t) override {
@@ -109,18 +88,18 @@ protected:
       std::condition_variable cv;
       execution_unit* last_worker;
     };
-    // use a set to keep track of remaining workers
+    // Use a set to keep track of remaining workers.
     shutdown_helper sh;
     std::set<worker_type*> alive_workers;
     auto num = num_workers();
     for (size_t i = 0; i < num; ++i) {
       alive_workers.insert(worker_by_id(i));
-      sh.ref(); // make sure reference count is high enough
+      sh.ref(); // Make sure reference count is high enough.
     }
     while (!alive_workers.empty()) {
       (*alive_workers.begin())->external_enqueue(&sh);
-      // since jobs can be stolen, we cannot assume that we have
-      // actually shut down the worker we've enqueued sh to
+      // Since jobs can be stolen, we cannot assume that we have actually shut
+      // down the worker we've enqueued sh to.
       { // lifetime scope of guard
         std::unique_lock<std::mutex> guard(sh.mtx);
         sh.cv.wait(guard, [&] { return sh.last_worker != nullptr; });
@@ -128,20 +107,19 @@ protected:
       alive_workers.erase(static_cast<worker_type*>(sh.last_worker));
       sh.last_worker = nullptr;
     }
-    // shutdown utility actors
+    // Shutdown utility actors.
     stop_actors();
-    // wait until all workers are done
+    // Wait until all workers are done.
     for (auto& w : workers_) {
       w->get_thread().join();
     }
-    // run cleanup code for each resumable
+    // Run cleanup code for each resumable.
     auto f = &abstract_coordinator::cleanup_and_release;
     for (auto& w : workers_)
       policy_.foreach_resumable(w.get(), f);
     policy_.foreach_central_resumable(this, f);
-    // stop timer thread
-    clock_.cancel_dispatch_loop();
-    timer_.join();
+    // Stop timer thread.
+    clock_.stop_dispatch_loop();
   }
 
   void enqueue(resumable* ptr) override {
