@@ -4,9 +4,6 @@
 
 #pragma once
 
-#include <functional>
-#include <type_traits>
-
 #include "caf/detail/behavior_impl.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/type_list.hpp"
@@ -15,6 +12,9 @@
 #include "caf/timeout_definition.hpp"
 #include "caf/timespan.hpp"
 #include "caf/unsafe_behavior_init.hpp"
+
+#include <functional>
+#include <type_traits>
 
 namespace caf {
 
@@ -86,8 +86,8 @@ public:
   }
 
   /// Runs this handler and returns its (optional) result.
-  optional<message> operator()(message& xs) {
-    return impl_ ? impl_->invoke(xs) : none;
+  std::optional<message> operator()(message& xs) {
+    return impl_ ? impl_->invoke(xs) : std::nullopt;
   }
 
   /// Runs this handler with callback.
@@ -112,8 +112,12 @@ public:
     // nop
   }
 
-  behavior& unbox() {
+  behavior& unbox() & {
     return *this;
+  }
+
+  behavior&& unbox() && {
+    return std::move(*this);
   }
 
   /// @endcond

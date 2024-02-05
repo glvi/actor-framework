@@ -4,15 +4,16 @@
 
 #pragma once
 
-#include <type_traits>
+#include "caf/test/unit_test.hpp"
 
 #include "caf/all.hpp"
 #include "caf/binary_serializer.hpp"
 #include "caf/byte_buffer.hpp"
 #include "caf/config.hpp"
-#include "caf/detail/gcd.hpp"
 #include "caf/init_global_meta_objects.hpp"
-#include "caf/test/unit_test.hpp"
+
+#include <tuple>
+#include <type_traits>
 
 CAF_PUSH_WARNINGS
 
@@ -21,7 +22,7 @@ struct wildcard {};
 
 /// Allows ignoring individual messages elements in `expect` clauses, e.g.
 /// `expect((int, int), from(foo).to(bar).with(1, _))`.
-constexpr wildcard _ = wildcard{};
+constexpr wildcard _ = wildcard{}; // NOLINT(bugprone-reserved-identifier)
 
 /// @relates wildcard
 constexpr bool operator==(const wildcard&, const wildcard&) {
@@ -30,19 +31,19 @@ constexpr bool operator==(const wildcard&, const wildcard&) {
 
 template <size_t I, class T>
 bool cmp_one(const caf::message& x, const T& y) {
-  if (std::is_same<T, wildcard>::value)
+  if (std::is_same_v<T, wildcard>)
     return true;
   return x.match_element<T>(I) && x.get_as<T>(I) == y;
 }
 
 template <size_t I, class... Ts>
-typename std::enable_if<(I == sizeof...(Ts)), bool>::type
+std::enable_if_t<(I == sizeof...(Ts)), bool>
 msg_cmp_rec(const caf::message&, const std::tuple<Ts...>&) {
   return true;
 }
 
 template <size_t I, class... Ts>
-typename std::enable_if<(I < sizeof...(Ts)), bool>::type
+std::enable_if_t<(I < sizeof...(Ts)), bool>
 msg_cmp_rec(const caf::message& x, const std::tuple<Ts...>& ys) {
   return cmp_one<I>(x, std::get<I>(ys)) && msg_cmp_rec<I + 1>(x, ys);
 }
@@ -75,7 +76,7 @@ struct has_outer_type {
   static auto sfinae(...) -> std::false_type;
 
   using type = decltype(sfinae<T>(nullptr));
-  static constexpr bool value = !std::is_same<type, std::false_type>::value;
+  static constexpr bool value = !std::is_same_v<type, std::false_type>;
 };
 
 // enables ADL in `with_content`
@@ -164,8 +165,7 @@ public:
     return *this;
   }
 
-  template <class T,
-            class E = caf::detail::enable_if_t<!std::is_pointer<T>::value>>
+  template <class T, class E = std::enable_if_t<!std::is_pointer_v<T>>>
   caf_handle& operator=(const T& x) {
     set(x);
     return *this;
@@ -203,21 +203,21 @@ private:
 
 /// @private
 template <class... Ts>
-caf::optional<std::tuple<Ts...>> default_extract(caf_handle x) {
+std::optional<std::tuple<Ts...>> default_extract(caf_handle x) {
   auto ptr = x->peek_at_next_mailbox_element();
   if (ptr == nullptr)
-    return caf::none;
+    return std::nullopt;
   if (auto view = caf::make_const_typed_message_view<Ts...>(ptr->content()))
     return to_tuple(view);
-  return caf::none;
+  return std::nullopt;
 }
 
 /// @private
 template <class T>
-caf::optional<std::tuple<T>> unboxing_extract(caf_handle x) {
+std::optional<std::tuple<T>> unboxing_extract(caf_handle x) {
   auto tup = default_extract<typename T::outer_type>(x);
-  if (tup == caf::none || !is<T>(get<0>(*tup)))
-    return caf::none;
+  if (!tup || !is<T>(get<0>(*tup)))
+    return std::nullopt;
   return std::make_tuple(get<T>(get<0>(*tup)));
 }
 
@@ -227,22 +227,22 @@ caf::optional<std::tuple<T>> unboxing_extract(caf_handle x) {
 /// @private
 template <class T, bool HasOuterType, class... Ts>
 struct try_extract_impl {
-  caf::optional<std::tuple<T, Ts...>> operator()(caf_handle x) {
+  std::optional<std::tuple<T, Ts...>> operator()(caf_handle x) {
     return default_extract<T, Ts...>(x);
   }
 };
 
 template <class T>
 struct try_extract_impl<T, true> {
-  caf::optional<std::tuple<T>> operator()(caf_handle x) {
+  std::optional<std::tuple<T>> operator()(caf_handle x) {
     return unboxing_extract<T>(x);
   }
 };
 
 /// Returns the content of the next mailbox element as `tuple<T, Ts...>` on a
-/// match. Returns `none` otherwise.
+/// match. Returns `std::nullopt` otherwise.
 template <class T, class... Ts>
-caf::optional<std::tuple<T, Ts...>> try_extract(caf_handle x) {
+std::optional<std::tuple<T, Ts...>> try_extract(caf_handle x) {
   try_extract_impl<T, has_outer_type<T>::value, Ts...> f;
   return f(x);
 }
@@ -250,30 +250,70 @@ caf::optional<std::tuple<T, Ts...>> try_extract(caf_handle x) {
 /// Returns the content of the next mailbox element without taking it out of
 /// the mailbox. Fails on an empty mailbox or if the content of the next
 /// element does not match `<T, Ts...>`.
-template <class T, class... Ts>
-std::tuple<T, Ts...> extract(caf_handle x, int src_line) {
-  if (auto result = try_extract<T, Ts...>(x); result != caf::none) {
-    return std::move(*result);
+template <class... Ts>
+std::tuple<Ts...> extract(caf_handle x, int src_line) {
+  if constexpr (sizeof...(Ts) > 0) {
+    if (auto result = try_extract<Ts...>(x)) {
+      return std::move(*result);
+    } else {
+      auto ptr = x->peek_at_next_mailbox_element();
+      if (ptr == nullptr)
+        CAF_FAIL("cannot peek at the next message: mailbox is empty", src_line);
+      else
+        CAF_FAIL("message does not match expected types: "
+                   << to_string(ptr->content()),
+                 src_line);
+    }
   } else {
     auto ptr = x->peek_at_next_mailbox_element();
     if (ptr == nullptr)
       CAF_FAIL("cannot peek at the next message: mailbox is empty", src_line);
-    else
-      CAF_FAIL("message does not match expected types: "
+    else if (!ptr->content().empty())
+      CAF_FAIL("message does not match (expected an empty message): "
                  << to_string(ptr->content()),
                src_line);
+    return {};
   }
 }
 
 template <class T, class... Ts>
 bool received(caf_handle x) {
-  return try_extract<T, Ts...>(x) != caf::none;
+  return try_extract<T, Ts...>(x) != std::nullopt;
 }
+
+class test_coordinator : public caf::scheduler::abstract_coordinator {
+public:
+  using super = caf::scheduler::abstract_coordinator;
+
+  using super::super;
+
+  /// A double-ended queue representing our current job queue.
+  std::deque<caf::resumable*> jobs;
+
+  template <class T = caf::resumable>
+  T& next_job() {
+    if (jobs.empty())
+      CAF_RAISE_ERROR("jobs.empty()");
+    return dynamic_cast<T&>(*jobs.front());
+  }
+
+  template <class Handle>
+  bool prioritize(const Handle& x) {
+    auto ptr
+      = dynamic_cast<caf::resumable*>(caf::actor_cast<caf::abstract_actor*>(x));
+    return prioritize_impl(ptr);
+  }
+
+  virtual void run_once() = 0;
+
+private:
+  virtual bool prioritize_impl(caf::resumable* ptr) = 0;
+};
 
 template <class... Ts>
 class expect_clause {
 public:
-  explicit expect_clause(caf::scheduler::test_coordinator& sched, int src_line)
+  explicit expect_clause(test_coordinator& sched, int src_line)
     : sched_(sched), src_line_(src_line) {
     peek_ = [this] {
       /// The extractor will call CAF_FAIL on a type mismatch, essentially
@@ -346,7 +386,7 @@ protected:
       dptr->dequeue(); // Drop message.
   }
 
-  caf::scheduler::test_coordinator& sched_;
+  test_coordinator& sched_;
   caf::strong_actor_ptr src_;
   caf::abstract_actor* dest_ = nullptr;
   std::function<void()> peek_;
@@ -356,14 +396,14 @@ protected:
 template <>
 class expect_clause<void> {
 public:
-  explicit expect_clause(caf::scheduler::test_coordinator& sched, int src_line)
+  explicit expect_clause(test_coordinator& sched, int src_line)
     : sched_(sched), src_line_(src_line) {
     // nop
   }
 
   expect_clause(expect_clause&& other) = default;
 
-  void eval(const char* type_str, const char* fields_str) {
+  void eval(const char*, const char* fields_str) {
     using namespace caf;
     test::logger::instance().verbose()
       << term::yellow << "  -> " << term::reset
@@ -413,7 +453,7 @@ protected:
       dptr->dequeue(); // Drop message.
   }
 
-  caf::scheduler::test_coordinator& sched_;
+  test_coordinator& sched_;
   caf::strong_actor_ptr src_;
   caf::abstract_actor* dest_ = nullptr;
   int src_line_;
@@ -422,7 +462,7 @@ protected:
 template <class... Ts>
 class inject_clause {
 public:
-  explicit inject_clause(caf::scheduler::test_coordinator& sched, int src_line)
+  explicit inject_clause(test_coordinator& sched, int src_line)
     : sched_(sched), src_line_(src_line) {
     // nop
   }
@@ -457,8 +497,8 @@ public:
     else if (src_ == nullptr)
       caf::anon_send(caf::actor_cast<caf::actor>(dest_), msg_);
     else
-      caf::send_as(caf::actor_cast<caf::actor>(src_),
-                   caf::actor_cast<caf::actor>(dest_), msg_);
+      caf::detail::send_as(caf::actor_cast<caf::actor>(src_),
+                           caf::actor_cast<caf::actor>(dest_), msg_);
     if (!sched_.prioritize(dest_))
       CAF_FAIL("inject: failed to schedule destination actor", src_line_);
     auto dest_ptr = &sched_.next_job<caf::abstract_actor>();
@@ -487,7 +527,7 @@ protected:
       dptr->dequeue(); // Drop message.
   }
 
-  caf::scheduler::test_coordinator& sched_;
+  test_coordinator& sched_;
   caf::strong_actor_ptr src_;
   caf::strong_actor_ptr dest_;
   caf::message msg_;
@@ -497,11 +537,11 @@ protected:
 template <class... Ts>
 class allow_clause {
 public:
-  explicit allow_clause(caf::scheduler::test_coordinator& sched, int src_line)
+  explicit allow_clause(test_coordinator& sched, int src_line)
     : sched_(sched), src_line_(src_line) {
     peek_ = [this] {
       if (dest_ != nullptr)
-        return try_extract<Ts...>(dest_) != caf::none;
+        return try_extract<Ts...>(dest_) != std::nullopt;
       else
         return false;
     };
@@ -533,7 +573,7 @@ public:
     peek_ = [this, tmp = std::make_tuple(std::forward<Us>(xs)...)] {
       using namespace caf::detail;
       if (dest_ != nullptr) {
-        if (auto ys = try_extract<Ts...>(dest_); ys != caf::none) {
+        if (auto ys = try_extract<Ts...>(dest_)) {
           elementwise_compare_inspector<decltype(tmp)> inspector{tmp};
           auto ys_indices = get_indices(*ys);
           return apply_args(inspector, ys_indices, *ys);
@@ -550,14 +590,12 @@ public:
       << term::yellow << "  -> " << term::reset
       << test::logger::stream::reset_flags_t{} << "allow" << type_str << "."
       << fields_str << " [line " << src_line_ << "]\n";
-    if (!dest_) {
+    if (!dest_)
       return false;
-    }
-    if (auto msg_ptr = dest_->peek_at_next_mailbox_element(); !msg_ptr) {
+    if (auto msg_ptr = dest_->peek_at_next_mailbox_element();
+        !msg_ptr || (src_ && msg_ptr->sender != src_))
       return false;
-    } else if (src_ && msg_ptr->sender != src_) {
-      return false;
-    } else if (peek_()) {
+    if (peek_()) {
       run_once();
       return true;
     } else {
@@ -574,7 +612,7 @@ protected:
       dptr->dequeue(); // Drop message.
   }
 
-  caf::scheduler::test_coordinator& sched_;
+  test_coordinator& sched_;
   caf::strong_actor_ptr src_;
   caf::abstract_actor* dest_ = nullptr;
   std::function<bool()> peek_;
@@ -592,7 +630,7 @@ public:
       if (src_ != nullptr && ptr->sender != src_)
         return;
       auto res = try_extract<Ts...>(dest_);
-      if (res != caf::none)
+      if (res)
         CAF_FAIL("received disallowed message: " << caf::deep_to_string(*ptr),
                  src_line_);
     };
@@ -623,7 +661,7 @@ public:
       if (src_ != nullptr && ptr->sender != src_)
         return;
       auto res = try_extract<Ts...>(dest_);
-      if (res != caf::none) {
+      if (res != std::nullopt) {
         using namespace caf::detail;
         elementwise_compare_inspector<decltype(tmp)> inspector{tmp};
         auto& ys = *res;
@@ -680,8 +718,351 @@ class test_coordinator_fixture {
 public:
   // -- member types -----------------------------------------------------------
 
+  class test_actor_clock : public caf::actor_clock {
+  public:
+    // -- constructors, destructors, and assignment operators ------------------
+
+    test_actor_clock() : current_time(duration_type{1}) {
+      // This ctor makes sure that the clock isn't at the default-constructed
+      // time_point, because begin-of-epoch may have special meaning.
+    }
+
+    // -- overrides ------------------------------------------------------------
+
+    time_point now() const noexcept override {
+      return current_time;
+    }
+
+    caf::disposable schedule(time_point abs_time, caf::action f) override {
+      CAF_ASSERT(f.ptr() != nullptr);
+      actions.emplace(abs_time, f);
+      return std::move(f).as_disposable();
+    }
+
+    // -- testing DSL API ------------------------------------------------------
+
+    /// Returns whether the actor clock has at least one pending timeout.
+    bool has_pending_timeout() const {
+      auto not_disposed = [](const auto& kvp) {
+        return !kvp.second.disposed();
+      };
+      return std::any_of(actions.begin(), actions.end(), not_disposed);
+    }
+
+    /// Triggers the next pending timeout regardless of its timestamp. Sets
+    /// `current_time` to the time point of the triggered timeout unless
+    /// `current_time` is already set to a later time.
+    /// @returns Whether a timeout was triggered.
+    bool trigger_timeout() {
+      for (;;) {
+        if (actions.empty())
+          return false;
+        auto i = actions.begin();
+        auto t = i->first;
+        if (t > current_time)
+          current_time = t;
+        if (try_trigger_once())
+          return true;
+      }
+    }
+
+    /// Triggers all pending timeouts regardless of their timestamp. Sets
+    /// `current_time` to the time point of the latest timeout unless
+    /// `current_time` is already set to a later time.
+    /// @returns The number of triggered timeouts.
+    size_t trigger_timeouts() {
+      if (actions.empty())
+        return 0u;
+      size_t result = 0;
+      while (trigger_timeout())
+        ++result;
+      return result;
+    }
+
+    /// Advances the time by `x` and dispatches timeouts and delayed messages.
+    /// @returns The number of triggered timeouts.
+    size_t advance_time(duration_type x) {
+      current_time += x;
+      auto result = size_t{0};
+      while (!actions.empty() && actions.begin()->first <= current_time)
+        if (try_trigger_once())
+          ++result;
+      return result;
+    }
+
+    // -- properties -----------------------------------------------------------
+
+    /// @pre has_pending_timeout()
+    time_point next_timeout() const {
+      return actions.begin()->first;
+    }
+
+    // -- member variables -----------------------------------------------------
+
+    time_point current_time;
+
+    std::multimap<time_point, caf::action> actions;
+
+  private:
+    bool try_trigger_once() {
+      for (;;) {
+        if (actions.empty())
+          return false;
+        auto i = actions.begin();
+        auto [t, f] = *i;
+        if (t > current_time)
+          return false;
+        actions.erase(i);
+        if (!f.disposed()) {
+          f.run();
+          return true;
+        }
+      }
+    }
+  };
+
   /// A deterministic scheduler type.
-  using scheduler_type = caf::scheduler::test_coordinator;
+  class test_coordinator_impl : public test_coordinator {
+  public:
+    using super = abstract_coordinator;
+
+    class dummy_worker : public caf::execution_unit {
+    public:
+      dummy_worker(test_coordinator* parent)
+        : execution_unit(&parent->system()), parent_(parent) {
+        // nop
+      }
+
+      void exec_later(caf::resumable* ptr) override {
+        parent_->jobs.push_back(ptr);
+      }
+
+    private:
+      test_coordinator* parent_;
+    };
+
+    class dummy_printer : public caf::abstract_actor {
+    public:
+      dummy_printer(caf::actor_config& cfg) : abstract_actor(cfg) {
+        mh_.assign([&](caf::add_atom, caf::actor_id, const std::string& str) {
+          printf("%s", str.c_str());
+        });
+      }
+
+      bool enqueue(caf::mailbox_element_ptr what,
+                   caf::execution_unit*) override {
+        mh_(what->content());
+        return true;
+      }
+
+      void setup_metrics() {
+        // nop
+      }
+
+      const char* name() const override {
+        return "test.dummy-printer";
+      }
+
+    private:
+      caf::message_handler mh_;
+    };
+
+    /// A type-erased boolean predicate.
+    using bool_predicate = std::function<bool()>;
+
+    test_coordinator_impl(caf::actor_system& sys) : test_coordinator(sys) {
+      // nop
+    }
+
+    /// Returns whether at least one job is in the queue.
+    bool has_job() const {
+      return !jobs.empty();
+    }
+
+    /// Peeks into the mailbox of `next_job<scheduled_actor>()`.
+    template <class... Ts>
+    decltype(auto) peek() {
+      auto ptr
+        = next_job<caf::scheduled_actor>().peek_at_next_mailbox_element();
+      CAF_ASSERT(ptr != nullptr);
+      if (auto view = caf::make_const_typed_message_view<Ts...>(ptr->payload)) {
+        if constexpr (sizeof...(Ts) == 1)
+          return get<0>(view);
+        else
+          return to_tuple(view);
+      } else {
+        CAF_RAISE_ERROR("Mailbox element does not match.");
+      }
+    }
+
+    /// Puts `x` at the front of the queue unless it cannot be found in the
+    /// queue. Returns `true` if `x` exists in the queue and was put in front,
+    /// `false` otherwise.
+    bool prioritize_impl(caf::resumable* ptr) override {
+      if (!ptr)
+        return false;
+      auto i = std::find(jobs.begin(), jobs.end(), ptr);
+      if (i == jobs.end())
+        return false;
+      if (i == jobs.begin())
+        return true;
+      std::rotate(jobs.begin(), i, i + 1);
+      return true;
+    }
+
+    /// Runs all jobs that satisfy the predicate.
+    template <class Predicate>
+    size_t run_jobs_filtered(Predicate predicate) {
+      size_t result = 0;
+      while (!jobs.empty()) {
+        auto i = std::find_if(jobs.begin(), jobs.end(), predicate);
+        if (i == jobs.end())
+          return result;
+        if (i != jobs.begin())
+          std::rotate(jobs.begin(), i, i + 1);
+        run_once();
+        ++result;
+      }
+      return result;
+    }
+
+    /// Tries to execute a single event in FIFO order.
+    bool try_run_once() {
+      if (jobs.empty())
+        return false;
+      auto job = jobs.front();
+      jobs.pop_front();
+      dummy_worker worker{this};
+      switch (job->resume(&worker, 1)) {
+        case caf::resumable::resume_later:
+          jobs.push_front(job);
+          break;
+        case caf::resumable::done:
+        case caf::resumable::awaiting_message:
+          intrusive_ptr_release(job);
+          break;
+        case caf::resumable::shutdown_execution_unit:
+          break;
+      }
+      return true;
+    }
+
+    /// Tries to execute a single event in LIFO order.
+    bool try_run_once_lifo() {
+      if (jobs.empty())
+        return false;
+      if (jobs.size() >= 2)
+        std::rotate(jobs.rbegin(), jobs.rbegin() + 1, jobs.rend());
+      return try_run_once();
+    }
+
+    /// Executes a single event in FIFO order or fails if no event is available.
+    void run_once() override {
+      if (jobs.empty())
+        CAF_RAISE_ERROR("No job to run available.");
+      try_run_once();
+    }
+
+    /// Executes a single event in LIFO order or fails if no event is available.
+    void run_once_lifo() {
+      if (jobs.empty())
+        CAF_RAISE_ERROR("No job to run available.");
+      try_run_once_lifo();
+    }
+
+    /// Executes events until the job queue is empty and no pending timeouts are
+    /// left. Returns the number of processed events.
+    size_t run(size_t max_count = std::numeric_limits<size_t>::max()) {
+      size_t res = 0;
+      while (res < max_count && try_run_once())
+        ++res;
+      return res;
+    }
+
+    /// Returns whether at least one pending timeout exists.
+    bool has_pending_timeout() const {
+      return clock_.has_pending_timeout();
+    }
+
+    /// Tries to trigger a single timeout.
+    bool trigger_timeout() {
+      return clock_.trigger_timeout();
+    }
+
+    /// Triggers all pending timeouts.
+    size_t trigger_timeouts() {
+      return clock_.trigger_timeouts();
+    }
+
+    /// Advances simulation time and returns the number of triggered timeouts.
+    size_t advance_time(caf::timespan x) {
+      return clock_.advance_time(x);
+    }
+
+    /// Call `f` after the next enqueue operation.
+    template <class F>
+    void after_next_enqueue(F f) {
+      after_next_enqueue_ = f;
+    }
+
+    /// Executes the next enqueued job immediately by using the
+    /// `after_next_enqueue` hook.
+    void inline_next_enqueue() {
+      after_next_enqueue([this] { run_once_lifo(); });
+    }
+
+    /// Executes all enqueued jobs immediately by using the `after_next_enqueue`
+    /// hook.
+    void inline_all_enqueues() {
+      after_next_enqueue([this] { inline_all_enqueues_helper(); });
+    }
+
+    bool detaches_utility_actors() const override {
+      return false;
+    }
+
+    test_actor_clock& clock() noexcept override {
+      return clock_;
+    }
+
+  protected:
+    void start() override {
+      dummy_worker worker{this};
+      caf::actor_config cfg{&worker};
+      auto& sys = system();
+      utility_actors_[printer_id] = caf::make_actor<dummy_printer, caf::actor>(
+        sys.next_actor_id(), sys.node(), &sys, cfg);
+    }
+
+    void stop() override {
+      while (run() > 0)
+        trigger_timeouts();
+    }
+
+    void enqueue(caf::resumable* ptr) override {
+      jobs.push_back(ptr);
+      if (after_next_enqueue_ != nullptr) {
+        CAF_LOG_DEBUG("inline this enqueue");
+        std::function<void()> f;
+        f.swap(after_next_enqueue_);
+        f();
+      }
+    }
+
+  private:
+    void inline_all_enqueues_helper() {
+      after_next_enqueue([this] { inline_all_enqueues_helper(); });
+      run_once_lifo();
+    }
+
+    /// Allows users to fake time at will.
+    test_actor_clock clock_;
+
+    /// User-provided callback for triggering custom code in `enqueue`.
+    std::function<void()> after_next_enqueue_;
+  };
+
+  using scheduler_type = test_coordinator_impl;
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -689,17 +1070,14 @@ public:
     if (auto err = cfg.parse(caf::test::engine::argc(),
                              caf::test::engine::argv()))
       CAF_FAIL("failed to parse config: " << to_string(err));
-    cfg.set("caf.scheduler.policy", "testing");
-    cfg.set("caf.logger.inline-output", true);
+    cfg.module_factories.push_back(
+      [](caf::actor_system& sys) -> caf::actor_system::module* {
+        return new scheduler_type(sys);
+      });
     if (cfg.custom_options().has_category("caf.middleman")) {
-      cfg.set("caf.middleman.network-backend", "testing");
-      cfg.set("caf.middleman.manual-multiplexing", true);
       cfg.set("caf.middleman.workers", size_t{0});
       cfg.set("caf.middleman.heartbeat-interval", caf::timespan{0});
     }
-    cfg.set("caf.stream.credit-policy", "token-based");
-    cfg.set("caf.stream.token-based-policy.batch-size", 50);
-    cfg.set("caf.stream.token-based-policy.buffer-size", 200);
     return cfg;
   }
 
@@ -821,19 +1199,19 @@ public:
 
   /// Call `run()` when the next scheduled actor becomes ready.
   void run_after_next_ready_event() {
-    sched.after_next_enqueue([=] { run(); });
+    sched.after_next_enqueue([this] { run(); });
   }
 
   /// Call `run_until(predicate)` when the next scheduled actor becomes ready.
   template <class BoolPredicate>
   void run_until_after_next_ready_event(BoolPredicate predicate) {
-    sched.after_next_enqueue([=] { run_until(predicate); });
+    sched.after_next_enqueue([this, predicate] { run_until(predicate); });
   }
 
   /// Sends a request to `hdl`, then calls `run()`, and finally fetches and
   /// returns the result.
   template <class T, class... Ts, class Handle, class... Us>
-  typename std::conditional<sizeof...(Ts) == 0, T, std::tuple<T, Ts...>>::type
+  std::conditional_t<sizeof...(Ts) == 0, T, std::tuple<T, Ts...>>
   request(Handle hdl, Us... args) {
     auto res_hdl = self->request(hdl, caf::infinite, std::move(args)...);
     run();
@@ -903,9 +1281,9 @@ T unbox(caf::expected<T> x) {
 
 /// Unboxes an optional value or fails the test if it doesn't exist.
 template <class T>
-T unbox(caf::optional<T> x) {
+T unbox(std::optional<T> x) {
   if (!x)
-    CAF_FAIL("x == none");
+    CAF_FAIL("x == std::nullopt");
   return std::move(*x);
 }
 

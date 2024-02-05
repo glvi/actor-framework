@@ -4,13 +4,13 @@
 
 #pragma once
 
-#include <array>
-#include <tuple>
-#include <utility>
-
 #include "caf/inspector_access.hpp"
 #include "caf/load_inspector.hpp"
 #include "caf/sec.hpp"
+
+#include <array>
+#include <tuple>
+#include <utility>
 
 namespace caf {
 
@@ -29,8 +29,13 @@ public:
                                     type_name_or_anonymous<T>(), dptr()};
   }
 
-  constexpr auto virtual_object(string_view type_name) noexcept {
+  constexpr auto virtual_object(std::string_view type_name) noexcept {
     return super::object_t<Subtype>{invalid_type_id, type_name, dptr()};
+  }
+
+  template <class T>
+  bool begin_object_t() {
+    return dref().begin_object(type_id_v<T>, caf::type_name_v<T>);
   }
 
   template <class T>
@@ -77,13 +82,13 @@ public:
   template <class T, size_t... Is>
   bool tuple(T& xs, std::index_sequence<Is...>) {
     return dref().begin_tuple(sizeof...(Is))
-           && (detail::load(dref(), get<Is>(xs)) && ...) //
+           && (detail::load(dref(), std::get<Is>(xs)) && ...) //
            && dref().end_tuple();
   }
 
   template <class T>
   bool tuple(T& xs) {
-    return tuple(xs, std::make_index_sequence<std::tuple_size<T>::value>{});
+    return tuple(xs, std::make_index_sequence<std::tuple_size_v<T>>{});
   }
 
   template <class T, size_t N>
@@ -100,7 +105,7 @@ public:
 
   template <class T>
   [[nodiscard]] bool apply(T& x) {
-    static_assert(!std::is_const<T>::value);
+    static_assert(!std::is_const_v<T>);
     return detail::load(dref(), x);
   }
 
@@ -110,7 +115,7 @@ public:
     using value_type = std::decay_t<decltype(get())>;
     auto tmp = value_type{};
     using setter_result = decltype(set(std::move(tmp)));
-    if constexpr (std::is_same<setter_result, bool>::value) {
+    if constexpr (std::is_same_v<setter_result, bool>) {
       if (dref().apply(tmp)) {
         if (set(std::move(tmp))) {
           return true;
@@ -121,7 +126,7 @@ public:
       } else {
         return false;
       }
-    } else if constexpr (std::is_same<setter_result, void>::value) {
+    } else if constexpr (std::is_same_v<setter_result, void>) {
       if (dref().apply(tmp)) {
         set(std::move(tmp));
         return true;
@@ -129,7 +134,7 @@ public:
         return false;
       }
     } else {
-      static_assert(std::is_convertible<setter_result, error>::value,
+      static_assert(std::is_convertible_v<setter_result, error>,
                     "a setter must return caf::error, bool or void");
       if (dref().apply(tmp)) {
         if (auto err = set(std::move(tmp)); !err) {

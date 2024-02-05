@@ -1,11 +1,15 @@
 // Showcases custom message types with a sealed class hierarchy.
 
+#include "caf/actor_ostream.hpp"
+#include "caf/actor_system.hpp"
+#include "caf/caf_main.hpp"
+#include "caf/scoped_actor.hpp"
+#include "caf/type_id.hpp"
+
 #include <cassert>
 #include <iostream>
 #include <memory>
 #include <utility>
-
-#include "caf/all.hpp"
 
 class circle;
 class shape;
@@ -172,8 +176,8 @@ struct variant_inspector_traits<shape_ptr> {
 
   // Assigns a value to x.
   template <class U>
-  static void assign(value_type& x, U value) {
-    if constexpr (std::is_same<U, none_t>::value)
+  static void assign(value_type& x, [[maybe_unused]] U value) {
+    if constexpr (std::is_same_v<U, none_t>)
       x.reset();
     else
       x = std::make_shared<U>(std::move(value));
@@ -228,17 +232,18 @@ shape_ptr serialization_roundtrip(const shape_ptr& in) {
   return out;
 }
 
-void caf_main(caf::actor_system&) {
+void caf_main(caf::actor_system& sys) {
+  caf::scoped_actor self{sys};
   std::vector<shape_ptr> shapes;
   shapes.emplace_back(nullptr);
   shapes.emplace_back(rectangle::make({10, 10}, {20, 20}));
   shapes.emplace_back(circle::make({15, 15}, 5));
-  std::cout << "shapes:\n";
+  aout(self).println("shapes:");
   for (auto& ptr : shapes) {
-    std::cout << "  shape: " << caf::deep_to_string(ptr) << '\n';
+    aout(self).println("- value: {}", ptr);
     auto copy = serialization_roundtrip(ptr);
     assert(!ptr || ptr.get() != copy.get());
-    std::cout << "   copy: " << caf::deep_to_string(copy) << '\n';
+    aout(self).println("-  copy: {}", copy);
   }
 }
 

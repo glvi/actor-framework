@@ -1,4 +1,12 @@
-#include "caf/all.hpp"
+// This example illustrates how to use a response promise to delay responding to
+// an incoming message until a later point in time.
+
+#include "caf/actor_ostream.hpp"
+#include "caf/actor_system.hpp"
+#include "caf/caf_main.hpp"
+#include "caf/event_based_actor.hpp"
+#include "caf/response_promise.hpp"
+#include "caf/typed_event_based_actor.hpp"
 
 using namespace caf;
 
@@ -27,7 +35,7 @@ void client_impl(event_based_actor* self, adder_actor adder, int32_t x,
                  int32_t y) {
   using namespace std::literals::chrono_literals;
   self->request(adder, 10s, add_atom_v, x, y).then([=](int32_t result) {
-    aout(self) << x << " + " << y << " = " << result << std::endl;
+    aout(self).println("{} + {} = {}", x, y, result);
   });
 }
 

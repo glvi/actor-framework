@@ -4,13 +4,13 @@
 
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
-
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
 #include "caf/span.hpp"
-#include "caf/string_view.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
 
 namespace caf::detail {
 
@@ -18,11 +18,14 @@ namespace caf::detail {
 /// pointers.
 struct meta_object {
   /// Stores a human-readable representation of the type's name.
-  string_view type_name;
+  std::string_view type_name;
 
   /// Stores how many Bytes objects of this type require, including padding for
   /// aligning to `max_align_t`.
   size_t padded_size;
+
+  /// Stores the result of `sizeof` for the type.
+  size_t simple_size;
 
   /// Calls the destructor for given object.
   void (*destroy)(void*) noexcept;
@@ -34,6 +37,10 @@ struct meta_object {
   /// Creates a new object at given memory location by calling the copy
   /// constructor.
   void (*copy_construct)(void*, const void*);
+
+  /// Creates a new object at given memory location by calling the move
+  /// constructor.
+  void (*move_construct)(void*, void*);
 
   /// Applies an object to a binary serializer.
   bool (*save_binary)(caf::binary_serializer&, const void*);
@@ -64,8 +71,13 @@ CAF_CORE_EXPORT global_meta_objects_guard_type global_meta_objects_guard();
 /// is the index for accessing the corresponding meta object.
 CAF_CORE_EXPORT span<const meta_object> global_meta_objects();
 
-/// Returns the global meta object for given type ID.
-CAF_CORE_EXPORT const meta_object* global_meta_object(type_id_t id);
+/// Returns the global meta object for given type ID. Aborts the program if no
+/// meta object exists for `id`.
+CAF_CORE_EXPORT const meta_object& global_meta_object(type_id_t id);
+
+/// Returns the global meta object for given type ID or `nullptr` if no meta
+/// object exists for `id`.
+CAF_CORE_EXPORT const meta_object* global_meta_object_or_null(type_id_t id);
 
 /// Clears the array for storing global meta objects.
 /// @warning intended for unit testing only!

@@ -6,13 +6,15 @@
 
 #include "caf/behavior.hpp"
 #include "caf/deduce_mpi.hpp"
+#include "caf/detail/tbind.hpp"
+#include "caf/detail/typed_actor_util.hpp"
 #include "caf/interface_mismatch.hpp"
 #include "caf/message_handler.hpp"
 #include "caf/system_messages.hpp"
 #include "caf/timespan.hpp"
 #include "caf/unsafe_behavior_init.hpp"
 
-#include "caf/detail/typed_actor_util.hpp"
+#include <utility>
 
 namespace caf ::detail {
 
@@ -42,11 +44,9 @@ struct same_input : std::is_same<Input, typename RepliesToWith::input_types> {};
 template <class Output, class RepliesToWith>
 struct same_output_or_skip_t {
   using other = typename RepliesToWith::output_types;
-  static constexpr bool value = std::is_same<
-                                  Output,
-                                  typename RepliesToWith::output_types>::value
-                                || std::is_same<Output,
-                                                type_list<skip_t>>::value;
+  static constexpr bool value
+    = std::is_same<Output, typename RepliesToWith::output_types>::value
+      || std::is_same_v<Output, type_list<skip_t>>;
 };
 
 template <class SList>
@@ -56,16 +56,17 @@ struct valid_input_predicate {
     using input_types = typename Expr::input_types;
     using output_types = typename Expr::output_types;
     // get matching elements for input type
-    using filtered_slist = typename tl_filter<
-      SList, tbind<same_input, input_types>::template type>::type;
+    using filtered_slist =
+      typename tl_filter<SList,
+                         tbind<same_input, input_types>::template type>::type;
     static_assert(tl_size<filtered_slist>::value > 0,
                   "cannot assign given match expression to "
                   "typed behavior, because the expression "
                   "contains at least one pattern that is "
                   "not defined in the actor's type");
-    static constexpr bool value = tl_exists<
-      filtered_slist,
-      tbind<same_output_or_skip_t, output_types>::template type>::value;
+    static constexpr bool value
+      = tl_exists<filtered_slist, tbind<same_output_or_skip_t,
+                                        output_types>::template type>::value;
     // check whether given output matches in the filtered list
     static_assert(value, "cannot assign given match expression to "
                          "typed behavior, because at least one return "
@@ -77,10 +78,10 @@ template <class T>
 struct is_system_msg_handler : std::false_type {};
 
 template <>
-struct is_system_msg_handler<reacts_to<exit_msg>> : std::true_type {};
+struct is_system_msg_handler<void(exit_msg)> : std::true_type {};
 
 template <>
-struct is_system_msg_handler<reacts_to<down_msg>> : std::true_type {};
+struct is_system_msg_handler<void(down_msg)> : std::true_type {};
 
 // Tests whether the input list (IList) matches the
 // signature list (SList) for a typed actor behavior
@@ -88,30 +89,32 @@ template <class SList, class IList>
 struct valid_input {
   // strip exit_msg and down_msg from input types,
   // because they're always allowed
-  using adjusted_slist = typename tl_filter_not<SList,
-                                                is_system_msg_handler>::type;
-  using adjusted_ilist = typename tl_filter_not<IList,
-                                                is_system_msg_handler>::type;
+  using adjusted_slist =
+    typename tl_filter_not<SList, is_system_msg_handler>::type;
+  using adjusted_ilist =
+    typename tl_filter_not<IList, is_system_msg_handler>::type;
   // check for each element in IList that there's an element in SList that
   // (1) has an identical input type list
   // (2)  has an identical output type list
   //   OR the output of the element in IList is skip_t
-  static_assert(detail::tl_is_distinct<IList>::value,
+  static_assert(detail::tl_is_distinct_v<IList>,
                 "given pattern is not distinct");
-  static constexpr bool value = tl_size<adjusted_slist>::value
-                                  == tl_size<adjusted_ilist>::value
-                                && tl_forall<
-                                  adjusted_ilist,
-                                  valid_input_predicate<
-                                    adjusted_slist>::template inner>::value;
+  static constexpr bool value
+    = tl_size_v<adjusted_slist> == tl_size_v<adjusted_ilist>
+      && tl_forall_v<adjusted_ilist,
+                     valid_input_predicate<adjusted_slist>::template inner>;
 };
+
+/// Convenience alias for `valid_input<SList, IList>::value`.
+template <class SList, class IList>
+inline constexpr bool valid_input_v = valid_input<SList, IList>::value;
 
 // this function is called from typed_behavior<...>::set and its whole
 // purpose is to give users a nicer error message on a type mismatch
 // (this function only has the type information needed to understand the error)
 template <class SignatureList, class InputList>
 void static_check_typed_behavior_input() {
-  constexpr bool is_valid = valid_input<SignatureList, InputList>::value;
+  constexpr bool is_valid = valid_input_v<SignatureList, InputList>;
   // note: it might be worth considering to allow a wildcard in the
   //     InputList if its return type is identical to all "missing"
   //     input types ... however, it might lead to unexpected results
@@ -223,8 +226,12 @@ public:
 
   /// @cond PRIVATE
 
-  behavior& unbox() {
+  behavior& unbox() & {
     return bhvr_;
+  }
+
+  behavior&& unbox() && {
+    return std::move(bhvr_);
   }
 
   static typed_behavior make_empty_behavior() {

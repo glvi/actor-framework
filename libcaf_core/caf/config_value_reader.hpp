@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <stack>
+#include <variant>
 #include <vector>
 
 namespace caf {
@@ -47,28 +48,18 @@ public:
     const std::pair<const std::string, config_value>& current();
   };
 
-  using value_type = variant<const settings*, const config_value*, key_ptr,
-                             absent_field, sequence, associative_array>;
+  using value_type = std::variant<const settings*, const config_value*, key_ptr,
+                                  absent_field, sequence, associative_array>;
 
   using stack_type = std::stack<value_type, std::vector<value_type>>;
 
   // -- constructors, destructors, and assignment operators --------------------
 
-  config_value_reader(const config_value* input, actor_system& sys)
-    : super(sys) {
-    st_.push(input);
-    has_human_readable_format_ = true;
-  }
+  config_value_reader(const config_value* input, actor_system& sys);
 
-  config_value_reader(const config_value* input, execution_unit* ctx)
-    : super(ctx) {
-    st_.push(input);
-    has_human_readable_format_ = true;
-  }
-  explicit config_value_reader(const config_value* input)
-    : config_value_reader(input, nullptr) {
-    // nop
-  }
+  config_value_reader(const config_value* input, execution_unit* ctx);
+
+  explicit config_value_reader(const config_value* input);
 
   ~config_value_reader() override;
 
@@ -90,18 +81,18 @@ public:
 
   bool fetch_next_object_type(type_id_t& type) override;
 
-  bool begin_object(type_id_t type, string_view name) override;
+  bool begin_object(type_id_t type, std::string_view name) override;
 
   bool end_object() override;
 
-  bool begin_field(string_view) override;
+  bool begin_field(std::string_view) override;
 
-  bool begin_field(string_view name, bool& is_present) override;
+  bool begin_field(std::string_view name, bool& is_present) override;
 
-  bool begin_field(string_view name, span<const type_id_t> types,
+  bool begin_field(std::string_view name, span<const type_id_t> types,
                    size_t& index) override;
 
-  bool begin_field(string_view name, bool& is_present,
+  bool begin_field(std::string_view name, bool& is_present,
                    span<const type_id_t> types, size_t& index) override;
 
   bool end_field() override;
@@ -122,7 +113,7 @@ public:
 
   bool end_associative_array() override;
 
-  bool value(byte& x) override;
+  bool value(std::byte& x) override;
 
   bool value(bool& x) override;
 
@@ -154,7 +145,7 @@ public:
 
   bool value(std::u32string& x) override;
 
-  bool value(span<byte> x) override;
+  bool value(span<std::byte> x) override;
 
 private:
   // Sets `type` according to the `@type` field in `obj` or to the type ID of

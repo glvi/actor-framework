@@ -4,14 +4,14 @@
 
 #pragma once
 
-#include <type_traits>
-#include <utility>
-
 #include "caf/detail/as_mutable_ref.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/error.hpp"
 #include "caf/inspector_access.hpp"
-#include "caf/string_view.hpp"
+
+#include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace caf {
 
@@ -49,11 +49,26 @@ public:
     return std::move(err_);
   }
 
+  template <class... Ts>
+  void field_invariant_check_failed(std::string msg) {
+    emplace_error(sec::field_invariant_check_failed, std::move(msg));
+  }
+
+  template <class... Ts>
+  void field_value_synchronization_failed(std::string msg) {
+    emplace_error(sec::field_value_synchronization_failed, std::move(msg));
+  }
+
+  template <class... Ts>
+  void invalid_field_type(std::string msg) {
+    emplace_error(sec::invalid_field_type, std::move(msg));
+  }
+
   // -- DSL types for regular fields -------------------------------------------
 
   template <class T, class U, class Predicate>
   struct field_with_invariant_and_fallback_t {
-    string_view field_name;
+    std::string_view field_name;
     T* val;
     U fallback;
     Predicate predicate;
@@ -68,7 +83,7 @@ public:
 
   template <class T, class U>
   struct field_with_fallback_t {
-    string_view field_name;
+    std::string_view field_name;
     T* val;
     U fallback;
 
@@ -92,7 +107,7 @@ public:
 
   template <class T, class Predicate>
   struct field_with_invariant_t {
-    string_view field_name;
+    std::string_view field_name;
     T* val;
     Predicate predicate;
 
@@ -115,7 +130,7 @@ public:
 
   template <class T>
   struct field_t {
-    string_view field_name;
+    std::string_view field_name;
     T* val;
 
     template <class Inspector>
@@ -143,7 +158,7 @@ public:
 
   template <class T, class Set, class U, class Predicate>
   struct virt_field_with_invariant_and_fallback_t {
-    string_view field_name;
+    std::string_view field_name;
     Set set;
     U fallback;
     Predicate predicate;
@@ -159,7 +174,7 @@ public:
 
   template <class T, class Set, class U>
   struct virt_field_with_fallback_t {
-    string_view field_name;
+    std::string_view field_name;
     Set set;
     U fallback;
 
@@ -185,7 +200,7 @@ public:
 
   template <class T, class Set, class Predicate>
   struct virt_field_with_invariant_t {
-    string_view field_name;
+    std::string_view field_name;
     Set set;
     Predicate predicate;
 
@@ -209,7 +224,7 @@ public:
 
   template <class T, class Set>
   struct virt_field_t {
-    string_view field_name;
+    std::string_view field_name;
     Set set;
 
     template <class Inspector>
@@ -240,7 +255,7 @@ public:
 
   template <class T, class Reset, class Set>
   struct optional_virt_field_t {
-    string_view field_name;
+    std::string_view field_name;
     Reset reset;
     Set set;
 
@@ -258,7 +273,7 @@ public:
   template <class Inspector, class LoadCallback>
   struct object_with_load_callback_t {
     type_id_t object_type;
-    string_view object_name;
+    std::string_view object_name;
     Inspector* f;
     LoadCallback load_callback;
 
@@ -267,7 +282,7 @@ public:
       using load_callback_result = decltype(load_callback());
       if (!(f->begin_object(object_type, object_name) && (fs(*f) && ...)))
         return false;
-      if constexpr (std::is_same<load_callback_result, bool>::value) {
+      if constexpr (std::is_same_v<load_callback_result, bool>) {
         if (!load_callback()) {
           f->set_error(sec::load_callback_failed);
           return false;
@@ -281,7 +296,7 @@ public:
       return f->end_object();
     }
 
-    auto pretty_name(string_view name) && {
+    auto pretty_name(std::string_view name) && {
       return object_t{object_type, name, f};
     }
 
@@ -294,7 +309,7 @@ public:
   template <class Inspector>
   struct object_t {
     type_id_t object_type;
-    string_view object_name;
+    std::string_view object_name;
     Inspector* f;
 
     template <class... Fields>
@@ -304,7 +319,7 @@ public:
              && f->end_object();
     }
 
-    auto pretty_name(string_view name) && {
+    auto pretty_name(std::string_view name) && {
       return object_t{object_type, name, f};
     }
 
@@ -327,20 +342,20 @@ public:
   // -- factory functions ------------------------------------------------------
 
   template <class T>
-  static auto field(string_view name, T& x) {
-    static_assert(!std::is_const<T>::value);
+  static auto field(std::string_view name, T& x) {
+    static_assert(!std::is_const_v<T>);
     return field_t<T>{name, &x};
   }
 
   template <class Get, class Set>
-  static auto field(string_view name, Get get, Set set) {
+  static auto field(std::string_view name, Get get, Set set) {
     using field_type = std::decay_t<decltype(get())>;
     using setter_result = decltype(set(std::declval<field_type&&>()));
-    if constexpr (std::is_same<setter_result, error>::value
-                  || std::is_same<setter_result, bool>::value) {
+    if constexpr (std::is_same_v<setter_result, error>
+                  || std::is_same_v<setter_result, bool>) {
       return virt_field_t<field_type, Set>{name, std::move(set)};
     } else {
-      static_assert(std::is_same<setter_result, void>::value,
+      static_assert(std::is_same_v<setter_result, void>,
                     "a setter must return caf::error, bool or void");
       auto set_fun = [f{std::move(set)}](field_type&& val) {
         f(std::move(val));
@@ -353,16 +368,16 @@ public:
 
   template <class IsPresent, class Get, class Reset, class Set>
   static auto
-  field(string_view name, IsPresent&&, Get&& get, Reset reset, Set set) {
+  field(std::string_view name, IsPresent&&, Get&& get, Reset reset, Set set) {
     using field_type = std::decay_t<decltype(get())>;
     using setter_result = decltype(set(std::declval<field_type&&>()));
-    if constexpr (std::is_same<setter_result, error>::value
-                  || std::is_same<setter_result, bool>::value) {
+    if constexpr (std::is_same_v<setter_result, error>
+                  || std::is_same_v<setter_result, bool>) {
       return optional_virt_field_t<field_type, Reset, Set>{name,
                                                            std::move(reset),
                                                            std::move(set)};
     } else {
-      static_assert(std::is_same<setter_result, void>::value,
+      static_assert(std::is_same_v<setter_result, void>,
                     "a setter must return caf::error, bool or void");
       auto set_fun = [f{std::move(set)}](field_type&& val) {
         f(std::move(val));

@@ -4,10 +4,9 @@
 
 #pragma once
 
-#include "caf/fwd.hpp"
-
 #include "caf/config.hpp"
 #include "caf/detail/core_export.hpp"
+#include "caf/fwd.hpp"
 
 namespace caf {
 
@@ -43,7 +42,7 @@ public:
   }
 
   /// Associated a new proxy factory to this unit.
-  void proxy_registry_ptr(proxy_registry* ptr) {
+  void proxy_registry_ptr(proxy_registry* ptr) noexcept {
     proxies_ = ptr;
   }
 

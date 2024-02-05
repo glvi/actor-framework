@@ -4,33 +4,26 @@
 
 #pragma once
 
-#include <atomic>
-#include <cstdint>
-#include <exception>
-#include <functional>
-#include <type_traits>
-#include <utility>
-
 #include "caf/abstract_actor.hpp"
-#include "caf/abstract_group.hpp"
 #include "caf/actor.hpp"
 #include "caf/actor_cast.hpp"
 #include "caf/actor_config.hpp"
 #include "caf/actor_system.hpp"
 #include "caf/behavior.hpp"
-#include "caf/check_typed_input.hpp"
 #include "caf/delegated.hpp"
 #include "caf/detail/core_export.hpp"
+#include "caf/detail/send_type_check.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/detail/typed_actor_util.hpp"
 #include "caf/detail/unique_function.hpp"
+#include "caf/disposable.hpp"
 #include "caf/error.hpp"
 #include "caf/fwd.hpp"
+#include "caf/mailbox_element.hpp"
 #include "caf/message.hpp"
 #include "caf/message_handler.hpp"
 #include "caf/message_id.hpp"
 #include "caf/message_priority.hpp"
-#include "caf/monitorable_actor.hpp"
 #include "caf/response_promise.hpp"
 #include "caf/response_type.hpp"
 #include "caf/resumable.hpp"
@@ -40,11 +33,18 @@
 #include "caf/typed_actor.hpp"
 #include "caf/typed_response_promise.hpp"
 
+#include <atomic>
+#include <cstdint>
+#include <exception>
+#include <functional>
+#include <type_traits>
+#include <utility>
+
 namespace caf {
 
 /// Base class for actors running on this node, either
 /// living in an own thread or cooperatively scheduled.
-class CAF_CORE_EXPORT local_actor : public monitorable_actor {
+class CAF_CORE_EXPORT local_actor : public abstract_actor {
 public:
   // -- member types -----------------------------------------------------------
 
@@ -129,74 +129,55 @@ public:
                   "cannot spawn function-based actor with given arguments");
     actor_config cfg{context(), this};
     static constexpr spawn_options unbound = make_unbound(Os);
-    detail::bool_token<spawnable> enabled;
+    std::bool_constant<spawnable> enabled;
     return eval_opts(Os, system().spawn_functor<unbound>(
                            enabled, cfg, fun, std::forward<Ts>(xs)...));
   }
 
-  template <class T, spawn_options Os = no_spawn_options, class Groups,
-            class... Ts>
-  actor spawn_in_groups(const Groups& gs, Ts&&... xs) {
-    actor_config cfg{context(), this};
-    return eval_opts(Os, system().spawn_class_in_groups<T, make_unbound(Os)>(
-                           cfg, gs.begin(), gs.end(), std::forward<Ts>(xs)...));
-  }
-
-  template <class T, spawn_options Os = no_spawn_options, class... Ts>
-  actor spawn_in_groups(std::initializer_list<group> gs, Ts&&... xs) {
-    actor_config cfg{context(), this};
-    return eval_opts(Os, system().spawn_class_in_groups<T, make_unbound(Os)>(
-                           cfg, gs.begin(), gs.end(), std::forward<Ts>(xs)...));
-  }
-
-  template <class T, spawn_options Os = no_spawn_options, class... Ts>
-  actor spawn_in_group(const group& grp, Ts&&... xs) {
-    actor_config cfg{context(), this};
-    auto first = &grp;
-    return eval_opts(Os, system().spawn_class_in_groups<T, make_unbound(Os)>(
-                           cfg, first, first + 1, std::forward<Ts>(xs)...));
-  }
-
-  template <spawn_options Os = no_spawn_options, class Groups, class F,
-            class... Ts>
-  actor spawn_in_groups(const Groups& gs, F fun, Ts&&... xs) {
-    actor_config cfg{context(), this};
-    return eval_opts(Os, system().spawn_fun_in_groups<make_unbound(Os)>(
-                           cfg, gs.begin(), gs.end(), fun,
-                           std::forward<Ts>(xs)...));
-  }
-
-  template <spawn_options Os = no_spawn_options, class F, class... Ts>
-  actor spawn_in_groups(std::initializer_list<group> gs, F fun, Ts&&... xs) {
-    actor_config cfg{context(), this};
-    return eval_opts(Os, system().spawn_fun_in_groups<make_unbound(Os)>(
-                           cfg, gs.begin(), gs.end(), fun,
-                           std::forward<Ts>(xs)...));
-  }
-
-  template <spawn_options Os = no_spawn_options, class F, class... Ts>
-  actor spawn_in_group(const group& grp, F fun, Ts&&... xs) {
-    actor_config cfg{context(), this};
-    auto first = &grp;
-    return eval_opts(Os,
-                     system().spawn_fun_in_groups<make_unbound(Os)>(
-                       cfg, first, first + 1, fun, std::forward<Ts>(xs)...));
-  }
-
   // -- sending asynchronous messages ------------------------------------------
 
-  /// Sends an exit message to `whom`.
-  void send_exit(const actor_addr& whom, error reason);
+  /// Sends an exit message to `receiver`.
+  void send_exit(const actor_addr& receiver, error reason);
 
-  /// Sends an exit message to `whom`.
-  void send_exit(const strong_actor_ptr& whom, error reason);
+  /// Sends an exit message to `receiver`.
+  void send_exit(const strong_actor_ptr& receiver, error reason);
 
-  /// Sends an exit message to `whom`.
-  template <class ActorHandle>
-  void send_exit(const ActorHandle& whom, error reason) {
-    if (whom)
-      whom->eq_impl(make_message_id(), ctrl(), context(),
-                    exit_msg{address(), std::move(reason)});
+  /// Sends an exit message to `receiver`.
+  template <class Handle>
+  void send_exit(const Handle& receiver, error reason) {
+    if (receiver)
+      receiver->enqueue(make_mailbox_element(ctrl(), make_message_id(),
+                                             exit_msg{address(),
+                                                      std::move(reason)}),
+                        context());
+  }
+
+  template <message_priority Priority = message_priority::normal, class Handle,
+            class T, class... Ts>
+  void anon_send(const Handle& receiver, T&& arg, Ts&&... args) {
+    detail::send_type_check<none_t, Handle, T, Ts...>();
+    do_anon_send(actor_cast<abstract_actor*>(receiver), Priority,
+                 make_message(std::forward<T>(arg), std::forward<Ts>(args)...));
+  }
+
+  template <message_priority Priority = message_priority::normal, class Handle,
+            class T, class... Ts>
+  disposable scheduled_anon_send(const Handle& receiver,
+                                 actor_clock::time_point timeout, T&& arg,
+                                 Ts&&... args) {
+    detail::send_type_check<none_t, Handle, T, Ts...>();
+    return do_scheduled_anon_send(
+      actor_cast<strong_actor_ptr>(receiver), Priority, timeout,
+      make_message(std::forward<T>(arg), std::forward<Ts>(args)...));
+  }
+
+  template <message_priority Priority = message_priority::normal, class Handle,
+            class T, class... Ts>
+  disposable delayed_anon_send(const Handle& receiver,
+                               actor_clock::duration_type timeout, T&& arg,
+                               Ts&&... args) {
+    return scheduled_anon_send(receiver, clock().now() + timeout,
+                               std::forward<T>(arg), std::forward<Ts>(args)...);
   }
 
   // -- miscellaneous actor operations -----------------------------------------
@@ -260,42 +241,6 @@ public:
     current_element_->mid.mark_as_answered();
   }
 
-  /// Returns a pointer to the next stage from the forwarding path of the
-  /// current message or `nullptr` if the path is empty.
-  strong_actor_ptr current_next_stage() noexcept {
-    CAF_ASSERT(current_element_);
-    auto& stages = current_element_->stages;
-    if (!stages.empty())
-      return stages.back();
-    return nullptr;
-  }
-
-  /// Returns a pointer to the next stage from the forwarding path of the
-  /// current message and removes it from the path. Returns `nullptr` if the
-  /// path is empty.
-  strong_actor_ptr take_current_next_stage() {
-    CAF_ASSERT(current_element_);
-    auto& stages = current_element_->stages;
-    if (!stages.empty()) {
-      auto result = stages.back();
-      stages.pop_back();
-      return result;
-    }
-    return nullptr;
-  }
-
-  /// Returns the forwarding stack from the current mailbox element.
-  const mailbox_element::forwarding_stack& current_forwarding_stack() noexcept {
-    CAF_ASSERT(current_element_);
-    return current_element_->stages;
-  }
-
-  /// Moves the forwarding stack from the current mailbox element.
-  mailbox_element::forwarding_stack take_current_forwarding_stack() noexcept {
-    CAF_ASSERT(current_element_);
-    return std::move(current_element_->stages);
-  }
-
   /// Returns a pointer to the currently processed mailbox element.
   mailbox_element* current_mailbox_element() noexcept {
     return current_element_;
@@ -342,7 +287,7 @@ public:
   /// is equivalent to `make_response_promise<int, int>()`.
   template <class... Ts>
   detail::response_promise_t<Ts...> make_response_promise() {
-    using result_t = typename detail::make_response_promise_helper<Ts...>::type;
+    using result_t = detail::make_response_promise_helper_t<Ts...>;
     if (current_element_ != nullptr && !current_element_->mid.is_answered()) {
       auto result = result_t{this, *current_element_};
       current_element_->mid.mark_as_answered();
@@ -407,9 +352,9 @@ public:
 
   template <message_priority P = message_priority::normal, class Handle = actor,
             class... Ts>
-  typename response_type<typename Handle::signatures,
-                         detail::implicit_conversions_t<
-                           typename std::decay<Ts>::type>...>::delegated_type
+  typename response_type<
+    typename Handle::signatures,
+    detail::implicit_conversions_t<std::decay_t<Ts>>...>::delegated_type
   delegate(const Handle& dest, Ts&&... xs) {
     auto rp = make_response_promise();
     return rp.template delegate<P>(dest, std::forward<Ts>(xs)...);
@@ -419,7 +364,10 @@ public:
 
   bool cleanup(error&& fail_state, execution_unit* host) override;
 
-  message_id new_request_id(message_priority mp);
+  message_id new_request_id(message_priority mp) noexcept;
+
+  /// Returns a 64-bit ID that is unique on this actor.
+  uint64_t new_u64_id() noexcept;
 
   template <class T>
   void respond(T& x) {
@@ -429,6 +377,40 @@ public:
   /// @endcond
 
 protected:
+  // -- send functions ---------------------------------------------------------
+
+  /// Sends `msg` as an asynchronous message to `receiver`.
+  /// @param receiver The receiver for the message.
+  /// @param priority The priority for sending the message.
+  /// @param msg The message to send.
+  void do_send(abstract_actor* receiver, message_priority priority,
+               message&& msg);
+
+  /// Sends `msg` as an asynchronous message to `receiver` after the timeout.
+  /// @param receiver The receiver for the message.
+  /// @param priority The priority for sending the message.
+  /// @param msg The message to send.
+  disposable do_scheduled_send(strong_actor_ptr receiver,
+                               message_priority priority,
+                               actor_clock::time_point timeout, message&& msg);
+
+  /// Sends `msg` as an asynchronous message to `receiver` without sender
+  /// information.
+  /// @param receiver The receiver for the message.
+  /// @param priority The priority for sending the message.
+  /// @param msg The message to send.
+  void do_anon_send(abstract_actor* receiver, message_priority priority,
+                    message&& msg);
+
+  /// Sends `msg` as an asynchronous message to `receiver` after the timeout
+  /// without sender information.
+  /// @param receiver The receiver for the message.
+  /// @param priority The priority for sending the message.
+  /// @param msg The message to send.
+  disposable
+  do_scheduled_anon_send(strong_actor_ptr receiver, message_priority priority,
+                         actor_clock::time_point timeout, message&& msg);
+
   // -- member variables -------------------------------------------------------
 
   // identifies the execution unit this actor is currently executed by

@@ -21,9 +21,8 @@ Contents
    ReferenceCounting
    Error
    ConfiguringActorApplications
-   GroupCommunication
    ManagingGroupsOfWorkers
-   Streaming
+   DataFlows
    Testing
    Metrics
 
@@ -37,9 +36,20 @@ Contents
 
 .. toctree::
    :maxdepth: 2
+   :caption: Networking Library
+
+   net/Overview
+   net/SSL
+   net/ActorShell
+   net/HTTP
+   net/LengthPrefixFraming
+   net/Prometheus
+   net/WebSocket
+
+.. toctree::
+   :maxdepth: 2
    :caption: Appendix
 
    FAQ
-   Utility
    CommonPitfalls
    UsingAout

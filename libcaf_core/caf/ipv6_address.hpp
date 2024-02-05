@@ -4,16 +4,16 @@
 
 #pragma once
 
-#include <array>
-#include <cstdint>
-#include <initializer_list>
-#include <string>
-
 #include "caf/byte_address.hpp"
 #include "caf/detail/comparable.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
 #include "caf/ipv4_address.hpp"
+
+#include <array>
+#include <cstdint>
+#include <initializer_list>
+#include <string>
 
 namespace caf {
 
@@ -99,6 +99,14 @@ public:
     return half_segments_[0] == 0 && half_segments_[1] == 0;
   }
 
+  // -- factories --------------------------------------------------------------
+
+  /// Returns `INADDR6_ANY`, i.e., `::`.
+  static ipv6_address any() noexcept;
+
+  /// Returns `INADDR6_LOOPBACK`, i.e., `::1`.
+  static ipv6_address loopback() noexcept;
+
   // -- inspection -------------------------------------------------------------
 
   template <class Inspector>
@@ -119,6 +127,6 @@ private:
   };
 };
 
-CAF_CORE_EXPORT error parse(string_view str, ipv6_address& dest);
+CAF_CORE_EXPORT error parse(std::string_view str, ipv6_address& dest);
 
 } // namespace caf

@@ -4,14 +4,6 @@
 
 #pragma once
 
-#include <limits>
-
-#include "caf/actor_system_config.hpp"
-#include "caf/byte_buffer.hpp"
-#include "caf/callback.hpp"
-#include "caf/detail/io_export.hpp"
-#include "caf/detail/worker_hub.hpp"
-#include "caf/error.hpp"
 #include "caf/io/basp/connection_state.hpp"
 #include "caf/io/basp/header.hpp"
 #include "caf/io/basp/message_queue.hpp"
@@ -19,7 +11,15 @@
 #include "caf/io/basp/routing_table.hpp"
 #include "caf/io/basp/worker.hpp"
 #include "caf/io/middleman.hpp"
-#include "caf/variant.hpp"
+
+#include "caf/actor_system_config.hpp"
+#include "caf/byte_buffer.hpp"
+#include "caf/callback.hpp"
+#include "caf/detail/io_export.hpp"
+#include "caf/detail/worker_hub.hpp"
+#include "caf/error.hpp"
+
+#include <limits>
 
 namespace caf::io::basp {
 
@@ -103,14 +103,14 @@ public:
 
   /// Handles received data and returns a config for receiving the
   /// next data or `none` if an error occurred.
-  connection_state handle(execution_unit* ctx,
-                          new_data_msg& dm, header& hdr, bool is_payload);
+  connection_state handle(execution_unit* ctx, new_data_msg& dm, header& hdr,
+                          bool is_payload);
 
   /// Sends heartbeat messages to all valid nodes those are directly connected.
   void handle_heartbeat(execution_unit* ctx);
 
   /// Returns a route to `target` or `none` on error.
-  optional<routing_table::route> lookup(const node_id& target);
+  std::optional<routing_table::route> lookup(const node_id& target);
 
   /// Flushes the underlying buffer of `path`.
   void flush(const routing_table::route& path);
@@ -125,8 +125,8 @@ public:
                            std::set<std::string> published_interface);
 
   /// Removes the actor currently assigned to `port`.
-  size_t
-  remove_published_actor(uint16_t port, removed_published_actor* cb = nullptr);
+  size_t remove_published_actor(uint16_t port,
+                                removed_published_actor* cb = nullptr);
 
   /// Removes `whom` if it is still assigned to `port` or from all of its
   /// current ports if `port == 0`.
@@ -135,7 +135,6 @@ public:
 
   /// Returns `true` if a path to destination existed, `false` otherwise.
   bool dispatch(execution_unit* ctx, const strong_actor_ptr& sender,
-                const std::vector<strong_actor_ptr>& forwarding_stack,
                 const node_id& dest_node, uint64_t dest_actor, uint8_t flags,
                 message_id mid, const message& msg);
 
@@ -171,7 +170,7 @@ public:
   /// if no actor is published at this port then a standard handshake is
   /// written (e.g. used when establishing direct connections on-the-fly).
   void write_server_handshake(execution_unit* ctx, byte_buffer& out_buf,
-                              optional<uint16_t> port);
+                              std::optional<uint16_t> port);
 
   /// Writes the client handshake to `buf`.
   void write_client_handshake(execution_unit* ctx, byte_buffer& buf);
@@ -181,9 +180,9 @@ public:
                              const node_id& dest_node, actor_id aid);
 
   /// Writes a `kill_proxy` to `buf`.
-  void
-  write_down_message(execution_unit* ctx, byte_buffer& buf,
-                     const node_id& dest_node, actor_id aid, const error& rsn);
+  void write_down_message(execution_unit* ctx, byte_buffer& buf,
+                          const node_id& dest_node, actor_id aid,
+                          const error& rsn);
 
   /// Writes a `heartbeat` to `buf`.
   void write_heartbeat(execution_unit* ctx, byte_buffer& buf);

@@ -4,18 +4,35 @@
 
 #pragma once
 
+#include "caf/detail/append_hex.hpp"
+#include "caf/detail/comparable.hpp"
+#include "caf/detail/type_traits.hpp"
+#include "caf/fwd.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 
-#include "caf/detail/append_hex.hpp"
-#include "caf/detail/comparable.hpp"
-#include "caf/detail/type_traits.hpp"
-#include "caf/fwd.hpp"
-
 namespace caf {
+
+/// Policy for adding and releasing references in an @ref intrusive_ptr. The
+/// default implementation dispatches to the free function pair
+/// `intrusive_ptr_add_ref` and `intrusive_ptr_release` that the policy picks up
+/// via ADL.
+/// @relates intrusive_ptr
+template <class T>
+struct intrusive_ptr_access {
+public:
+  static void add_ref(T* ptr) noexcept {
+    intrusive_ptr_add_ref(ptr);
+  }
+
+  static void release(T* ptr) noexcept {
+    intrusive_ptr_release(ptr);
+  }
+};
 
 /// An intrusive, reference counting smart pointer implementation.
 /// @relates ref_counted
@@ -70,13 +87,12 @@ public:
 
   template <class Y>
   intrusive_ptr(intrusive_ptr<Y> other) noexcept : ptr_(other.detach()) {
-    static_assert(std::is_convertible<Y*, T*>::value,
-                  "Y* is not assignable to T*");
+    static_assert(std::is_convertible_v<Y*, T*>, "Y* is not assignable to T*");
   }
 
   ~intrusive_ptr() {
     if (ptr_)
-      intrusive_ptr_release(ptr_);
+      intrusive_ptr_access<T>::release(ptr_);
   }
 
   void swap(intrusive_ptr& other) noexcept {
@@ -102,7 +118,7 @@ public:
     auto old = ptr_;
     set_ptr(new_value, add_ref);
     if (old)
-      intrusive_ptr_release(old);
+      intrusive_ptr_access<T>::release(old);
   }
 
   template <class... Ts>
@@ -159,19 +175,27 @@ public:
 
   template <class C>
   intrusive_ptr<C> downcast() const noexcept {
-    return (ptr_) ? dynamic_cast<C*>(get()) : nullptr;
+    static_assert(std::is_base_of_v<T, C>);
+    return intrusive_ptr<C>{ptr_ ? dynamic_cast<C*>(get()) : nullptr};
   }
 
   template <class C>
-  intrusive_ptr<C> upcast() const noexcept {
-    return (ptr_) ? static_cast<C*>(get()) : nullptr;
+  intrusive_ptr<C> upcast() const& noexcept {
+    static_assert(std::is_base_of_v<C, T>);
+    return intrusive_ptr<C>{ptr_ ? ptr_ : nullptr};
+  }
+
+  template <class C>
+  intrusive_ptr<C> upcast() && noexcept {
+    static_assert(std::is_base_of_v<C, T>);
+    return intrusive_ptr<C>{ptr_ ? release() : nullptr, false};
   }
 
 private:
   void set_ptr(pointer raw_ptr, bool add_ref) noexcept {
     ptr_ = raw_ptr;
     if (raw_ptr && add_ref)
-      intrusive_ptr_add_ref(raw_ptr);
+      intrusive_ptr_access<T>::add_ref(raw_ptr);
   }
 
   pointer ptr_;
@@ -206,41 +230,45 @@ bool operator!=(std::nullptr_t, const intrusive_ptr<T>& x) {
 // -- comparison to raw pointer ------------------------------------------------
 
 /// @relates intrusive_ptr
-template <class T>
-bool operator==(const intrusive_ptr<T>& x, const T* y) {
-  return x.get() == y;
+template <class T, class U>
+std::enable_if_t<detail::is_comparable<T*, U*>::value, bool>
+operator==(const intrusive_ptr<T>& lhs, const U* rhs) {
+  return lhs.get() == rhs;
 }
 
 /// @relates intrusive_ptr
-template <class T>
-bool operator==(const T* x, const intrusive_ptr<T>& y) {
-  return x == y.get();
+template <class T, class U>
+std::enable_if_t<detail::is_comparable<T*, U*>::value, bool>
+operator==(const T* lhs, const intrusive_ptr<U>& rhs) {
+  return lhs == rhs.get();
 }
 
 /// @relates intrusive_ptr
-template <class T>
-bool operator!=(const intrusive_ptr<T>& x, const T* y) {
-  return x.get() != y;
+template <class T, class U>
+std::enable_if_t<detail::is_comparable<T*, U*>::value, bool>
+operator!=(const intrusive_ptr<T>& lhs, const U* rhs) {
+  return lhs.get() != rhs;
 }
 
 /// @relates intrusive_ptr
-template <class T>
-bool operator!=(const T* x, const intrusive_ptr<T>& y) {
-  return x != y.get();
+template <class T, class U>
+std::enable_if_t<detail::is_comparable<T*, U*>::value, bool>
+operator!=(const T* lhs, const intrusive_ptr<U>& rhs) {
+  return lhs != rhs.get();
 }
 
 // -- comparison to intrusive_pointer ------------------------------------------
 
 /// @relates intrusive_ptr
 template <class T, class U>
-detail::enable_if_t<detail::is_comparable<T*, U*>::value, bool>
+std::enable_if_t<detail::is_comparable_v<T*, U*>, bool>
 operator==(const intrusive_ptr<T>& x, const intrusive_ptr<U>& y) {
   return x.get() == y.get();
 }
 
 /// @relates intrusive_ptr
 template <class T, class U>
-detail::enable_if_t<detail::is_comparable<T*, U*>::value, bool>
+std::enable_if_t<detail::is_comparable_v<T*, U*>, bool>
 operator!=(const intrusive_ptr<T>& x, const intrusive_ptr<U>& y) {
   return x.get() != y.get();
 }
@@ -271,3 +299,22 @@ std::string to_string(const intrusive_ptr<T>& x) {
 
 } // namespace caf
 
+/// Convenience macro for adding `intrusive_ptr_add_ref` and
+/// `intrusive_ptr_release` as free friend functions.
+#define CAF_INTRUSIVE_PTR_FRIENDS(class_name)                                  \
+  friend void intrusive_ptr_add_ref(const class_name* ptr) noexcept {          \
+    ptr->ref();                                                                \
+  }                                                                            \
+  friend void intrusive_ptr_release(const class_name* ptr) noexcept {          \
+    ptr->deref();                                                              \
+  }
+
+/// Convenience macro for adding `intrusive_ptr_add_ref` and
+/// `intrusive_ptr_release` as free friend functions with a custom suffix.
+#define CAF_INTRUSIVE_PTR_FRIENDS_SFX(class_name, suffix)                      \
+  friend void intrusive_ptr_add_ref(const class_name* ptr) noexcept {          \
+    ptr->ref##suffix();                                                        \
+  }                                                                            \
+  friend void intrusive_ptr_release(const class_name* ptr) noexcept {          \
+    ptr->deref##suffix();                                                      \
+  }

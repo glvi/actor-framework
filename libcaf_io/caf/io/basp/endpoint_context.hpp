@@ -4,16 +4,16 @@
 
 #pragma once
 
-#include <unordered_map>
-
-#include "caf/actor_clock.hpp"
 #include "caf/io/basp/connection_state.hpp"
 #include "caf/io/basp/header.hpp"
 #include "caf/io/connection_handle.hpp"
 #include "caf/io/datagram_handle.hpp"
+
+#include "caf/actor_clock.hpp"
 #include "caf/response_promise.hpp"
 #include "caf/timestamp.hpp"
-#include "caf/variant.hpp"
+
+#include <unordered_map>
 
 namespace caf::io::basp {
 
@@ -31,7 +31,7 @@ struct endpoint_context {
   uint16_t remote_port;
   uint16_t local_port;
   // pending operations to be performed after handshake completed
-  optional<response_promise> callback;
+  std::optional<response_promise> callback;
   // keeps track of when we've last received a message from this endpoint
   actor_clock::time_point last_seen;
 };

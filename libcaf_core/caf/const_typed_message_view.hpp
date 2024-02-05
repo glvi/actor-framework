@@ -4,12 +4,13 @@
 
 #pragma once
 
-#include <utility>
-
 #include "caf/detail/message_data.hpp"
 #include "caf/detail/offset_at.hpp"
 #include "caf/detail/type_list.hpp"
 #include "caf/message.hpp"
+
+#include <optional>
+#include <utility>
 
 namespace caf {
 
@@ -67,10 +68,10 @@ auto make_const_typed_message_view(const message& msg) {
 }
 
 template <class... Ts>
-optional<std::tuple<Ts...>> to_tuple(const message& msg) {
+std::optional<std::tuple<Ts...>> to_tuple(const message& msg) {
   if (auto view = make_const_typed_message_view<Ts...>(msg))
     return to_tuple(view);
-  return none;
+  return std::nullopt;
 }
 
 } // namespace caf

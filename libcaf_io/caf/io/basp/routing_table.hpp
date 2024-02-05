@@ -4,14 +4,15 @@
 
 #pragma once
 
+#include "caf/io/abstract_broker.hpp"
+
+#include "caf/detail/io_export.hpp"
+#include "caf/node_id.hpp"
+
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
-#include "caf/detail/io_export.hpp"
-#include "caf/io/abstract_broker.hpp"
-#include "caf/node_id.hpp"
 
 namespace caf::io::basp {
 
@@ -33,7 +34,7 @@ public:
   };
 
   /// Returns a route to `target` or `none` on error.
-  optional<route> lookup(const node_id& target);
+  std::optional<route> lookup(const node_id& target);
 
   /// Returns the ID of the peer connected via `hdl` or
   /// `none` if `hdl` is unknown.
@@ -41,7 +42,7 @@ public:
 
   /// Returns the handle offering a direct connection to `nid` or
   /// `invalid_connection_handle` if no direct connection to `nid` exists.
-  optional<connection_handle> lookup_direct(const node_id& nid) const;
+  std::optional<connection_handle> lookup_direct(const node_id& nid) const;
 
   /// Returns the next hop that would be chosen for `nid`
   /// or `none` if there's no indirect route to `nid`.

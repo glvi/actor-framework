@@ -4,10 +4,11 @@
 
 #pragma once
 
-#include "caf/detail/io_export.hpp"
-#include "caf/fwd.hpp"
 #include "caf/io/fwd.hpp"
 #include "caf/io/middleman_actor.hpp"
+
+#include "caf/detail/io_export.hpp"
+#include "caf/fwd.hpp"
 #include "caf/typed_actor.hpp"
 #include "caf/typed_event_based_actor.hpp"
 
@@ -53,18 +54,18 @@ protected:
 
   /// Tries to connect to given `host` and `port`. The default implementation
   /// calls `system().middleman().backend().new_udp`.
-  virtual expected<datagram_servant_ptr>
-  contact(const std::string& host, uint16_t port);
+  virtual expected<datagram_servant_ptr> contact(const std::string& host,
+                                                 uint16_t port);
 
   /// Tries to open a local port. The default implementation calls
   /// `system().middleman().backend().new_tcp_doorman(port, addr, reuse)`.
-  virtual expected<doorman_ptr>
-  open(uint16_t port, const char* addr, bool reuse);
+  virtual expected<doorman_ptr> open(uint16_t port, const char* addr,
+                                     bool reuse);
 
   /// Tries to open a local port. The default implementation calls
   /// `system().middleman().backend().new_tcp_doorman(port, addr, reuse)`.
-  virtual expected<datagram_servant_ptr>
-  open_udp(uint16_t port, const char* addr, bool reuse);
+  virtual expected<datagram_servant_ptr> open_udp(uint16_t port,
+                                                  const char* addr, bool reuse);
 
 private:
   put_res put(uint16_t port, strong_actor_ptr& whom, mpi_set& sigs,
@@ -73,10 +74,10 @@ private:
   put_res put_udp(uint16_t port, strong_actor_ptr& whom, mpi_set& sigs,
                   const char* in = nullptr, bool reuse_addr = false);
 
-  optional<endpoint_data&> cached_tcp(const endpoint& ep);
-  optional<endpoint_data&> cached_udp(const endpoint& ep);
+  endpoint_data* cached_tcp(const endpoint& ep);
+  endpoint_data* cached_udp(const endpoint& ep);
 
-  optional<std::vector<response_promise>&> pending(const endpoint& ep);
+  std::vector<response_promise>* pending(const endpoint& ep);
 
   actor broker_;
   std::map<endpoint, endpoint_data> cached_tcp_;

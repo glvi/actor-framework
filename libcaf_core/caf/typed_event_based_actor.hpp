@@ -4,49 +4,43 @@
 
 #pragma once
 
-#include "caf/replies_to.hpp"
-#include "caf/local_actor.hpp"
-#include "caf/typed_actor.hpp"
 #include "caf/actor_system.hpp"
-#include "caf/typed_behavior.hpp"
-#include "caf/scheduled_actor.hpp"
-
+#include "caf/keep_behavior.hpp"
+#include "caf/local_actor.hpp"
 #include "caf/mixin/requester.hpp"
-#include "caf/mixin/behavior_changer.hpp"
+#include "caf/mixin/sender.hpp"
+#include "caf/scheduled_actor.hpp"
+#include "caf/typed_actor.hpp"
+#include "caf/typed_behavior.hpp"
 
 namespace caf {
-
-template <class... Sigs>
-class behavior_type_of<typed_event_based_actor<Sigs...>> {
-public:
-  using type = typed_behavior<Sigs...>;
-};
 
 /// A cooperatively scheduled, event-based actor
 /// implementation with static type-checking.
 /// @extends local_actor
 template <class... Sigs>
-class typed_event_based_actor : public extend<scheduled_actor,
-                                              typed_event_based_actor<Sigs...>
-                                       >::template
-                                       with<mixin::sender, mixin::requester,
-                                            mixin::behavior_changer>,
-                                public statically_typed_actor_base {
+class typed_event_based_actor
+  : public extend<scheduled_actor, typed_event_based_actor<Sigs...>>::
+      template with<mixin::sender, mixin::requester>,
+    public statically_typed_actor_base {
 public:
-  using super = typename
-                extend<scheduled_actor,
-                       typed_event_based_actor<Sigs...>>::template
-                with<mixin::sender, mixin::requester, mixin::behavior_changer>;
+  // -- member types -----------------------------------------------------------
 
-  explicit typed_event_based_actor(actor_config& cfg) : super(cfg) {
-    // nop
-  }
+  using super =
+    typename extend<scheduled_actor, typed_event_based_actor<Sigs...>>::
+      template with<mixin::sender, mixin::requester>;
 
   using signatures = detail::type_list<Sigs...>;
 
   using behavior_type = typed_behavior<Sigs...>;
 
   using actor_hdl = typed_actor<Sigs...>;
+
+  // -- constructors, destructors, and assignment operators --------------------
+
+  using super::super;
+
+  // -- overrides --------------------------------------------------------------
 
   std::set<std::string> message_types() const override {
     detail::type_list<typed_actor<Sigs...>> token;
@@ -59,12 +53,31 @@ public:
     this->setf(abstract_actor::is_initialized_flag);
     auto bhvr = make_behavior();
     CAF_LOG_DEBUG_IF(!bhvr, "make_behavior() did not return a behavior:"
-                            << CAF_ARG2("alive", this->alive()));
+                              << CAF_ARG2("alive", this->alive()));
     if (bhvr) {
       // make_behavior() did return a behavior instead of using become()
       CAF_LOG_DEBUG("make_behavior() did return a valid behavior");
       this->do_become(std::move(bhvr.unbox()), true);
     }
+  }
+
+  // -- behavior management ----------------------------------------------------
+
+  /// @copydoc event_based_actor::become
+  template <class T, class... Ts>
+  void become(T&& arg, Ts&&... args) {
+    if constexpr (std::is_same_v<keep_behavior_t, std::decay_t<T>>) {
+      static_assert(sizeof...(Ts) > 0);
+      this->do_become(behavior_type{std::forward<Ts>(args)...}.unbox(), false);
+    } else {
+      behavior_type bhv{std::forward<T>(arg), std::forward<Ts>(args)...};
+      this->do_become(std::move(bhv).unbox(), true);
+    }
+  }
+
+  /// @copydoc event_based_actor::unbecome
+  void unbecome() {
+    this->bhvr_stack_.pop_back();
   }
 
 protected:
@@ -80,4 +93,3 @@ protected:
 };
 
 } // namespace caf
-

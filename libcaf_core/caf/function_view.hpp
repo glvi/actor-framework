@@ -4,16 +4,16 @@
 
 #pragma once
 
-#include <functional>
-#include <new>
-#include <utility>
-
 #include "caf/detail/core_export.hpp"
 #include "caf/expected.hpp"
 #include "caf/response_type.hpp"
 #include "caf/scoped_actor.hpp"
 #include "caf/timespan.hpp"
 #include "caf/typed_actor.hpp"
+
+#include <functional>
+#include <new>
+#include <utility>
 
 namespace caf {
 
@@ -52,21 +52,11 @@ private:
   std::tuple<Ts...>* storage_;
 };
 
-template <>
-class function_view_storage<unit_t> {
-public:
-  using type = function_view_storage;
+/// Convenience alias for `function_view_storage<T>::type`.
+template <class T>
+using function_view_storage_t = typename function_view_storage<T>::type;
 
-  explicit function_view_storage(unit_t&) {
-    // nop
-  }
-
-  void operator()() {
-    // nop
-  }
-};
-
-struct CAF_CORE_EXPORT function_view_storage_catch_all {
+struct function_view_storage_catch_all {
   message* storage_;
 
   explicit function_view_storage_catch_all(message& ptr) : storage_(&ptr) {
@@ -93,11 +83,6 @@ struct function_view_flattened_result {
 template <class T>
 struct function_view_flattened_result<std::tuple<T>> {
   using type = T;
-};
-
-template <>
-struct function_view_flattened_result<std::tuple<void>> {
-  using type = unit_t;
 };
 
 template <class T>
@@ -174,13 +159,23 @@ public:
     if (!impl_)
       return result_type{sec::bad_function_call};
     error err;
-    function_view_result<value_type> result;
-    self_->request(impl_, timeout, std::forward<Ts>(xs)...)
-      .receive([&](error& x) { err = std::move(x); },
-               typename function_view_storage<value_type>::type{result.value});
-    if (err)
-      return result_type{err};
-    return result_type{flatten(result.value)};
+    if constexpr (std::is_void_v<value_type>) {
+      self_->request(impl_, timeout, std::forward<Ts>(xs)...)
+        .receive([&](error& x) { err = std::move(x); }, [] {});
+      if (err)
+        return result_type{err};
+      else
+        return result_type{};
+    } else {
+      function_view_result<value_type> result;
+      self_->request(impl_, timeout, std::forward<Ts>(xs)...)
+        .receive([&](error& x) { err = std::move(x); },
+                 function_view_storage_t<value_type>{result.value});
+      if (err)
+        return result_type{err};
+      else
+        return result_type{flatten(result.value)};
+    }
   }
 
   void assign(type x) {

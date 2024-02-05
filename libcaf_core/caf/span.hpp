@@ -4,11 +4,11 @@
 
 #pragma once
 
-#include <array>
-#include <type_traits>
-
-#include "caf/byte.hpp"
 #include "caf/detail/type_traits.hpp"
+
+#include <array>
+#include <cstddef>
+#include <type_traits>
 
 namespace caf {
 
@@ -21,7 +21,7 @@ public:
 
   using element_type = T;
 
-  using value_type = typename std::remove_cv<T>::type;
+  using value_type = std::remove_cv_t<T>;
 
   using index_type = size_t;
 
@@ -64,16 +64,14 @@ public:
     // nop
   }
 
-  template <class C,
-            class = std::enable_if_t<
-              detail::has_convertible_data_member<C, value_type>::value>>
+  template <class C, class = std::enable_if_t<
+                       detail::has_convertible_data_member_v<C, value_type>>>
   span(C& xs) noexcept : begin_(xs.data()), size_(xs.size()) {
     // nop
   }
 
-  template <class C,
-            class = std::enable_if_t<
-              detail::has_convertible_data_member<C, value_type>::value>>
+  template <class C, class = std::enable_if_t<
+                       detail::has_convertible_data_member_v<C, value_type>>>
   span(const C& xs) noexcept : begin_(xs.data()), size_(xs.size()) {
     // nop
   }
@@ -197,19 +195,19 @@ auto cend(const span<T>& xs) -> decltype(xs.cend()) {
 }
 
 template <class T>
-span<const byte> as_bytes(span<T> xs) {
-  return {reinterpret_cast<const byte*>(xs.data()), xs.size_bytes()};
+span<const std::byte> as_bytes(span<T> xs) {
+  return {reinterpret_cast<const std::byte*>(xs.data()), xs.size_bytes()};
 }
 
 template <class T>
-span<byte> as_writable_bytes(span<T> xs) {
-  return {reinterpret_cast<byte*>(xs.data()), xs.size_bytes()};
+span<std::byte> as_writable_bytes(span<T> xs) {
+  return {reinterpret_cast<std::byte*>(xs.data()), xs.size_bytes()};
 }
 
 /// Convenience function to make using `caf::span` more convenient without the
 /// deduction guides.
 template <class T>
-auto make_span(T& xs) -> span<detail::remove_reference_t<decltype(xs[0])>> {
+auto make_span(T& xs) -> span<std::remove_reference_t<decltype(xs[0])>> {
   return {xs.data(), xs.size()};
 }
 

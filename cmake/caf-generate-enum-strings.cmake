@@ -37,13 +37,13 @@ macro(write_enum_file)
   # File header and includes.
   list(APPEND out
     "#include \"caf/config.hpp\"\n"
-    "#include \"caf/string_view.hpp\"\n"
     "\n"
     "CAF_PUSH_DEPRECATED_WARNING\n"
     "\n"
     "#include \"${namespace_path}/${enum_name}.hpp\"\n"
     "\n"
     "#include <string>\n"
+    "#include <string_view>\n"
     "\n"
     "namespace ${namespace_str} {\n"
     "\n")
@@ -56,7 +56,7 @@ macro(write_enum_file)
   foreach(label IN LISTS enum_values)
     list(APPEND out
       "    case ${label_prefix}${label}:\n"
-      "      return \"${namespace_str}::${enum_name}::${label}\"\;\n")
+      "      return \"${label}\"\;\n")
   endforeach()
   list(APPEND out
     "  }\n"
@@ -64,10 +64,11 @@ macro(write_enum_file)
      "\n")
   # Generate from_string implementation.
   list(APPEND out
-    "bool from_string(string_view in, ${enum_name}& out) {\n")
+    "bool from_string(std::string_view in, ${enum_name}& out) {\n")
   foreach(label IN LISTS enum_values)
     list(APPEND out
-      "  if (in == \"${namespace_str}::${enum_name}::${label}\") {\n"
+      "  if (in == \"${label}\"\n"
+      "      || in == \"${namespace_str}::${enum_name}::${label}\") {\n"
       "    out = ${label_prefix}${label}\;\n"
       "    return true\;\n"
       "  }\n")

@@ -4,9 +4,6 @@
 
 #pragma once
 
-#include <cstddef>
-#include <memory>
-
 #include "caf/behavior.hpp"
 #include "caf/config.hpp"
 #include "caf/detail/type_list.hpp"
@@ -15,6 +12,9 @@
 #include "caf/disposable.hpp"
 #include "caf/logger.hpp"
 #include "caf/sec.hpp"
+
+#include <cstddef>
+#include <memory>
 
 namespace caf::detail {
 
@@ -26,9 +26,8 @@ struct select_any_factory<F, type_list<Ts...>> {
   template <class Fun>
   static auto
   make(std::shared_ptr<size_t> pending, disposable timeouts, Fun f) {
-    using std::move;
-    return [pending{move(pending)}, timeouts{move(timeouts)},
-            f{move(f)}](Ts... xs) mutable {
+    return [pending{std::move(pending)}, timeouts{std::move(timeouts)},
+            f{std::move(f)}](Ts... xs) mutable {
       CAF_LOG_TRACE(CAF_ARG2("pending", *pending));
       if (*pending > 0) {
         timeouts.dispose();
@@ -56,8 +55,7 @@ public:
   using message_id_list = std::vector<message_id>;
 
   template <class Fun>
-  using type_checker
-    = detail::type_checker<response_type, detail::decay_t<Fun>>;
+  using type_checker = detail::type_checker<response_type, std::decay_t<Fun>>;
 
   explicit select_any(message_id_list ids, disposable pending_timeouts)
     : ids_(std::move(ids)), pending_timeouts_(std::move(pending_timeouts)) {

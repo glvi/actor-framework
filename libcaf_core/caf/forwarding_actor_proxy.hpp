@@ -7,18 +7,19 @@
 #include "caf/actor.hpp"
 #include "caf/actor_proxy.hpp"
 #include "caf/detail/core_export.hpp"
-#include "caf/detail/shared_spinlock.hpp"
+
+#include <shared_mutex>
 
 namespace caf {
 
 /// Implements a simple proxy forwarding all operations to a manager.
 class CAF_CORE_EXPORT forwarding_actor_proxy : public actor_proxy {
 public:
-  using forwarding_stack = std::vector<strong_actor_ptr>;
-
   forwarding_actor_proxy(actor_config& cfg, actor dest);
 
   ~forwarding_actor_proxy() override;
+
+  const char* name() const override;
 
   bool enqueue(mailbox_element_ptr what, execution_unit* context) override;
 
@@ -29,10 +30,9 @@ public:
   void kill_proxy(execution_unit* ctx, error rsn) override;
 
 private:
-  bool forward_msg(strong_actor_ptr sender, message_id mid, message msg,
-                   const forwarding_stack* fwd = nullptr);
+  bool forward_msg(strong_actor_ptr sender, message_id mid, message msg);
 
-  mutable detail::shared_spinlock broker_mtx_;
+  mutable std::shared_mutex broker_mtx_;
   actor broker_;
 };
 

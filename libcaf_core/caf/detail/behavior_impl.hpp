@@ -4,22 +4,16 @@
 
 #pragma once
 
-#include <tuple>
-#include <type_traits>
-#include <utility>
-
 #include "caf/const_typed_message_view.hpp"
 #include "caf/detail/apply_args.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/int_list.hpp"
 #include "caf/detail/invoke_result_visitor.hpp"
-#include "caf/detail/tail_argument_token.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/intrusive_ptr.hpp"
 #include "caf/make_counted.hpp"
 #include "caf/message.hpp"
 #include "caf/none.hpp"
-#include "caf/optional.hpp"
 #include "caf/ref_counted.hpp"
 #include "caf/response_promise.hpp"
 #include "caf/skip.hpp"
@@ -27,7 +21,11 @@
 #include "caf/timespan.hpp"
 #include "caf/typed_message_view.hpp"
 #include "caf/typed_response_promise.hpp"
-#include "caf/variant.hpp"
+
+#include <optional>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
 namespace caf {
 
@@ -51,7 +49,7 @@ public:
 
   virtual bool invoke(detail::invoke_result_visitor& f, message& xs) = 0;
 
-  optional<message> invoke(message&);
+  std::optional<message> invoke(message&);
 
   virtual void handle_timeout();
 
@@ -75,10 +73,9 @@ struct with_generic_timeout<false, std::tuple<Ts...>> {
 
 template <class... Ts>
 struct with_generic_timeout<true, std::tuple<Ts...>> {
-  using type =
-    typename tl_apply<typename tl_replace_back<
-                        type_list<Ts...>, generic_timeout_definition>::type,
-                      std::tuple>::type;
+  using type = tl_apply_t<
+    tl_replace_back_t<type_list<Ts...>, generic_timeout_definition>,
+    std::tuple>;
 };
 
 struct dummy_timeout_definition {
@@ -117,18 +114,31 @@ public:
     [[maybe_unused]] auto dispatch = [&](auto& fun) {
       using fun_type = std::decay_t<decltype(fun)>;
       using trait = get_callable_trait_t<fun_type>;
-      auto arg_types = to_type_id_list<typename trait::decayed_arg_types>();
-      if (arg_types == msg.types()) {
-        typename trait::message_view_type xs{msg};
-        using fun_result = decltype(detail::apply_args(fun, xs));
-        if constexpr (std::is_same<void, fun_result>::value) {
-          detail::apply_args(fun, xs);
+      using decayed_args = typename trait::decayed_arg_types;
+      if constexpr (std::is_same_v<decayed_args, type_list<message>>) {
+        using fun_result = decltype(fun(msg));
+        if constexpr (std::is_same_v<void, fun_result>) {
+          fun(msg);
           f(unit);
         } else {
-          auto invoke_res = detail::apply_args(fun, xs);
+          auto invoke_res = fun(msg);
           f(invoke_res);
         }
         return true;
+      } else {
+        auto arg_types = to_type_id_list<decayed_args>();
+        if (arg_types == msg.types()) {
+          typename trait::message_view_type xs{msg};
+          using fun_result = decltype(detail::apply_args(fun, xs));
+          if constexpr (std::is_same_v<void, fun_result>) {
+            detail::apply_args(fun, xs);
+            f(unit);
+          } else {
+            auto invoke_res = detail::apply_args(fun, xs);
+            f(invoke_res);
+          }
+          return true;
+        }
       }
       return false;
     };

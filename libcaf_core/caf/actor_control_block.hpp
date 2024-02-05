@@ -4,15 +4,14 @@
 
 #pragma once
 
-#include <atomic>
-
 #include "caf/config.hpp"
 #include "caf/detail/core_export.hpp"
-#include "caf/error.hpp"
 #include "caf/fwd.hpp"
 #include "caf/intrusive_ptr.hpp"
 #include "caf/node_id.hpp"
 #include "caf/weak_intrusive_ptr.hpp"
+
+#include <atomic>
 
 namespace caf {
 
@@ -86,7 +85,7 @@ public:
                 "sizeof(node_id) != sizeof(size_t)");
 
   static_assert(sizeof(data_destructor) == sizeof(void*),
-                "functiion pointer and regular pointers have different size");
+                "function pointer and regular pointers have different size");
 
   /// Returns a pointer to the actual actor instance.
   abstract_actor* get() {
@@ -115,9 +114,6 @@ public:
     return nid;
   }
 
-  bool enqueue(strong_actor_ptr sender, message_id mid, message content,
-               execution_unit* host);
-
   bool enqueue(mailbox_element_ptr what, execution_unit* host);
 
   /// @endcond
@@ -128,7 +124,12 @@ CAF_CORE_EXPORT bool intrusive_ptr_upgrade_weak(actor_control_block* x);
 
 /// @relates actor_control_block
 inline void intrusive_ptr_add_weak_ref(actor_control_block* x) {
+#ifdef NDEBUG
   x->weak_refs.fetch_add(1, std::memory_order_relaxed);
+#else
+  if (x->weak_refs.fetch_add(1, std::memory_order_relaxed) == 0)
+    CAF_CRITICAL("increased the weak reference count of an expired actor");
+#endif
 }
 
 /// @relates actor_control_block
@@ -136,7 +137,12 @@ CAF_CORE_EXPORT void intrusive_ptr_release_weak(actor_control_block* x);
 
 /// @relates actor_control_block
 inline void intrusive_ptr_add_ref(actor_control_block* x) {
+#ifdef NDEBUG
   x->strong_refs.fetch_add(1, std::memory_order_relaxed);
+#else
+  if (x->strong_refs.fetch_add(1, std::memory_order_relaxed) == 0)
+    CAF_CRITICAL("increased the strong reference count of an expired actor");
+#endif
 }
 
 /// @relates actor_control_block
@@ -160,13 +166,13 @@ inline bool operator!=(const abstract_actor* x, const strong_actor_ptr& y) {
 /// @relates actor_control_block
 using weak_actor_ptr = weak_intrusive_ptr<actor_control_block>;
 
-CAF_CORE_EXPORT error_code<sec>
-load_actor(strong_actor_ptr& storage, execution_unit*, actor_id aid,
-           const node_id& nid);
+CAF_CORE_EXPORT error_code<sec> load_actor(strong_actor_ptr& storage,
+                                           execution_unit*, actor_id aid,
+                                           const node_id& nid);
 
-CAF_CORE_EXPORT error_code<sec>
-save_actor(strong_actor_ptr& storage, execution_unit*, actor_id aid,
-           const node_id& nid);
+CAF_CORE_EXPORT error_code<sec> save_actor(strong_actor_ptr& storage,
+                                           execution_unit*, actor_id aid,
+                                           const node_id& nid);
 
 template <class Inspector>
 auto context_of(Inspector* f) -> decltype(f->context()) {
@@ -179,8 +185,8 @@ inline execution_unit* context_of(void*) {
 
 CAF_CORE_EXPORT std::string to_string(const strong_actor_ptr& x);
 
-CAF_CORE_EXPORT void
-append_to_string(std::string& x, const strong_actor_ptr& y);
+CAF_CORE_EXPORT void append_to_string(std::string& x,
+                                      const strong_actor_ptr& y);
 
 CAF_CORE_EXPORT std::string to_string(const weak_actor_ptr& x);
 

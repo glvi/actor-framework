@@ -6,12 +6,13 @@
 
 #include "caf/allowed_unsafe_message_type.hpp"
 #include "caf/config.hpp"
+#include "caf/detail/atomic_ref_counted.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/disposable.hpp"
 #include "caf/make_counted.hpp"
-#include "caf/ref_counted.hpp"
 
 #include <atomic>
+#include <cstddef>
 
 namespace caf {
 
@@ -23,44 +24,25 @@ public:
 
   /// Describes the current state of an `action`.
   enum class state {
-    disposed,  /// The action may no longer run.
-    scheduled, /// The action is scheduled for execution.
-    invoked,   /// The action fired and needs rescheduling before running again.
-    waiting,   /// The action waits for reschedule but didn't run yet.
-  };
-
-  /// Describes the result of an attempted state transition.
-  enum class transition {
-    success,  /// Transition completed as expected.
-    disposed, /// No transition since the action has been disposed.
-    failure,  /// No transition since preconditions did not hold.
+    scheduled,        /// The action is scheduled for execution.
+    running,          /// The action is currently running in another thread.
+    deferred_dispose, /// The action is currently running, and will be disposed.
+    disposed,         /// The action may no longer run.
   };
 
   /// Internal interface of `action`.
-  class impl : public disposable::impl {
+  class CAF_CORE_EXPORT impl : public disposable::impl {
   public:
-    virtual transition reschedule() = 0;
-
-    virtual transition run() = 0;
+    virtual void run() = 0;
 
     virtual state current_state() const noexcept = 0;
-
-    friend void intrusive_ptr_add_ref(const impl* ptr) noexcept {
-      ptr->ref_disposable();
-    }
-
-    friend void intrusive_ptr_release(const impl* ptr) noexcept {
-      ptr->deref_disposable();
-    }
   };
 
   using impl_ptr = intrusive_ptr<impl>;
 
   // -- constructors, destructors, and assignment operators --------------------
 
-  explicit action(impl_ptr ptr) noexcept : pimpl_(std::move(ptr)) {
-    // nop
-  }
+  explicit action(impl_ptr ptr) noexcept;
 
   action() noexcept = default;
 
@@ -72,36 +54,32 @@ public:
 
   action& operator=(const action&) noexcept = default;
 
+  action& operator=(std::nullptr_t) noexcept {
+    pimpl_ = nullptr;
+    return *this;
+  }
+
   // -- observers --------------------------------------------------------------
 
   [[nodiscard]] bool disposed() const {
-    return pimpl_->current_state() == state::disposed;
+    auto state = pimpl_->current_state();
+    return state == state::disposed || state == state::deferred_dispose;
   }
 
   [[nodiscard]] bool scheduled() const {
-    return pimpl_->current_state() == state::scheduled;
-  }
-
-  [[nodiscard]] bool invoked() const {
-    return pimpl_->current_state() == state::invoked;
+    return !disposed();
   }
 
   // -- mutators ---------------------------------------------------------------
 
-  /// Tries to transition from `scheduled` to `invoked`, running the body of the
-  /// internal function object as a side effect on success.
-  /// @return whether the transition took place.
-  transition run();
+  /// Triggers the action.
+  void run() {
+    pimpl_->run();
+  }
 
   /// Cancel the action if it has not been invoked yet.
   void dispose() {
     pimpl_->dispose();
-  }
-
-  /// Tries setting the state from `invoked` back to `scheduled`.
-  /// @return whether the transition took place.
-  transition reschedule() {
-    return pimpl_->reschedule();
   }
 
   // -- conversion -------------------------------------------------------------
@@ -131,71 +109,107 @@ public:
     return pimpl_;
   }
 
+  explicit operator bool() const noexcept {
+    return static_cast<bool>(pimpl_);
+  }
+
+  [[nodiscard]] bool operator!() const noexcept {
+    return !pimpl_;
+  }
+
 private:
   impl_ptr pimpl_;
 };
 
+/// Checks whether two actions are equal by comparing their pointers.
+inline bool operator==(const action& lhs, const action& rhs) noexcept {
+  return lhs.ptr() == rhs.ptr();
+}
+
+/// Checks whether two actions are not equal by comparing their pointers.
+inline bool operator!=(const action& lhs, const action& rhs) noexcept {
+  return !(lhs == rhs);
+}
+
 } // namespace caf
 namespace caf::detail {
 
-template <class F>
-struct default_action_impl : ref_counted, action::impl {
-  std::atomic<action::state> state_;
-  F f_;
-
-  default_action_impl(F fn, action::state init_state)
-    : state_(init_state), f_(std::move(fn)) {
+template <class F, bool IsSingleShot>
+class default_action_impl : public detail::atomic_ref_counted,
+                            public action::impl {
+public:
+  default_action_impl(F fn)
+    : state_(action::state::scheduled), f_(std::move(fn)) {
     // nop
   }
 
+  ~default_action_impl() {
+    // The action going out of scope can't be running or deferred dispose.
+    CAF_ASSERT(state_.load() != action::state::running);
+    CAF_ASSERT(state_.load() != action::state::deferred_dispose);
+    if (state_.load() == action::state::scheduled)
+      f_.~F();
+  }
+
   void dispose() override {
-    state_ = action::state::disposed;
+    // Try changing the state to disposed
+    for (;;) {
+      if (auto expected = state_.load(); expected == action::state::scheduled) {
+        if (state_.compare_exchange_weak(expected, action::state::disposed)) {
+          f_.~F();
+          return;
+        }
+      } else if (expected == action::state::running) {
+        if (state_.compare_exchange_weak(expected,
+                                         action::state::deferred_dispose))
+          return;
+      } else { // action::state::{deferred_dispose, disposed}
+        return;
+      }
+    }
   }
 
   bool disposed() const noexcept override {
-    return state_.load() == action::state::disposed;
+    auto current_state = state_.load();
+    return current_state == action::state::disposed
+           || current_state == action::state::deferred_dispose;
   }
 
   action::state current_state() const noexcept override {
     return state_.load();
   }
 
-  action::transition reschedule() override {
-    auto st = action::state::invoked;
-    for (;;) {
-      if (state_.compare_exchange_strong(st, action::state::scheduled))
-        return action::transition::success;
-      switch (st) {
-        case action::state::invoked:
-        case action::state::waiting:
-          break; // Try again.
-        case action::state::disposed:
-          return action::transition::disposed;
-        default:
-          return action::transition::failure;
-      }
-    }
+  void run_single_shot() {
+    // We can only run a scheduled action.
+    auto expected = action::state::scheduled;
+    if (!state_.compare_exchange_strong(expected, action::state::disposed))
+      return;
+    f_();
+    f_.~F();
   }
 
-  action::transition run() override {
-    auto st = state_.load();
-    switch (st) {
-      case action::state::scheduled:
-        f_();
-        // No retry. If this action has been disposed while running, we stay
-        // in the state 'disposed'. We assume that only one thread may try to
-        // transition from scheduled to invoked, while other threads may only
-        // dispose the action.
-        if (state_.compare_exchange_strong(st, action::state::invoked)) {
-          return action::transition::success;
-        } else {
-          CAF_ASSERT(st == action::state::disposed);
-          return action::transition::disposed;
-        }
-      case action::state::disposed:
-        return action::transition::disposed;
-      default:
-        return action::transition::failure;
+  void run_multi_shot() {
+    // We can only run a scheduled action.
+    auto expected = action::state::scheduled;
+    if (!state_.compare_exchange_strong(expected, action::state::running))
+      return;
+    f_();
+    // Once run, we can stay in the running state or switch to deferred dispose.
+    expected = action::state::running;
+    if (state_.compare_exchange_strong(expected, action::state::scheduled))
+      return;
+    CAF_ASSERT(expected == action::state::deferred_dispose);
+    [[maybe_unused]] auto ok
+      = state_.compare_exchange_strong(expected, action::state::disposed);
+    CAF_ASSERT(ok);
+    f_.~F();
+  }
+
+  void run() override {
+    if constexpr (IsSingleShot)
+      return run_single_shot();
+    else {
+      return run_multi_shot();
     }
   }
 
@@ -214,23 +228,32 @@ struct default_action_impl : ref_counted, action::impl {
   friend void intrusive_ptr_release(const default_action_impl* ptr) noexcept {
     ptr->deref();
   }
+
+private:
+  std::atomic<action::state> state_;
+  union {
+    F f_;
+  };
 };
 
 } // namespace caf::detail
 
 namespace caf {
 
-/// Convenience function for creating @ref action objects from a function
-/// object.
+/// Convenience function for creating an @ref action from a function object.
 /// @param f The body for the action.
-/// @param init_state either `action::state::scheduled` or
-///                   `action::state::waiting`.
 template <class F>
-action make_action(F f, action::state init_state = action::state::scheduled) {
-  CAF_ASSERT(init_state == action::state::scheduled
-             || init_state == action::state::waiting);
-  using impl_t = detail::default_action_impl<F>;
-  return action{make_counted<impl_t>(std::move(f), init_state)};
+action make_action(F f) {
+  using impl_t = detail::default_action_impl<F, false>;
+  return action{make_counted<impl_t>(std::move(f))};
+}
+
+/// Convenience function for creating an @ref action from a function object.
+/// @param f The body for the action.
+template <class F>
+action make_single_shot_action(F f) {
+  using impl_t = detail::default_action_impl<F, true>;
+  return action{make_counted<impl_t>(std::move(f))};
 }
 
 } // namespace caf

@@ -4,12 +4,12 @@
 
 #pragma once
 
+#include "caf/default_enum_inspect.hpp"
+#include "caf/detail/io_export.hpp"
+
 #include <cstdint>
 #include <string>
 #include <type_traits>
-
-#include "caf/default_enum_inspect.hpp"
-#include "caf/detail/io_export.hpp"
 
 namespace caf::io::basp {
 
@@ -64,7 +64,7 @@ enum class message_type : uint8_t {
 
 CAF_IO_EXPORT std::string to_string(message_type);
 
-CAF_IO_EXPORT bool from_string(string_view, message_type&);
+CAF_IO_EXPORT bool from_string(std::string_view, message_type&);
 
 CAF_IO_EXPORT bool from_integer(std::underlying_type_t<message_type>,
                                 message_type&);

@@ -4,14 +4,14 @@
 
 #pragma once
 
-#include <utility>
-
 #include "caf/detail/as_mutable_ref.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/error.hpp"
 #include "caf/inspector_access.hpp"
 #include "caf/sec.hpp"
-#include "caf/string_view.hpp"
+
+#include <string_view>
+#include <utility>
 
 namespace caf {
 
@@ -49,18 +49,33 @@ public:
     return std::move(err_);
   }
 
+  template <class... Ts>
+  void field_invariant_check_failed(std::string msg) {
+    emplace_error(sec::field_invariant_check_failed, std::move(msg));
+  }
+
+  template <class... Ts>
+  void field_value_synchronization_failed(std::string msg) {
+    emplace_error(sec::field_value_synchronization_failed, std::move(msg));
+  }
+
+  template <class... Ts>
+  void invalid_field_type(std::string msg) {
+    emplace_error(sec::invalid_field_type, std::move(msg));
+  }
+
   // -- DSL types for regular fields -------------------------------------------
 
   template <class T, class U>
   struct field_with_fallback_t {
-    string_view field_name;
+    std::string_view field_name;
     T* val;
     U fallback;
 
     template <class Inspector>
     bool operator()(Inspector& f) {
       auto is_present = [this] { return *val != fallback; };
-      auto get = [this] { return *val; };
+      auto get = [this]() -> decltype(auto) { return *val; };
       return detail::save_field(f, field_name, is_present, get);
     }
 
@@ -72,7 +87,7 @@ public:
 
   template <class T>
   struct field_t {
-    string_view field_name;
+    std::string_view field_name;
     T* val;
 
     template <class Inspector>
@@ -95,7 +110,7 @@ public:
 
   template <class T, class Get, class U>
   struct virt_field_with_fallback_t {
-    string_view field_name;
+    std::string_view field_name;
     Get get;
     U fallback;
 
@@ -113,7 +128,7 @@ public:
 
   template <class T, class Get>
   struct virt_field_t {
-    string_view field_name;
+    std::string_view field_name;
     Get get;
 
     template <class Inspector>
@@ -139,7 +154,7 @@ public:
 
   template <class T, class IsPresent, class Get>
   struct optional_virt_field_t {
-    string_view field_name;
+    std::string_view field_name;
     IsPresent is_present;
     Get get;
 
@@ -154,7 +169,7 @@ public:
   template <class Inspector, class SaveCallback>
   struct object_with_save_callback_t {
     type_id_t object_type;
-    string_view object_name;
+    std::string_view object_name;
     Inspector* f;
     SaveCallback save_callback;
 
@@ -163,7 +178,7 @@ public:
       using save_callback_result = decltype(save_callback());
       if (!(f->begin_object(object_type, object_name) && (fs(*f) && ...)))
         return false;
-      if constexpr (std::is_same<save_callback_result, bool>::value) {
+      if constexpr (std::is_same_v<save_callback_result, bool>) {
         if (!save_callback()) {
           f->set_error(sec::save_callback_failed);
           return false;
@@ -177,7 +192,7 @@ public:
       return f->end_object();
     }
 
-    auto pretty_name(string_view name) && {
+    auto pretty_name(std::string_view name) && {
       return object_t{name, f};
     }
 
@@ -190,7 +205,7 @@ public:
   template <class Inspector>
   struct object_t {
     type_id_t object_type;
-    string_view object_name;
+    std::string_view object_name;
     Inspector* f;
 
     template <class... Fields>
@@ -200,7 +215,7 @@ public:
              && f->end_object();
     }
 
-    auto pretty_name(string_view name) && {
+    auto pretty_name(std::string_view name) && {
       return object_t{object_type, name, f};
     }
 
@@ -223,19 +238,20 @@ public:
   // -- factory functions ------------------------------------------------------
 
   template <class T>
-  static auto field(string_view name, T& x) {
-    static_assert(!std::is_const<T>::value);
+  static auto field(std::string_view name, T& x) {
+    static_assert(!std::is_const_v<T>);
     return field_t<T>{name, std::addressof(x)};
   }
 
   template <class Get, class Set>
-  static auto field(string_view name, Get get, Set&&) {
+  static auto field(std::string_view name, Get get, Set&&) {
     using field_type = std::decay_t<decltype(get())>;
     return virt_field_t<field_type, Get>{name, get};
   }
 
   template <class IsPresent, class Get, class... Ts>
-  static auto field(string_view name, IsPresent is_present, Get get, Ts&&...) {
+  static auto
+  field(std::string_view name, IsPresent is_present, Get get, Ts&&...) {
     using field_type = std::decay_t<decltype(get())>;
     return optional_virt_field_t<field_type, IsPresent, Get>{
       name,

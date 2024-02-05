@@ -4,11 +4,6 @@
 
 #pragma once
 
-#include <array>
-#include <cstdint>
-#include <functional>
-#include <string>
-
 #include "caf/detail/comparable.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
@@ -18,7 +13,11 @@
 #include "caf/none.hpp"
 #include "caf/ref_counted.hpp"
 #include "caf/uri.hpp"
-#include "caf/variant.hpp"
+
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <string>
 
 namespace caf {
 
@@ -51,7 +50,7 @@ public:
 
   static bool valid(const host_id_type& x) noexcept;
 
-  static bool can_parse(string_view str) noexcept;
+  static bool can_parse(std::string_view str) noexcept;
 
   static node_id local(const actor_system_config&);
 
@@ -74,7 +73,7 @@ class CAF_CORE_EXPORT node_id_data : public ref_counted {
 public:
   // -- member types -----------------------------------------------------------
 
-  using variant_type = variant<uri, hashed_node_id>;
+  using variant_type = std::variant<uri, hashed_node_id>;
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -153,16 +152,14 @@ public:
   void swap(node_id& other) noexcept;
 
   /// Returns whether `parse` would produce a valid node ID.
-  static bool can_parse(string_view str) noexcept;
+  static bool can_parse(std::string_view str) noexcept;
 
   // -- friend functions -------------------------------------------------------
 
   template <class Inspector>
   friend bool inspect(Inspector& f, node_id& x) {
     auto is_present = [&x] { return x.data_ != nullptr; };
-    auto get = [&]() -> const auto& {
-      return x.data_->content;
-    };
+    auto get = [&]() -> const auto& { return x.data_->content; };
     auto reset = [&x] { x.data_.reset(); };
     auto set = [&x](node_id_data::variant_type&& val) {
       if (x.data_ && x.data_->unique())
@@ -203,7 +200,7 @@ private:
 /// Returns whether `x` contains an URI.
 /// @relates node_id
 inline bool wraps_uri(const node_id& x) noexcept {
-  return x && holds_alternative<uri>(x->content);
+  return x && std::holds_alternative<uri>(x->content);
 }
 
 /// @relates node_id
@@ -279,11 +276,11 @@ CAF_CORE_EXPORT node_id make_node_id(
 /// @param process_id System-wide unique process identifier.
 /// @param host_hash Unique node ID as hexadecimal string representation.
 /// @relates node_id
-CAF_CORE_EXPORT optional<node_id> make_node_id(uint32_t process_id,
-                                               string_view host_hash);
+CAF_CORE_EXPORT std::optional<node_id> make_node_id(uint32_t process_id,
+                                                    std::string_view host_hash);
 
 /// @relates node_id
-CAF_CORE_EXPORT error parse(string_view str, node_id& dest);
+CAF_CORE_EXPORT error parse(std::string_view str, node_id& dest);
 
 } // namespace caf
 

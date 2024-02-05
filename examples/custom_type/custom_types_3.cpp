@@ -1,10 +1,10 @@
 // Showcases custom message types that cannot provide
 // friend access to the inspect() function.
 
+#include "caf/all.hpp"
+
 #include <iostream>
 #include <utility>
-
-#include "caf/all.hpp"
 
 class foo;
 
@@ -74,7 +74,7 @@ bool inspect(Inspector& f, foo& x) {
 
 behavior testee(event_based_actor* self) {
   return {
-    [=](const foo& x) { aout(self) << deep_to_string(x) << endl; },
+    [self](const foo& x) { aout(self).println("{}", x); },
   };
 }
 

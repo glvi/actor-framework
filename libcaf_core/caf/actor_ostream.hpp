@@ -6,8 +6,13 @@
 
 #include "caf/actor.hpp"
 #include "caf/deep_to_string.hpp"
+#include "caf/detail/actor_local_printer.hpp"
 #include "caf/detail/core_export.hpp"
+#include "caf/detail/format.hpp"
 #include "caf/typed_actor_pointer.hpp"
+
+#include <string>
+#include <string_view>
 
 namespace caf {
 
@@ -38,27 +43,46 @@ public:
     // nop
   }
 
+  /// Adds a new line to the actor output stream.
+  template <class... Args>
+  actor_ostream& println(std::string_view fmt, Args&&... args) {
+    auto buf = detail::format(fmt, std::forward<Args>(args)...);
+    buf.push_back('\n');
+    printer_->write(std::move(buf));
+    return *this;
+  }
+
   /// Writes `arg` to the buffer allocated for the calling actor.
-  actor_ostream& write(std::string arg);
+  actor_ostream& write(std::string arg) {
+    printer_->write(std::move(arg));
+    return *this;
+  }
 
   /// Flushes the buffer allocated for the calling actor.
-  actor_ostream& flush();
+  actor_ostream& flush() {
+    printer_->flush();
+    return *this;
+  }
 
   /// Redirects all further output from `self` to `file_name`.
-  static void redirect(abstract_actor* self, std::string fn, int flags = 0);
+  [[deprecated]] static void redirect(abstract_actor* self, std::string fn,
+                                      int flags = 0);
 
   /// Redirects all further output from any actor that did not
   /// redirect its output to `fname`.
-  static void redirect_all(actor_system& sys, std::string fn, int flags = 0);
+  [[deprecated]] static void redirect_all(actor_system& sys, std::string fn,
+                                          int flags = 0);
 
   /// Writes `arg` to the buffer allocated for the calling actor.
   actor_ostream& operator<<(const char* arg) {
-    return write(arg);
+    printer_->write(arg);
+    return *this;
   }
 
   /// Writes `arg` to the buffer allocated for the calling actor.
   actor_ostream& operator<<(std::string arg) {
-    return write(std::move(arg));
+    printer_->write(std::move(arg));
+    return *this;
   }
 
   /// Writes `to_string(arg)` to the buffer allocated for the calling actor,
@@ -66,7 +90,8 @@ public:
   /// the argument.
   template <class T>
   actor_ostream& operator<<(const T& arg) {
-    return write(deep_to_string(arg));
+    printer_->write(deep_to_string(arg));
+    return *this;
   }
 
   /// Apply `f` to `*this`.
@@ -75,10 +100,7 @@ public:
   }
 
 private:
-  void init(abstract_actor*);
-
-  actor_id self_;
-  actor printer_;
+  detail::actor_local_printer_ptr printer_;
 };
 
 /// Convenience factory function for creating an actor output stream.

@@ -4,6 +4,15 @@
 
 #pragma once
 
+#include "caf/config.hpp"
+#include "caf/deep_to_string.hpp"
+#include "caf/detail/arg_wrapper.hpp"
+#include "caf/detail/type_traits.hpp"
+#include "caf/fwd.hpp"
+#include "caf/logger.hpp"
+#include "caf/raise_error.hpp"
+#include "caf/term.hpp"
+
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -15,19 +24,8 @@
 #include <thread>
 #include <vector>
 
-#include "caf/config.hpp"
-#include "caf/deep_to_string.hpp"
-#include "caf/fwd.hpp"
-#include "caf/logger.hpp"
-#include "caf/optional.hpp"
-#include "caf/raise_error.hpp"
-#include "caf/term.hpp"
-#include "caf/variant.hpp"
-
-#include "caf/detail/arg_wrapper.hpp"
-#include "caf/detail/type_traits.hpp"
-
 namespace caf::test {
+inline namespace legacy {
 
 #ifdef CAF_ENABLE_EXCEPTIONS
 
@@ -68,13 +66,14 @@ struct compare_visitor {
 struct equality_operator {
   static constexpr bool default_value = false;
 
-  template <class T, class U,
-            detail::enable_if_t<((std::is_floating_point<T>::value
-                                  && std::is_convertible<U, double>::value)
-                                 || (std::is_floating_point<U>::value
-                                     && std::is_convertible<T, double>::value))
-                                  && detail::is_comparable<T, U>::value,
-                                int> = 0>
+  template <
+    class T, class U,
+    std::enable_if_t<
+      ((std::is_floating_point_v<T> && std::is_convertible_v<U, double>)
+       || (std::is_floating_point_v<U> && std::is_convertible_v<T, double>) )
+        && detail::is_comparable_v<T, U>,
+      int>
+    = 0>
   bool operator()(const T& t, const U& u) const {
     auto x = static_cast<long double>(t);
     auto y = static_cast<long double>(u);
@@ -83,20 +82,20 @@ struct equality_operator {
     return dif <= max * 1e-5l;
   }
 
-  template <class T, class U,
-            detail::enable_if_t<!((std::is_floating_point<T>::value
-                                   && std::is_convertible<U, double>::value)
-                                  || (std::is_floating_point<U>::value
-                                      && std::is_convertible<T, double>::value))
-                                  && detail::is_comparable<T, U>::value,
-                                int> = 0>
+  template <
+    class T, class U,
+    std::enable_if_t<
+      !((std::is_floating_point_v<T> && std::is_convertible_v<U, double>)
+        || (std::is_floating_point_v<U> && std::is_convertible_v<T, double>) )
+        && detail::is_comparable_v<T, U>,
+      int>
+    = 0>
   bool operator()(const T& x, const U& y) const {
     return x == y;
   }
 
-  template <
-    class T, class U,
-    typename std::enable_if<!detail::is_comparable<T, U>::value, int>::type = 0>
+  template <class T, class U,
+            std::enable_if_t<!detail::is_comparable_v<T, U>> = 0>
   bool operator()(const T&, const U&) const {
     return default_value;
   }
@@ -106,10 +105,10 @@ struct inequality_operator {
   static constexpr bool default_value = true;
 
   template <class T, class U,
-            typename std::enable_if<(std::is_floating_point<T>::value
-                                     || std::is_floating_point<U>::value)
-                                      && detail::is_comparable<T, U>::value,
-                                    int>::type
+            std::enable_if_t<
+              (std::is_floating_point_v<T>
+               || std::is_floating_point_v<U>) &&detail::is_comparable_v<T, U>,
+              int>
             = 0>
   bool operator()(const T& x, const U& y) const {
     equality_operator f;
@@ -117,18 +116,17 @@ struct inequality_operator {
   }
 
   template <class T, class U,
-            typename std::enable_if<!std::is_floating_point<T>::value
-                                      && !std::is_floating_point<U>::value
-                                      && detail::is_comparable<T, U>::value,
-                                    int>::type
+            std::enable_if_t<!std::is_floating_point_v<T>
+                               && !std::is_floating_point_v<U>
+                               && detail::is_comparable_v<T, U>,
+                             int>
             = 0>
   bool operator()(const T& x, const U& y) const {
     return x != y;
   }
 
-  template <
-    class T, class U,
-    typename std::enable_if<!detail::is_comparable<T, U>::value, int>::type = 0>
+  template <class T, class U,
+            std::enable_if_t<!detail::is_comparable_v<T, U>> = 0>
   bool operator()(const T&, const U&) const {
     return default_value;
   }
@@ -148,42 +146,10 @@ struct comparison_unbox_helper {
 template <class Operator>
 class comparison {
 public:
-  // -- default case -----------------------------------------------------------
-
   template <class T, class U>
   bool operator()(const T& x, const U& y) const {
-    std::integral_constant<bool, SumType<T>()> lhs_is_sum_type;
-    std::integral_constant<bool, SumType<U>()> rhs_is_sum_type;
-    return cmp(x, y, lhs_is_sum_type, rhs_is_sum_type);
-  }
-
-private:
-  // -- automagic unboxing of sum types ----------------------------------------
-
-  template <class T, class U>
-  bool cmp(const T& x, const U& y, std::false_type, std::false_type) const {
     Operator f;
     return f(x, y);
-  }
-
-  template <class T, class U>
-  bool cmp(const T& x, const U& y, std::true_type, std::false_type) const {
-    Operator f;
-    auto inner_x = caf::get_if<U>(&x);
-    return inner_x ? f(*inner_x, y) : Operator::default_value;
-  }
-
-  template <class T, class U>
-  bool cmp(const T& x, const U& y, std::false_type, std::true_type) const {
-    Operator f;
-    auto inner_y = caf::get_if<T>(&y);
-    return inner_y ? f(x, *inner_y) : Operator::default_value;
-  }
-
-  template <class T, class U>
-  bool cmp(const T& x, const U& y, std::true_type, std::true_type) const {
-    comparison_unbox_helper<comparison, U> f{*this, y};
-    return visit(f, x);
   }
 };
 
@@ -324,11 +290,10 @@ public:
         return y;
       }
     };
-    using fwd =
-      typename std::conditional<std::is_same<char, T>::value
-                                  || std::is_convertible<T, std::string>::value
-                                  || std::is_same<caf::term, T>::value,
-                                simple_fwd_t, deep_to_string_t>::type;
+    using fwd = std::conditional_t<std::is_same_v<char, T>
+                                     || std::is_convertible_v<T, std::string>
+                                     || std::is_same_v<caf::term, T>,
+                                   simple_fwd_t, deep_to_string_t>;
     fwd f;
     auto y = f(x);
     if (lvl <= level_console_)
@@ -365,15 +330,15 @@ public:
     level lvl_;
   };
 
-  auto levels() {
+  auto levels() noexcept {
     return std::make_pair(level_console_, level_file_);
   }
 
-  void levels(std::pair<level, level> values) {
+  void levels(std::pair<level, level> values) noexcept {
     std::tie(level_console_, level_file_) = values;
   }
 
-  void levels(level console_lvl, level file_lvl) {
+  void levels(level console_lvl, level file_lvl) noexcept {
     level_console_ = console_lvl;
     level_file_ = file_lvl;
   }
@@ -525,6 +490,7 @@ void require_bin(bool result, const char* file, size_t line, const char* expr,
                  const std::string& lhs, const std::string& rhs);
 
 } // namespace detail
+} // namespace legacy
 } // namespace caf::test
 
 // on the global namespace so that it can hidden via namespace-scoping

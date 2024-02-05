@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include <cstdint>
-#include <vector>
+#include "caf/io/basp/header.hpp"
+#include "caf/io/middleman.hpp"
 
 #include "caf/actor_control_block.hpp"
 #include "caf/actor_proxy.hpp"
@@ -15,14 +15,16 @@
 #include "caf/detail/scope_guard.hpp"
 #include "caf/detail/sync_request_bouncer.hpp"
 #include "caf/execution_unit.hpp"
-#include "caf/io/basp/header.hpp"
-#include "caf/io/middleman.hpp"
 #include "caf/logger.hpp"
+#include "caf/mailbox_element.hpp"
 #include "caf/message.hpp"
 #include "caf/message_id.hpp"
 #include "caf/node_id.hpp"
 #include "caf/telemetry/histogram.hpp"
 #include "caf/telemetry/timer.hpp"
+
+#include <cstdint>
+#include <vector>
 
 namespace caf::io::basp {
 
@@ -36,13 +38,12 @@ public:
     auto& sys = *dref.system_;
     strong_actor_ptr src;
     strong_actor_ptr dst;
-    std::vector<strong_actor_ptr> stages;
     message msg;
     auto mid = make_message_id(dref.hdr_.operation_data);
     binary_deserializer source{ctx, dref.payload_};
     // Make sure to drop the message in case we return abnormally.
-    auto guard
-      = detail::make_scope_guard([&] { dref.queue_->drop(ctx, dref.msg_id_); });
+    auto guard = detail::scope_guard{
+      [&]() noexcept { dref.queue_->drop(ctx, dref.msg_id_); }};
     // Registry setup.
     dref.proxies_->set_last_hop(&dref.last_hop_);
     // Get the local receiver.
@@ -94,14 +95,13 @@ public:
       return;
     }
     // Get the remainder of the message.
-    if (!source.apply(stages)) {
-      CAF_LOG_ERROR("failed to read stages:" << source.get_error());
-      return;
-    }
     auto& mm_metrics = ctx->system().middleman().metric_singletons;
     auto t0 = telemetry::timer::clock_type::now();
     if (!source.apply(msg)) {
       CAF_LOG_ERROR("failed to read message content:" << source.get_error());
+      auto ptr = make_mailbox_element(nullptr, mid.response_id(),
+                                      make_error(sec::malformed_message));
+      src->enqueue(std::move(ptr), nullptr);
       return;
     }
     telemetry::timer::observe(mm_metrics.deserialization_time, t0);
@@ -131,7 +131,7 @@ public:
     guard.disable();
     dref.queue_->push(ctx, dref.msg_id_, std::move(dst),
                       make_mailbox_element(std::move(src), mid,
-                                           std::move(stages), std::move(msg)));
+                                           std::move(msg)));
   }
 };
 

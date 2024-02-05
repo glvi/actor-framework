@@ -7,6 +7,9 @@
 #include "caf/inspector_access.hpp"
 #include "caf/save_inspector.hpp"
 
+#include <string_view>
+#include <tuple>
+
 namespace caf {
 
 template <class Subtype>
@@ -24,8 +27,13 @@ public:
                                     type_name_or_anonymous<T>(), dptr()};
   }
 
-  constexpr auto virtual_object(string_view type_name) noexcept {
+  constexpr auto virtual_object(std::string_view type_name) noexcept {
     return super::object_t<Subtype>{invalid_type_id, type_name, dptr()};
+  }
+
+  template <class T>
+  bool begin_object_t() {
+    return dref().begin_object(type_id_v<T>, caf::type_name_v<T>);
   }
 
   template <class T>
@@ -36,7 +44,7 @@ public:
       return false;
     for (auto&& val : xs) {
       using found_type = std::decay_t<decltype(val)>;
-      if constexpr (std::is_same<found_type, value_type>::value) {
+      if constexpr (std::is_same_v<found_type, value_type>) {
         if (!detail::save(dref(), val))
           return false;
       } else {
@@ -65,6 +73,7 @@ public:
 
   template <class T, size_t... Is>
   bool tuple(const T& xs, std::index_sequence<Is...>) {
+    using std::get;
     return dref().begin_tuple(sizeof...(Is))             //
            && (detail::save(dref(), get<Is>(xs)) && ...) //
            && dref().end_tuple();
@@ -72,7 +81,7 @@ public:
 
   template <class T>
   bool tuple(const T& xs) {
-    return tuple(xs, std::make_index_sequence<std::tuple_size<T>::value>{});
+    return tuple(xs, std::make_index_sequence<std::tuple_size_v<T>>{});
   }
 
   template <class T, size_t N>

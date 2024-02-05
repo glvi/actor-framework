@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <vector>
-
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/implicit_conversions.hpp"
 #include "caf/detail/message_builder_element.hpp"
@@ -13,6 +11,8 @@
 #include "caf/detail/type_id_list_builder.hpp"
 #include "caf/fwd.hpp"
 #include "caf/message.hpp"
+
+#include <vector>
 
 namespace caf {
 
@@ -45,12 +45,12 @@ public:
   /// Adds `x` to the elements of the buffer.
   template <class T>
   message_builder& append(T&& x) {
-    using namespace detail;
-    using value_type = strip_and_convert_t<T>;
-    static_assert(sendable<value_type>);
-    storage_size_ += padded_size_v<value_type>;
+    using value_type = detail::strip_and_convert_t<T>;
+    static_assert(detail::sendable<value_type>);
+    using wrapper_type = detail::message_builder_element_impl<value_type>;
+    storage_size_ += detail::padded_size_v<value_type>;
     types_.push_back(type_id_v<value_type>);
-    elements_.emplace_back(make_message_builder_element(std::forward<T>(x)));
+    elements_.emplace_back(std::make_unique<wrapper_type>(std::forward<T>(x)));
     return *this;
   }
 

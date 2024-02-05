@@ -4,53 +4,43 @@
 
 #pragma once
 
-#include <map>
-#include <vector>
-#include <type_traits>
-
-#include "caf/none.hpp"
-#include "caf/config.hpp"
-#include "caf/make_counted.hpp"
-#include "caf/extend.hpp"
-#include "caf/typed_actor.hpp"
-#include "caf/local_actor.hpp"
-
-#include "caf/logger.hpp"
-#include "caf/detail/scope_guard.hpp"
-#include "caf/actor_registry.hpp"
-#include "caf/detail/sync_request_bouncer.hpp"
-
-#include "caf/mixin/sender.hpp"
-#include "caf/mixin/requester.hpp"
-#include "caf/mixin/behavior_changer.hpp"
-
+#include "caf/io/abstract_broker.hpp"
 #include "caf/io/fwd.hpp"
 #include "caf/io/middleman.hpp"
-#include "caf/io/abstract_broker.hpp"
 
-namespace caf {
+#include "caf/actor_registry.hpp"
+#include "caf/config.hpp"
+#include "caf/detail/scope_guard.hpp"
+#include "caf/detail/sync_request_bouncer.hpp"
+#include "caf/extend.hpp"
+#include "caf/keep_behavior.hpp"
+#include "caf/local_actor.hpp"
+#include "caf/logger.hpp"
+#include "caf/make_counted.hpp"
+#include "caf/mixin/requester.hpp"
+#include "caf/mixin/sender.hpp"
+#include "caf/none.hpp"
+#include "caf/typed_actor.hpp"
 
-template <class... Sigs>
-class behavior_type_of<io::typed_broker<Sigs...>> {
-public:
-  using type = typed_behavior<Sigs...>;
-};
+#include <map>
+#include <type_traits>
+#include <vector>
 
-namespace io {
+namespace caf::io {
 
 /// Denotes a minimal "client" broker managing one or more connection
 /// handles by reacting to `new_data_msg` and `connection_closed_msg`.
 /// @relates typed_broker
-using connection_handler = typed_actor<reacts_to<new_data_msg>,
-                                       reacts_to<connection_closed_msg>>;
+using connection_handler = typed_actor<result<void>(new_data_msg),
+                                       result<void>(connection_closed_msg)>;
 
 /// Denotes a minimal "server" broker managing one or more accept
 /// handles by reacting to `new_connection_msg` and `acceptor_closed_msg`.
 /// The accept handler usually calls `self->fork(...)` when receiving
 /// a `new_connection_msg`.
 /// @relates typed_broker
-using accept_handler = typed_actor<reacts_to<new_connection_msg>,
-                                   reacts_to<acceptor_closed_msg>>;
+using accept_handler = typed_actor<result<void>(new_connection_msg),
+                                   result<void>(acceptor_closed_msg)>;
 
 /// A typed broker mediates between actor systems and other
 /// components in the network.
@@ -60,8 +50,7 @@ class typed_broker
   // clang-format off
   : public extend<abstract_broker, typed_broker<Sigs...>>::template
            with<mixin::sender,
-                mixin::requester,
-                mixin::behavior_changer>,
+                mixin::requester>,
     public statically_typed_actor_base {
   // clang-format on
 public:
@@ -71,8 +60,9 @@ public:
 
   using behavior_type = typed_behavior<Sigs...>;
 
-  using super = typename extend<abstract_broker, typed_broker<Sigs...>>::
-    template with<mixin::sender, mixin::requester, mixin::behavior_changer>;
+  using super =
+    typename extend<abstract_broker, typed_broker<Sigs...>>::template with<
+      mixin::sender, mixin::requester>;
 
   /// @cond PRIVATE
 
@@ -88,7 +78,7 @@ public:
     this->init_broker();
     auto bhvr = make_behavior();
     CAF_LOG_DEBUG_IF(!bhvr, "make_behavior() did not return a behavior:"
-                            << CAF_ARG2("alive", this->alive()));
+                              << CAF_ARG2("alive", this->alive()));
     if (bhvr) {
       // make_behavior() did return a behavior instead of using become()
       CAF_LOG_DEBUG("make_behavior() did return a valid behavior");
@@ -97,62 +87,76 @@ public:
   }
 
   template <class F, class... Ts>
-  typename infer_handle_from_fun<F>::type
-  fork(F fun, connection_handle hdl, Ts&&... xs) {
+  infer_handle_from_fun_t<F> fork(F fun, connection_handle hdl, Ts&&... xs) {
     CAF_ASSERT(this->context() != nullptr);
     auto sptr = this->take(hdl);
     CAF_ASSERT(sptr->hdl() == hdl);
     using impl = typename infer_handle_from_fun<F>::impl;
-    static_assert(std::is_convertible<
-                    typename impl::actor_hdl,
-                    connection_handler
-                  >::value,
-                  "Cannot fork: new broker misses required handlers");
+    static_assert(
+      std::is_convertible<typename impl::actor_hdl, connection_handler>::value,
+      "Cannot fork: new broker misses required handlers");
     actor_config cfg{this->context()};
     detail::init_fun_factory<impl, F> fac;
     cfg.init_fun = fac(std::move(fun), hdl, std::forward<Ts>(xs)...);
     using impl = infer_impl_from_fun_t<F>;
-    static constexpr bool spawnable = detail::spawnable<F, impl, decltype(hdl),
-                                                        Ts...>();
+    static constexpr bool spawnable
+      = detail::spawnable<F, impl, decltype(hdl), Ts...>();
     static_assert(spawnable,
                   "cannot spawn function-based broker with given arguments");
-    detail::bool_token<spawnable> enabled;
-    auto res = this->system().spawn_functor(enabled, cfg, fun, hdl,
+    auto res = this->system().spawn_functor(std::bool_constant<spawnable>{},
+                                            cfg, fun, hdl,
                                             std::forward<Ts>(xs)...);
     auto forked = static_cast<impl*>(actor_cast<abstract_actor*>(res));
     forked->move_scribe(std::move(sptr));
     return res;
   }
 
-  expected<connection_handle> add_tcp_scribe(const std::string& host, uint16_t port) {
-    static_assert(std::is_convertible<actor_hdl, connection_handler>::value,
+  expected<connection_handle> add_tcp_scribe(const std::string& host,
+                                             uint16_t port) {
+    static_assert(std::is_convertible_v<actor_hdl, connection_handler>,
                   "Cannot add scribe: broker misses required handlers");
     return super::add_tcp_scribe(host, port);
   }
 
   connection_handle add_tcp_scribe(network::native_socket fd) {
-    static_assert(std::is_convertible<actor_hdl, connection_handler>::value,
+    static_assert(std::is_convertible_v<actor_hdl, connection_handler>,
                   "Cannot add scribe: broker misses required handlers");
     return super::add_tcp_scribe(fd);
   }
 
   expected<std::pair<accept_handle, uint16_t>>
-  add_tcp_doorman(uint16_t port = 0,
-                  const char* in = nullptr,
+  add_tcp_doorman(uint16_t port = 0, const char* in = nullptr,
                   bool reuse_addr = false) {
-    static_assert(std::is_convertible<actor_hdl, accept_handler>::value,
+    static_assert(std::is_convertible_v<actor_hdl, accept_handler>,
                   "Cannot add doorman: broker misses required handlers");
     return super::add_tcp_doorman(port, in, reuse_addr);
   }
 
   expected<accept_handle> add_tcp_doorman(network::native_socket fd) {
-    static_assert(std::is_convertible<actor_hdl, accept_handler>::value,
+    static_assert(std::is_convertible_v<actor_hdl, accept_handler>,
                   "Cannot add doorman: broker misses required handlers");
     return super::add_tcp_doorman(fd);
   }
 
   explicit typed_broker(actor_config& cfg) : super(cfg) {
     // nop
+  }
+
+  /// @copydoc event_based_actor::become
+  template <class T, class... Ts>
+  void become(T&& arg, Ts&&... args) {
+    if constexpr (std::is_same_v<keep_behavior_t, std::decay_t<T>>) {
+      static_assert(sizeof...(Ts) > 0);
+      this->do_become(behavior_type{std::forward<Ts>(args)...}.unbox(), false);
+    } else {
+      behavior_type bhv{std::forward<T>(arg), std::forward<Ts>(args)...};
+      this->do_become(std::move(bhv).unbox(), true);
+    }
+  }
+
+  /// @copydoc event_based_actor::unbecome
+  void unbecome() {
+    this->bhvr_stack_.pop_back();
   }
 
 protected:
@@ -167,6 +171,4 @@ protected:
   }
 };
 
-} // namespace io
-} // namespace caf
-
+} // namespace caf::io

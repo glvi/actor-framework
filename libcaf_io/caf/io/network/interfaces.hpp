@@ -4,17 +4,18 @@
 
 #pragma once
 
+#include "caf/io/network/ip_endpoint.hpp"
+#include "caf/io/network/protocol.hpp"
+
+#include "caf/detail/io_export.hpp"
+
 #include <functional>
 #include <initializer_list>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "caf/detail/io_export.hpp"
-#include "caf/io/network/ip_endpoint.hpp"
-#include "caf/io/network/protocol.hpp"
-#include "caf/optional.hpp"
 
 namespace caf::io::network {
 
@@ -49,23 +50,23 @@ public:
                  bool include_localhost = true);
 
   /// Returns all addresses for all devices for given protocol.
-  static std::vector<std::string>
-  list_addresses(protocol::network proc, bool include_localhost = true);
+  static std::vector<std::string> list_addresses(protocol::network proc,
+                                                 bool include_localhost = true);
 
   /// Returns a native IPv4 or IPv6 translation of `host`.
-  static optional<std::pair<std::string, protocol::network>>
+  static std::optional<std::pair<std::string, protocol::network>>
   native_address(const std::string& host,
-                 optional<protocol::network> preferred = none);
+                 std::optional<protocol::network> preferred = std::nullopt);
 
   /// Returns the host and protocol available for a local server socket
   static std::vector<std::pair<std::string, protocol::network>>
   server_address(uint16_t port, const char* host,
-                 optional<protocol::network> preferred = none);
+                 std::optional<protocol::network> preferred = std::nullopt);
 
   /// Writes datagram endpoint info for `host`:`port` into ep
   static bool
   get_endpoint(const std::string& host, uint16_t port, ip_endpoint& ep,
-               optional<protocol::network> preferred = none);
+               std::optional<protocol::network> preferred = std::nullopt);
 };
 
 } // namespace caf::io::network

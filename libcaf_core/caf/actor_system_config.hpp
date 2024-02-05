@@ -4,14 +4,6 @@
 
 #pragma once
 
-#include <atomic>
-#include <functional>
-#include <memory>
-#include <string>
-#include <type_traits>
-#include <typeindex>
-#include <unordered_map>
-
 #include "caf/actor_factory.hpp"
 #include "caf/actor_profiler.hpp"
 #include "caf/config_option.hpp"
@@ -19,21 +11,35 @@
 #include "caf/config_option_set.hpp"
 #include "caf/config_value.hpp"
 #include "caf/detail/core_export.hpp"
-#include "caf/detail/safe_equal.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/dictionary.hpp"
 #include "caf/fwd.hpp"
 #include "caf/is_typed_actor.hpp"
+#include "caf/raise_error.hpp"
 #include "caf/settings.hpp"
-#include "caf/stream.hpp"
 #include "caf/thread_hook.hpp"
+
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <typeindex>
+#include <unordered_map>
 
 namespace caf {
 
 /// Configures an `actor_system` on startup.
 class CAF_CORE_EXPORT actor_system_config {
 public:
+  // -- friends ----------------------------------------------------------------
+
+  friend class actor_system;
+
   // -- member types -----------------------------------------------------------
+
+  using logger_factory_t = std::function<intrusive_ptr<logger>(actor_system&)>;
 
   using hook_factory = std::function<io::hook*(actor_system&)>;
 
@@ -41,20 +47,13 @@ public:
 
   using thread_hooks = std::vector<std::unique_ptr<thread_hook>>;
 
-  template <class K, class V>
-  using hash_map = std::unordered_map<K, V>;
-
   using module_factory = std::function<actor_system::module*(actor_system&)>;
 
   using module_factory_vector = std::vector<module_factory>;
 
-  using actor_factory_map = hash_map<std::string, actor_factory>;
+  using actor_factory_map = std::unordered_map<std::string, actor_factory>;
 
-  using portable_name_map = hash_map<std::type_index, std::string>;
-
-  using group_module_factory = std::function<group_module*()>;
-
-  using group_module_factory_vector = std::vector<group_module_factory>;
+  using portable_name_map = std::unordered_map<std::type_index, std::string>;
 
   using config_map = dictionary<config_value::dictionary>;
 
@@ -84,7 +83,7 @@ public:
 
   /// Sets a config by using its name `config_name` to `config_value`.
   template <class T>
-  actor_system_config& set(string_view name, T&& value) {
+  actor_system_config& set(std::string_view name, T&& value) {
     return set_impl(name, config_value{std::forward<T>(value)});
   }
 
@@ -117,7 +116,7 @@ public:
   /// @experimental
   template <class T, class... Ts>
   actor_system_config& add_actor_type(std::string name) {
-    using handle = typename infer_handle_from_class<T>::type;
+    using handle = infer_handle_from_class_t<T>;
     static_assert(detail::is_complete<type_id<handle>>);
     return add_actor_factory(std::move(name), make_actor_factory<T, Ts...>());
   }
@@ -127,7 +126,7 @@ public:
   /// @experimental
   template <class F>
   actor_system_config& add_actor_type(std::string name, F f) {
-    using handle = typename infer_handle_from_fun<F>::type;
+    using handle = infer_handle_from_fun_t<F>;
     static_assert(detail::is_complete<type_id<handle>>);
     return add_actor_factory(std::move(name), make_actor_factory(std::move(f)));
   }
@@ -164,12 +163,30 @@ public:
     return *this;
   }
 
+  /// Overrides the default logger factory.
+  /// @pre `new_factory != nullptr`
+  actor_system_config& logger_factory(logger_factory_t new_factory) {
+    logger_factory_ = std::move(new_factory);
+    return *this;
+  }
+
+  /// Checks whether this config contains a custom logger factory.
+  bool has_logger_factory() const noexcept {
+    return logger_factory_ != nullptr;
+  }
+
+  // -- factories --------------------------------------------------------------
+
+  /// Creates a new logger for `sys`. Either uses the user-defined logger
+  /// factory or the default logger factory.
+  intrusive_ptr<logger> make_logger(actor_system& sys) const;
+
   // -- parser and CLI state ---------------------------------------------------
 
   /// Stores whether the help text was printed. If set to `true`, the
   /// application should not use this config to initialize an `actor_system`
   /// and instead return from `main` immediately.
-  bool cli_helptext_printed;
+  bool cli_helptext_printed = false;
 
   /// Stores the content of `argv[0]` from the arguments passed to `parse`.
   std::string program_name;
@@ -188,21 +205,13 @@ public:
   // -- caf-run parameters -----------------------------------------------------
 
   /// Stores whether this node was started in slave mode.
-  bool slave_mode;
+  bool slave_mode = false;
 
   /// Name of this node when started in slave mode.
   std::string slave_name;
 
   /// Credentials for connecting to the bootstrap node.
   std::string bootstrap_node;
-
-  // -- stream parameters ------------------------------------------------------
-
-  /// @private
-  timespan stream_max_batch_delay;
-
-  /// @private
-  timespan stream_credit_round_interval;
 
   // -- OpenSSL parameters -----------------------------------------------------
 
@@ -217,7 +226,6 @@ public:
   actor_factory_map actor_factories;
   module_factory_vector module_factories;
   hook_factory_vector hook_factories;
-  group_module_factory_vector group_module_factories;
 
   // -- hooks ------------------------------------------------------------------
 
@@ -244,7 +252,7 @@ public:
 
   // -- utility for caf-run ----------------------------------------------------
 
-  int (*slave_mode_fun)(actor_system&, const actor_system_config&);
+  int (*slave_mode_fun)(actor_system&, const actor_system_config&) = nullptr;
 
   // -- config file parsing ----------------------------------------------------
 
@@ -260,8 +268,8 @@ public:
   /// @param opts User-defined config options for type checking.
   /// @returns A ::settings dictionary with the parsed content of `filename` on
   ///          success, an ::error otherwise.
-  static expected<settings>
-  parse_config_file(const char* filename, const config_option_set& opts);
+  static expected<settings> parse_config_file(const char* filename,
+                                              const config_option_set& opts);
 
   /// Tries to open `filename`, parses its content as CAF config file and
   /// stores all entries in `result` (overrides conflicting entries). Also
@@ -272,9 +280,9 @@ public:
   ///               partial results if this function returns an error.
   /// @returns A default-constructed ::error on success, the error code of the
   ///          parser otherwise.
-  static error
-  parse_config_file(const char* filename, const config_option_set& opts,
-                    settings& result);
+  static error parse_config_file(const char* filename,
+                                 const config_option_set& opts,
+                                 settings& result);
 
   /// Parses the content of `source` using CAF's config format.
   /// @param source Character sequence in CAF's config format.
@@ -288,8 +296,8 @@ public:
   /// @param opts User-defined config options for type checking.
   /// @returns A ::settings dictionary with the parsed content of `source` on
   ///          success, an ::error otherwise.
-  static expected<settings>
-  parse_config(std::istream& source, const config_option_set& opts);
+  static expected<settings> parse_config(std::istream& source,
+                                         const config_option_set& opts);
 
   /// Parses the content of `source` using CAF's config format and stores all
   /// entries in `result` (overrides conflicting entries). Also type-checks
@@ -308,18 +316,25 @@ public:
     return custom_options_;
   }
 
+  /// @private
+  void print_content() const;
+
 protected:
   config_option_set custom_options_;
 
 private:
+  virtual detail::mailbox_factory* mailbox_factory();
+
   void set_remainder(string_list args);
 
   mutable std::vector<char*> c_args_remainder_;
   std::vector<char> c_args_remainder_buf_;
 
-  actor_system_config& set_impl(string_view name, config_value value);
+  actor_system_config& set_impl(std::string_view name, config_value value);
 
   std::pair<error, std::string> extract_config_file_path(string_list& args);
+
+  logger_factory_t logger_factory_;
 };
 
 /// Returns all user-provided configuration parameters.
@@ -328,28 +343,28 @@ CAF_CORE_EXPORT const settings& content(const actor_system_config& cfg);
 /// Returns whether `xs` associates a value of type `T` to `name`.
 /// @relates actor_system_config
 template <class T>
-bool holds_alternative(const actor_system_config& cfg, string_view name) {
+bool holds_alternative(const actor_system_config& cfg, std::string_view name) {
   return holds_alternative<T>(content(cfg), name);
 }
 
 /// Tries to retrieve the value associated to `name` from `cfg`.
 /// @relates actor_system_config
 template <class T>
-auto get_if(const actor_system_config* cfg, string_view name) {
+auto get_if(const actor_system_config* cfg, std::string_view name) {
   return get_if<T>(&content(*cfg), name);
 }
 
 /// Retrieves the value associated to `name` from `cfg`.
 /// @relates actor_system_config
 template <class T>
-T get(const actor_system_config& cfg, string_view name) {
+T get(const actor_system_config& cfg, std::string_view name) {
   return get<T>(content(cfg), name);
 }
 
 /// Retrieves the value associated to `name` from `cfg` or returns `fallback`.
 /// @relates actor_system_config
 template <class To = get_or_auto_deduce, class Fallback>
-auto get_or(const actor_system_config& cfg, string_view name,
+auto get_or(const actor_system_config& cfg, std::string_view name,
             Fallback&& fallback) {
   return get_or<To>(content(cfg), name, std::forward<Fallback>(fallback));
 }
@@ -358,7 +373,7 @@ auto get_or(const actor_system_config& cfg, string_view name,
 /// of type `T`.
 /// @relates actor_system_config
 template <class T>
-expected<T> get_as(const actor_system_config& cfg, string_view name) {
+expected<T> get_as(const actor_system_config& cfg, std::string_view name) {
   return get_as<T>(content(cfg), name);
 }
 

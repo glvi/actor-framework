@@ -4,13 +4,13 @@
 
 #pragma once
 
-#include <string>
-
 #include "caf/detail/comparable.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
 #include "caf/hash/fnv.hpp"
-#include "caf/string_view.hpp"
+
+#include <string>
+#include <string_view>
 
 namespace caf::telemetry {
 
@@ -30,22 +30,21 @@ public:
   label& operator=(const label&) = default;
 
   /// @pre `name` matches the regex `[a-zA-Z_:][a-zA-Z0-9_:]*`
-  label(string_view name, string_view value);
+  label(std::string_view name, std::string_view value);
 
   explicit label(const label_view& view);
 
   // -- properties -------------------------------------------------------------
 
-  string_view name() const noexcept {
-    return string_view{str_.data(), name_length_};
+  std::string_view name() const noexcept {
+    return {str_.data(), name_length_};
   }
 
-  string_view value() const noexcept {
-    return string_view{str_.data() + name_length_ + 1,
-                       str_.size() - name_length_ - 1};
+  std::string_view value() const noexcept {
+    return {str_.data() + name_length_ + 1, str_.size() - name_length_ - 1};
   }
 
-  void value(string_view new_value);
+  void value(std::string_view new_value);
 
   /// Returns the label in `name=value` notation.
   const std::string& str() const noexcept {
@@ -54,7 +53,15 @@ public:
 
   // -- comparison -------------------------------------------------------------
 
-  int compare(const label& x) const noexcept;
+  template <class T1, class T2>
+  static int compare(const T1& lhs, const T2& rhs) noexcept {
+    auto cmp1 = lhs.name().compare(rhs.name());
+    return cmp1 != 0 ? cmp1 : lhs.value().compare(rhs.value());
+  }
+
+  int compare(const label_view& other) const noexcept;
+
+  int compare(const label& other) const noexcept;
 
 private:
   size_t name_length_;

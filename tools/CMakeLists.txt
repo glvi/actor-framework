@@ -2,12 +2,9 @@ add_custom_target(all_tools)
 
 macro(add name)
   add_executable(${name} ${name}.cpp ${ARGN})
-  install(TARGETS ${name} DESTINATION ${CMAKE_INSTALL_DATADIR}/caf/tools)
+  install(TARGETS ${name} DESTINATION ${CMAKE_INSTALL_BINDIR})
   add_dependencies(${name} all_tools)
 endmacro()
-
-add(caf-vec)
-target_link_libraries(caf-vec PRIVATE CAF::internal CAF::core)
 
 if(TARGET CAF::io)
   if(WIN32)

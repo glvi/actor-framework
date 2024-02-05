@@ -4,14 +4,14 @@
 
 #pragma once
 
-#include <array>
-#include <cstdint>
-#include <string>
-
 #include "caf/byte_address.hpp"
 #include "caf/detail/comparable.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
+
+#include <array>
+#include <cstdint>
+#include <string>
 
 namespace caf {
 
@@ -80,6 +80,13 @@ public:
   const array_type& data() const noexcept {
     return bytes_;
   }
+  // -- factories --------------------------------------------------------------
+
+  /// Returns `INADDR_ANY`, i.e., `0.0.0.0`.
+  static ipv4_address any() noexcept;
+
+  /// Returns `INADDR_LOOPBACK`, i.e., `127.0.0.1`.
+  static ipv4_address loopback() noexcept;
 
   // -- comparison -------------------------------------------------------------
 
@@ -121,6 +128,6 @@ CAF_CORE_EXPORT std::string to_string(const ipv4_address& x);
 
 /// Tries to parse the content of `str` into `dest`.
 /// @relates ipv4_address
-CAF_CORE_EXPORT error parse(string_view str, ipv4_address& dest);
+CAF_CORE_EXPORT error parse(std::string_view str, ipv4_address& dest);
 
 } // namespace caf

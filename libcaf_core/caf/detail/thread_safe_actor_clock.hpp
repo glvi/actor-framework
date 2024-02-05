@@ -4,16 +4,16 @@
 
 #pragma once
 
-#include <memory>
-#include <thread>
-#include <vector>
-
 #include "caf/action.hpp"
 #include "caf/actor_clock.hpp"
 #include "caf/actor_control_block.hpp"
 #include "caf/detail/core_export.hpp"
-#include "caf/detail/ringbuffer.hpp"
+#include "caf/detail/sync_ring_buffer.hpp"
 #include "caf/fwd.hpp"
+
+#include <memory>
+#include <thread>
+#include <vector>
 
 namespace caf::detail {
 
@@ -25,24 +25,22 @@ public:
 
   // -- member types -----------------------------------------------------------
 
+  using super = actor_clock;
+
   /// Stores actions along with their scheduling period.
   struct schedule_entry {
     time_point t;
     action f;
-    duration_type period;
   };
 
   /// @relates schedule_entry
   using schedule_entry_ptr = std::unique_ptr<schedule_entry>;
 
-  // -- constructors, destructors, and assignment operators --------------------
-
-  thread_safe_actor_clock();
-
   // -- overrides --------------------------------------------------------------
 
-  disposable schedule_periodically(time_point first_run, action f,
-                                   duration_type period) override;
+  using super::schedule;
+
+  disposable schedule(time_point abs_time, action f) override;
 
   // -- thread management ------------------------------------------------------
 
@@ -51,21 +49,20 @@ public:
   void stop_dispatch_loop();
 
 private:
-  void run();
+  // -- member types -----------------------------------------------------------
+  using queue_type = detail::sync_ring_buffer<schedule_entry_ptr, buffer_size>;
+
+  // -- internal API -----------------------------------------------------------
+
+  static void run(queue_type* queue);
 
   // -- member variables -------------------------------------------------------
 
   /// Communication to the dispatcher thread.
-  detail::ringbuffer<schedule_entry_ptr, buffer_size> queue_;
+  detail::sync_ring_buffer<schedule_entry_ptr, buffer_size> queue_;
 
   /// Handle to the dispatcher thread.
   std::thread dispatcher_;
-
-  /// Internal data of the dispatcher.
-  bool running_ = true;
-
-  /// Internal data of the dispatcher.
-  std::vector<schedule_entry_ptr> tbl_;
 };
 
 } // namespace caf::detail

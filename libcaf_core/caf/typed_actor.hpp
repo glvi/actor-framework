@@ -4,23 +4,21 @@
 
 #pragma once
 
-#include <cstddef>
-
 #include "caf/abstract_actor.hpp"
 #include "caf/actor.hpp"
 #include "caf/actor_cast.hpp"
 #include "caf/actor_system.hpp"
-#include "caf/composed_type.hpp"
-#include "caf/decorator/sequencer.hpp"
 #include "caf/fwd.hpp"
 #include "caf/intrusive_ptr.hpp"
 #include "caf/make_actor.hpp"
-#include "caf/replies_to.hpp"
 #include "caf/stateful_actor.hpp"
 #include "caf/type_id_list.hpp"
 #include "caf/typed_actor_view_base.hpp"
 #include "caf/typed_behavior.hpp"
 #include "caf/typed_response_promise.hpp"
+
+#include <cstddef>
+#include <functional>
 
 namespace caf {
 
@@ -38,8 +36,10 @@ public:
                 "Function signatures must be normalized to the format "
                 "'result<Out...>(In...)', no qualifiers or references allowed");
 
-  // -- friend types that need access to private ctors
+  // -- friends ----------------------------------------------------------------
+
   friend class local_actor;
+  friend class abstract_actor;
 
   template <class>
   friend class data_processor;
@@ -64,8 +64,7 @@ public:
   /// Creates a new `typed_actor` type by extending this one with another
   /// `typed_actor`.
   template <class... Ts>
-  using extend_with =
-    typename detail::extend_with_helper<typed_actor, Ts...>::type;
+  using extend_with = detail::extend_with_helper_t<typed_actor, Ts...>;
 
   /// Identifies the behavior type actors of this kind use
   /// for their behavior stack.
@@ -122,7 +121,7 @@ public:
 
   // allow `handle_type{this}` for typed actors
   template <class T,
-            class = detail::enable_if_t<actor_traits<T>::is_statically_typed>>
+            class = std::enable_if_t<actor_traits<T>::is_statically_typed>>
   typed_actor(T* ptr) : ptr_(ptr->ctrl()) {
     static_assert(
       detail::tl_subset_of<signatures, typename T::signatures>::value,
@@ -132,7 +131,7 @@ public:
 
   // Enable `handle_type{self}` for typed actor views.
   template <class T, class = std::enable_if_t<
-                       std::is_base_of<typed_actor_view_base, T>::value>>
+                       std::is_base_of_v<typed_actor_view_base, T>>>
   explicit typed_actor(T ptr) : ptr_(ptr.ctrl()) {
     static_assert(
       detail::tl_subset_of<signatures, typename T::signatures>::value,
@@ -297,21 +296,6 @@ bool operator!=(const typed_actor<Xs...>& x, std::nullptr_t) noexcept {
 template <class... Xs>
 bool operator!=(std::nullptr_t, const typed_actor<Xs...>& x) noexcept {
   return !(x == nullptr);
-}
-
-/// Returns a new actor that implements the composition `f.g(x) = f(g(x))`.
-/// @relates typed_actor
-template <class... Xs, class... Ys>
-composed_type_t<detail::type_list<Xs...>, detail::type_list<Ys...>>
-operator*(typed_actor<Xs...> f, typed_actor<Ys...> g) {
-  using result
-    = composed_type_t<detail::type_list<Xs...>, detail::type_list<Ys...>>;
-  auto& sys = g->home_system();
-  auto mts = sys.message_types(detail::type_list<result>{});
-  return make_actor<decorator::sequencer, result>(
-    sys.next_actor_id(), sys.node(), &sys,
-    actor_cast<strong_actor_ptr>(std::move(f)),
-    actor_cast<strong_actor_ptr>(std::move(g)), std::move(mts));
 }
 
 } // namespace caf

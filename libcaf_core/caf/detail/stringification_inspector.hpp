@@ -4,20 +4,19 @@
 
 #pragma once
 
-#include <chrono>
-#include <cstring>
-#include <string>
-#include <type_traits>
-#include <vector>
-
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
 #include "caf/inspector_access.hpp"
 #include "caf/save_inspector_base.hpp"
-#include "caf/string_view.hpp"
 #include "caf/timespan.hpp"
 #include "caf/timestamp.hpp"
-#include "caf/variant.hpp"
+
+#include <chrono>
+#include <cstring>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <vector>
 
 namespace caf::detail {
 
@@ -44,17 +43,17 @@ public:
 
   // -- serializer interface ---------------------------------------------------
 
-  bool begin_object(type_id_t, string_view name);
+  bool begin_object(type_id_t, std::string_view name);
 
   bool end_object();
 
-  bool begin_field(string_view);
+  bool begin_field(std::string_view);
 
-  bool begin_field(string_view name, bool is_present);
+  bool begin_field(std::string_view name, bool is_present);
 
-  bool begin_field(string_view name, span<const type_id_t>, size_t);
+  bool begin_field(std::string_view name, span<const type_id_t>, size_t);
 
-  bool begin_field(string_view name, bool, span<const type_id_t>, size_t);
+  bool begin_field(std::string_view name, bool, span<const type_id_t>, size_t);
 
   bool end_field();
 
@@ -86,13 +85,13 @@ public:
     return end_sequence();
   }
 
-  bool value(byte x);
+  bool value(std::byte x);
 
   bool value(bool x);
 
   template <class Integral>
-  std::enable_if_t<std::is_integral<Integral>::value, bool> value(Integral x) {
-    if constexpr (std::is_signed<Integral>::value)
+  std::enable_if_t<std::is_integral_v<Integral>, bool> value(Integral x) {
+    if constexpr (std::is_signed_v<Integral>)
       return int_value(static_cast<int64_t>(x));
     else
       return int_value(static_cast<uint64_t>(x));
@@ -108,13 +107,13 @@ public:
 
   bool value(timestamp x);
 
-  bool value(string_view x);
+  bool value(std::string_view x);
 
   bool value(const std::u16string& x);
 
   bool value(const std::u32string& x);
 
-  bool value(span<const byte> x);
+  bool value(span<const std::byte> x);
 
   using super::list;
 
@@ -152,9 +151,8 @@ public:
   }
 
   template <class T>
-  std::enable_if_t<has_to_string<T>::value
-                     && !std::is_convertible<T, string_view>::value,
-                   bool>
+  std::enable_if_t<
+    has_to_string_v<T> && !std::is_convertible_v<T, std::string_view>, bool>
   builtin_inspect(const T& x) {
     auto str = to_string(x);
     if constexpr (std::is_convertible<decltype(str), const char*>::value) {
@@ -173,9 +171,10 @@ public:
       sep();
       result_ += "null";
       return true;
-    } else if constexpr (std::is_same<T, char>::value) {
-      return value(string_view{x, strlen(x)});
-    } else if constexpr (std::is_same<T, void>::value) {
+    }
+    if constexpr (std::is_same_v<T, char>) {
+      return value(std::string_view{x, strlen(x)});
+    } else if constexpr (std::is_same_v<T, void>) {
       sep();
       result_ += "*<";
       auto addr = reinterpret_cast<intptr_t>(x);
@@ -191,7 +190,7 @@ public:
   }
 
   template <class T>
-  bool builtin_inspect(const optional<T>& x) {
+  bool builtin_inspect(const std::optional<T>& x) {
     sep();
     if (!x) {
       result_ += "null";
@@ -219,14 +218,14 @@ public:
 
   template <class T>
   static std::string render(const T& x) {
-    if constexpr (std::is_same<std::nullptr_t, T>::value) {
+    if constexpr (std::is_same_v<std::nullptr_t, T>) {
       return "null";
-    } else if constexpr (std::is_constructible<string_view, T>::value) {
-      if constexpr (std::is_pointer<T>::value) {
+    } else if constexpr (std::is_constructible_v<std::string_view, T>) {
+      if constexpr (std::is_pointer_v<T>) {
         if (x == nullptr)
           return "null";
       }
-      auto str = string_view{x};
+      auto str = std::string_view{x};
       return std::string{str.begin(), str.end()};
     } else {
       std::string result;

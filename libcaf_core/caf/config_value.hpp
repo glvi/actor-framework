@@ -4,23 +4,10 @@
 
 #pragma once
 
-#include <chrono>
-#include <cmath>
-#include <cstddef>
-#include <cstdint>
-#include <iosfwd>
-#include <iterator>
-#include <map>
-#include <string>
-#include <tuple>
-#include <type_traits>
-#include <vector>
-
 #include "caf/config_value_reader.hpp"
 #include "caf/config_value_writer.hpp"
 #include "caf/detail/bounds_checker.hpp"
 #include "caf/detail/core_export.hpp"
-#include "caf/detail/move_if_not_ptr.hpp"
 #include "caf/detail/parse.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/dictionary.hpp"
@@ -28,17 +15,27 @@
 #include "caf/fwd.hpp"
 #include "caf/inspector_access.hpp"
 #include "caf/inspector_access_type.hpp"
-#include "caf/optional.hpp"
 #include "caf/raise_error.hpp"
 #include "caf/string_algorithms.hpp"
-#include "caf/string_view.hpp"
-#include "caf/sum_type.hpp"
-#include "caf/sum_type_access.hpp"
-#include "caf/sum_type_token.hpp"
 #include "caf/timespan.hpp"
 #include "caf/timestamp.hpp"
 #include "caf/uri.hpp"
-#include "caf/variant.hpp"
+#include "caf/variant_wrapper.hpp"
+
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <iosfwd>
+#include <iterator>
+#include <map>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <variant>
+#include <vector>
 
 namespace caf::detail {
 
@@ -62,7 +59,7 @@ CAF_ADD_CONFIG_VALUE_TYPE(dictionary<config_value>);
 #undef CAF_ADD_CONFIG_VALUE_TYPE
 
 template <class T>
-constexpr bool is_config_value_type_v = is_config_value_type<T>::value;
+inline constexpr bool is_config_value_type_v = is_config_value_type<T>::value;
 
 } // namespace caf::detail
 
@@ -90,7 +87,7 @@ public:
   using types = detail::type_list<none_t, integer, boolean, real, timespan, uri,
                                   string, list, dictionary>;
 
-  using variant_type = detail::tl_apply_t<types, variant>;
+  using variant_type = detail::tl_apply_t<types, std::variant>;
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -100,20 +97,20 @@ public:
 
   config_value(const config_value& other) = default;
 
-  template <class T, class E = detail::enable_if_t<
-                       !std::is_same<detail::decay_t<T>, config_value>::value>>
-  explicit config_value(T&& x) {
-    set(std::forward<T>(x));
+  template <class T, class = std::enable_if_t<
+                       !std::is_same_v<std::decay_t<T>, config_value>>>
+  explicit config_value(T&& x) : data_(lift(std::forward<T>(x))) {
+    // nop
   }
 
   config_value& operator=(config_value&& other) = default;
 
   config_value& operator=(const config_value& other) = default;
 
-  template <class T, class E = detail::enable_if_t<
-                       !std::is_same<detail::decay_t<T>, config_value>::value>>
+  template <class T, class = std::enable_if_t<
+                       !std::is_same_v<std::decay_t<T>, config_value>>>
   config_value& operator=(T&& x) {
-    set(std::forward<T>(x));
+    data_ = lift(std::forward<T>(x));
     return *this;
   }
 
@@ -122,16 +119,16 @@ public:
   // -- parsing ----------------------------------------------------------------
 
   /// Tries to parse a value from given characters.
-  static expected<config_value> parse(string_view::iterator first,
-                                      string_view::iterator last);
+  static expected<config_value> parse(std::string_view::iterator first,
+                                      std::string_view::iterator last);
 
   /// Tries to parse a value from `str`.
-  static expected<config_value> parse(string_view str);
+  static expected<config_value> parse(std::string_view str);
 
   /// Tries to parse a config value (list) from `str` and to convert it to an
   /// allowed input message type for `Handle`.
   template <class Handle>
-  static optional<message> parse_msg(string_view str, const Handle&) {
+  static std::optional<message> parse_msg(std::string_view str, const Handle&) {
     auto allowed = Handle::allowed_inputs();
     return parse_msg_impl(str, allowed);
   }
@@ -158,24 +155,19 @@ public:
   /// Returns a human-readable type name of the current value.
   const char* type_name() const noexcept;
 
-  /// Returns the underlying variant.
-  variant_type& get_data() {
+  /// @private
+  variant_type& get_data() & {
     return data_;
   }
 
-  /// Returns the underlying variant.
-  const variant_type& get_data() const {
+  /// @private
+  const variant_type& get_data() const& {
     return data_;
   }
 
-  /// Returns a pointer to the underlying variant.
-  variant_type* get_data_ptr() {
-    return &data_;
-  }
-
-  /// Returns a pointer to the underlying variant.
-  const variant_type* get_data_ptr() const {
-    return &data_;
+  /// @private
+  variant_type&& get_data() && {
+    return std::move(data_);
   }
 
   /// Checks whether this config value is not null.
@@ -235,23 +227,32 @@ public:
   }
 
   template <class T>
-  error assign(const T& x) {
-    if constexpr (detail::is_config_value_type_v<T>) {
-      data_ = x;
+  error assign(T&& x) {
+    using val_t = std::decay_t<T>;
+    if constexpr (std::is_convertible_v<val_t, const char*>) {
+      data_ = std::string{x};
+      return {};
+    } else if constexpr (std::is_same_v<val_t, config_value>) {
+      if constexpr (std::is_rvalue_reference_v<T&&>)
+        data_ = std::move(x.data_);
+      else
+        data_ = x.data_;
+      return {};
+    } else if constexpr (detail::is_config_value_type_v<val_t>) {
+      data_ = std::forward<T>(x);
       return {};
     } else {
       config_value_writer writer{this};
       if (writer.apply(x))
         return {};
-      else
-        return {writer.move_error()};
+      return {writer.move_error()};
     }
   }
 
   template <class T>
-  static constexpr string_view mapped_type_name() {
+  static constexpr std::string_view mapped_type_name() {
     if constexpr (detail::is_complete<caf::type_name<T>>) {
-      return caf::type_name<T>::value;
+      return caf::type_name_v<T>;
     } else if constexpr (detail::is_list_like_v<T>) {
       return "list";
     } else {
@@ -264,53 +265,38 @@ private:
 
   static const char* type_name_at_index(size_t index) noexcept;
 
-  static optional<message>
-  parse_msg_impl(string_view str, span<const type_id_list> allowed_types);
+  static std::optional<message>
+  parse_msg_impl(std::string_view str, span<const type_id_list> allowed_types);
 
   // -- auto conversion of related types ---------------------------------------
 
   template <class T>
-  void set_range(T& xs, std::true_type) {
-    auto& dict = as_dictionary();
-    dict.clear();
-    for (auto& [key, val] : xs)
-      dict.emplace(key, std::move(val));
-  }
-
-  template <class T>
-  void set_range(T& xs, std::false_type) {
-    auto& ls = as_list();
-    ls.clear();
-    ls.insert(ls.end(), std::make_move_iterator(xs.begin()),
-              std::make_move_iterator(xs.end()));
-  }
-
-  template <class T>
-  void set(T x) {
+  auto lift(T x) {
     if constexpr (detail::is_config_value_type_v<T>) {
-      data_ = std::move(x);
-    } else if constexpr (std::is_integral<T>::value) {
-      data_ = static_cast<int64_t>(x);
-    } else if constexpr (std::is_convertible<T, const char*>::value) {
-      data_ = std::string{x};
+      return x;
+    } else if constexpr (std::is_integral_v<T>) {
+      return static_cast<int64_t>(x);
+    } else if constexpr (std::is_same_v<T, float>) {
+      return static_cast<double>(x);
+    } else if constexpr (std::is_convertible_v<T, const char*>
+                         || std::is_same_v<T, std::string_view>) {
+      return std::string{x};
     } else {
-      static_assert(detail::is_iterable<T>::value);
+      static_assert(detail::is_iterable_v<T>);
       using value_type = typename T::value_type;
-      detail::bool_token<detail::is_pair<value_type>::value> is_map_type;
-      set_range(x, is_map_type);
+      if constexpr (detail::is_pair<value_type>::value) {
+        dictionary result;
+        for (auto& [key, val] : x)
+          result.emplace(std::move(key), std::move(val));
+        return result;
+      } else {
+        list result;
+        result.reserve(x.size());
+        for (auto& val : x)
+          result.emplace_back(std::move(val));
+        return result;
+      }
     }
-  }
-
-  void set(float x) {
-    data_ = static_cast<double>(x);
-  }
-
-  void set(const char* x) {
-    data_ = std::string{x};
-  }
-
-  void set(string_view x) {
-    data_ = std::string{x.begin(), x.end()};
   }
 
   // -- member variables -------------------------------------------------------
@@ -320,6 +306,11 @@ private:
 
 /// @relates config_value
 CAF_CORE_EXPORT std::string to_string(const config_value& x);
+
+// -- std::variant-like access -------------------------------------------------
+
+template <>
+struct is_variant_wrapper<config_value> : std::true_type {};
 
 // -- conversion via get_as ----------------------------------------------------
 
@@ -355,11 +346,11 @@ get_as(const config_value& x, inspector_access_type::builtin_inspect token) {
 
 template <class T>
 expected<T> get_as(const config_value& x, inspector_access_type::builtin) {
-  if constexpr (std::is_same<T, std::string>::value) {
+  if constexpr (std::is_same_v<T, std::string>) {
     return to_string(x);
-  } else if constexpr (std::is_same<T, bool>::value) {
+  } else if constexpr (std::is_same_v<T, bool>) {
     return x.to_boolean();
-  } else if constexpr (std::is_integral<T>::value) {
+  } else if constexpr (std::is_integral_v<T>) {
     if (auto result = x.to_integer()) {
       if (detail::bounds_checker<T>::check(*result))
         return static_cast<T>(*result);
@@ -368,7 +359,7 @@ expected<T> get_as(const config_value& x, inspector_access_type::builtin) {
     } else {
       return std::move(result.error());
     }
-  } else if constexpr (std::is_floating_point<T>::value) {
+  } else if constexpr (std::is_floating_point_v<T>) {
     if (auto result = x.to_real()) {
       if constexpr (sizeof(T) >= sizeof(config_value::real)) {
         return *result;
@@ -413,10 +404,9 @@ get_as_tuple(const config_value::list& x, std::index_sequence<Is...>) {
 
 template <class T>
 expected<T> get_as(const config_value& x, inspector_access_type::tuple) {
-  static_assert(!std::is_array<T>::value,
-                "cannot return an array from a function");
+  static_assert(!std::is_array_v<T>, "cannot return an array from a function");
   if (auto wrapped_values = x.to_list()) {
-    static constexpr size_t n = std::tuple_size<T>::value;
+    static constexpr size_t n = std::tuple_size_v<T>;
     if (wrapped_values->size() == n)
       return get_as_tuple<T>(*wrapped_values, std::make_index_sequence<n>{});
     else
@@ -482,13 +472,13 @@ expected<T> get_as(const config_value& x, inspector_access_type::list) {
 /// @relates config_value
 template <class T>
 expected<T> get_as(const config_value& value) {
-  if constexpr (std::is_same<T, timespan>::value) {
+  if constexpr (std::is_same_v<T, timespan>) {
     return value.to_timespan();
-  } else if constexpr (std::is_same<T, config_value::list>::value) {
+  } else if constexpr (std::is_same_v<T, config_value::list>) {
     return value.to_list();
-  } else if constexpr (std::is_same<T, config_value::dictionary>::value) {
+  } else if constexpr (std::is_same_v<T, config_value::dictionary>) {
     return value.to_dictionary();
-  } else if constexpr (std::is_same<T, uri>::value) {
+  } else if constexpr (std::is_same_v<T, uri>) {
     return value.to_uri();
   } else {
     auto token = inspect_access_type<config_value_reader, T>();
@@ -500,8 +490,9 @@ expected<T> get_as(const config_value& value) {
 
 /// Customization point for configuring automatic mappings from default value
 /// types to deduced types. For example, `get_or(value, "foo"sv)` must return a
-/// `string` rather than a `string_view`. However, user-defined overloads *must
-/// not* specialize this class for any type from the namespaces `std` or `caf`.
+/// `string` rather than a `string_view`. However, user-defined overloads
+/// *must not* specialize this class for any type from the namespaces `std` or
+/// `caf`.
 template <class T>
 struct get_or_deduction_guide {
   using value_type = T;
@@ -512,9 +503,9 @@ struct get_or_deduction_guide {
 };
 
 template <>
-struct get_or_deduction_guide<string_view> {
+struct get_or_deduction_guide<std::string_view> {
   using value_type = std::string;
-  static value_type convert(string_view str) {
+  static value_type convert(std::string_view str) {
     return {str.begin(), str.end()};
   }
 };
@@ -543,7 +534,7 @@ struct get_or_auto_deduce {};
 /// @relates config_value
 template <class To = get_or_auto_deduce, class Fallback>
 auto get_or(const config_value& x, Fallback&& fallback) {
-  if constexpr (std::is_same<To, get_or_auto_deduce>::value) {
+  if constexpr (std::is_same_v<To, get_or_auto_deduce>) {
     using guide = get_or_deduction_guide<std::decay_t<Fallback>>;
     using value_type = typename guide::value_type;
     if (auto val = get_as<value_type>(x))
@@ -556,33 +547,6 @@ auto get_or(const config_value& x, Fallback&& fallback) {
     else
       return To{std::forward<Fallback>(fallback)};
   }
-}
-
-// -- SumType-like access ------------------------------------------------------
-
-template <class T, class = std::enable_if_t<detail::is_config_value_type_v<T>>>
-auto get_if(const config_value* x) {
-  return get_if<T>(x->get_data_ptr());
-}
-
-template <class T, class = std::enable_if_t<detail::is_config_value_type_v<T>>>
-auto get_if(config_value* x) {
-  return get_if<T>(x->get_data_ptr());
-}
-
-template <class T, class = std::enable_if_t<detail::is_config_value_type_v<T>>>
-decltype(auto) get(const config_value& x) {
-  return get<T>(x.get_data());
-}
-
-template <class T, class = std::enable_if_t<detail::is_config_value_type_v<T>>>
-decltype(auto) get(config_value& x) {
-  return get<T>(x.get_data());
-}
-
-template <class T, class = std::enable_if_t<detail::is_config_value_type_v<T>>>
-auto holds_alternative(const config_value& x) {
-  return holds_alternative<T>(x.get_data());
 }
 
 // -- comparison operator overloads --------------------------------------------
@@ -643,12 +607,12 @@ struct variant_inspector_traits<config_value> {
 
   template <class F, class Value>
   static auto visit(F&& f, Value&& x) {
-    return caf::visit(std::forward<F>(f), x.get_data());
+    return std::visit(std::forward<F>(f), x.get_data());
   }
 
   template <class U>
   static void assign(value_type& x, U&& value) {
-    x = std::move(value);
+    x = std::forward<U>(value);
   }
 
   template <class F>

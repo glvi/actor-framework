@@ -4,10 +4,10 @@
 
 #pragma once
 
+#include "caf/intrusive_ptr.hpp"
+
 #include <cstddef>
 #include <cstdint>
-
-#include "caf/intrusive_ptr.hpp"
 
 namespace caf {
 
@@ -35,10 +35,10 @@ T* intrusive_cow_ptr_unshare(T*& ptr) {
 /// copy-on-write optimization.
 template <class T>
 class intrusive_cow_ptr
-    : detail::comparable<intrusive_cow_ptr<T>>,
-      detail::comparable<intrusive_cow_ptr<T>, T*>,
-      detail::comparable<intrusive_cow_ptr<T>, std::nullptr_t>,
-      detail::comparable<intrusive_cow_ptr<T>, intrusive_ptr<T>> {
+  : detail::comparable<intrusive_cow_ptr<T>>,
+    detail::comparable<intrusive_cow_ptr<T>, T*>,
+    detail::comparable<intrusive_cow_ptr<T>, std::nullptr_t>,
+    detail::comparable<intrusive_cow_ptr<T>, intrusive_ptr<T>> {
 public:
   // -- member types -----------------------------------------------------------
 
@@ -68,7 +68,7 @@ public:
 
   template <class Y>
   intrusive_cow_ptr(intrusive_cow_ptr<Y> other) noexcept
-      : ptr_(other.detach(), false) {
+    : ptr_(other.detach(), false) {
     // nop
   }
 
@@ -77,7 +77,7 @@ public:
   }
 
   explicit intrusive_cow_ptr(pointer ptr, bool add_ref = true) noexcept
-      : ptr_(ptr, add_ref) {
+    : ptr_(ptr, add_ref) {
     // nop
   }
 
@@ -88,6 +88,11 @@ public:
   intrusive_cow_ptr& operator=(counting_pointer x) noexcept {
     ptr_ = std::move(x);
     return *this;
+  }
+
+  template <class U = T, class... Ts>
+  void emplace(Ts&&... xs) {
+    reset(new U(std::forward<Ts>(xs)...), false);
   }
 
   // -- comparison -------------------------------------------------------------
@@ -173,6 +178,26 @@ public:
 
   explicit operator bool() const noexcept {
     return get() != nullptr;
+  }
+
+  template <class C>
+  intrusive_cow_ptr<C> downcast() const noexcept {
+    using res_t = intrusive_cow_ptr<C>;
+    return (ptr_) ? res_t{ptr_.template downcast<C>()} : res_t{};
+  }
+
+  template <class C>
+  intrusive_cow_ptr<C> upcast() const noexcept {
+    using res_t = intrusive_cow_ptr<C>;
+    return (ptr_) ? res_t{ptr_.template upcast<C>()} : res_t{};
+  }
+
+  // -- factories --------------------------------------------------------------
+
+  /// Constructs an object of type `T` in an `intrusive_cow_ptr`.
+  template <class... Ts>
+  static intrusive_cow_ptr make(Ts&&... xs) {
+    return intrusive_cow_ptr{new T(std::forward<Ts>(xs)...), false};
   }
 
 private:

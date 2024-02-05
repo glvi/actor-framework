@@ -5,6 +5,429 @@ is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix building CAF with shared libraries (DLLs) enabled on Windows (#1715).
+
+### Removed
+
+- The obsolete CAF types `caf::string_view`, `caf::byte`, `caf::optional`,
+  `caf::replies_to`, and `caf::flow::item_publisher`.
+- The obsolete `operator*` for "combining" two actor handles.
+- All `to_stream` and `to_typed_stream` member functions on actors (they are
+  available on `caf::flow::observable` directly).
+- The `group` API has been removed entirely.
+
+### Changed
+
+- When using the caf-net module, users may enable Prometheus metric export by
+  setting the configuration option `caf.net.prometheus-http`. The option has the
+  following fields: `port`, `address`, `tls.key-file`, and `tls.cert-file`. When
+  setting the TLS options, the server will use HTTPS instead of HTTP.
+
+## [0.19.5] - 2024-01-08
+
+### Added
+
+- An `observable` that runs on an actor can now be converted to a `stream` or
+  `typed_stream` directly by calling `to_stream` or `to_typed_stream` on it.
+- New `caf::async` API to read text and binary files asynchronously in a
+  separate thread. The contents of the files are consumed as flows (#1573).
+- The class `caf::unordered_flat_map` now has the `contains` and
+  `insert_or_assign` member functions.
+- CAF now supports setting custom configuration options via environment
+  variables. The new priority order is: CLI arguments, environment variables,
+  configuration files, and default values. The environment variable name is
+  the full name of the option in uppercase, with all non-alphanumeric
+  characters replaced by underscores. For example, the environment variable
+  `FOO_BAR` sets the option `foo.bar`. Users may also override the default
+  name by putting the environment name after the short names, separated by a
+  comma. For example, `opt_group{custom_options_, "foo"}.add("bar,b,MY_BAR")`
+  overrides the default environment variable name `FOO_BAR` with `MY_BAR`.
+- The formatting functions from `caf/chrono.hpp` now support precision for the
+  fractional part of the seconds and an option to print with a fixed number of
+  digits.
+- The new class `caf::chunk` represents an immutable sequence of bytes with a
+  fixed size. Unlike `std::span`, a `chunk` owns its data and can be (cheaply)
+  copied and moved.
+- Users can now convert state classes with a `make_behavior` member function
+  into a "function-based actor" via the new `actor_from_state` utility. For
+  example, `sys.spawn(caf::actor_from_state<my_state>, args...)` creates a new
+  actor that initializes its state with `my_state{args...}` and then calls
+  `make_behavior()` on the state object to obtain the initial behavior.
+- The `aout` utility received a `println` member function that adds a formatted
+  line to the output stream. The function uses the same formatting backend as
+  the logging API.
+
+### Fixed
+
+- The class `caf::test::outline` is now properly exported from the test module.
+  This fixes builds with dynamic linking against `libcaf_test`.
+- Fix a crash with the new deterministic test fixture when cleaning up actors
+  with stashed messages (#1589).
+- When using `request(...).await(...)`, the actor no longer suspends handling of
+  system messages while waiting for the response (#1584).
+- Fix compiler errors and warnings for GCC 13 in C++23 mode (#1583).
+- Fix encoding of chunk size in chunked HTTP responses (#1587).
+- Fix leak when using `spawn_inactive` and not launching the actor explicitly
+  (#1597).
+- Fix a minor bug in the deserialization of messages that caused CAF to allocate
+  more storage than necessary (#1614).
+- Add missing `const` to `publisher<T>::observe_on`.
+- All `observable` implementations now properly call `on_subscribe` on their
+  subscriber before calling `on_error`.
+- The function `config_value::parse` now properly handles leading and trailing
+  whitespaces.
+- Comparing two  `caf::unordered_flat_map` previously relied on the order of
+  elements in the map and thus could result in false negatives. The new
+  implementation is correct and no longer relies on the order of elements.
+- When using `--dump-config`, CAF now properly renders nested dictionaries.
+  Previously, dictionaries in lists missed surrounding braces.
+- CAF now parses `foo.bar = 42` in a config file as `foo { bar = 42 }`, just as
+  it does for CLI arguments.
+- Fix shutdown logic for actors with open streams. This resolves an issue where
+  actors would not terminate correctly after receiving an exit message (#1657).
+- Fix compilation error on MSVC when building `caf_test` with shared libraries
+  enabled (#1669).
+- Calling `delay_for_fn` on a flow coordinator now returns a `disposable` in
+  order to be consistent with `delay_for` and `delay_until`.
+- Calling `dispose` on a server (e.g. an HTTP server) now properly closes all
+  open connections.
+- Fix static assert in `expected` when calling `transform` on an rvalue with a
+  function object that only accepts an rvalue.
+- The function `caf::net::make_pipe` no longer closes read/write channels of the
+  connected socket pair on Windows. This fixes a bug where the pipe would close
+  after two minutes of inactivity.
+
+### Changed
+
+- Calling `to_string` on any of CAF's enum types now represents the enum value
+  using the short name instead of the fully qualified name. For example,
+  `to_string(sec::none)` now returns `"none"` instead of `"caf::sec::none"`.
+  Accordingly, `from_string` now accepts the short name (in additional to the
+  fully qualified name).
+- Log format strings no longer support `%C`. CAF still recognizes this option
+  but it will always print `null`.
+- The function `caf::telemetry::counter::inc` now allows passing 0 as an
+  argument. Previously, passing 0 triggered an assertion when building CAF with
+  runtime checks enabled.
+- Calling `dispose` on a flow subscription now calls `on_error(sec::disposed)`
+  on the observer. Previously, CAF would simply call `on_complete()` on the
+  observer, making it impossible to distinguish between a normal completion and
+  disposal.
+- The `caf::logger` received a complete overhaul and became an interface class.
+  By turning the class into an interface, users can now install custom logger
+  implementations. CAF uses the previous implementation as the default logger if
+  no custom logger is configured. To install a logger, users can call
+  `cfg.logger_factory(my_logger_factory)` on the `actor_system_config` before
+  constructing the `actor_system`. The logger factory is a function object with
+  signature `caf::intrusive_ptr<caf::logger>(caf::actor_system&)`. Furthermore,
+  log messages are now formatted using `std::format` when compiling CAF with
+  C++20 or later. Otherwise, CAF will fall back to a minimal formatting
+  implementation with compatible syntax. The logging API will also automatically
+  convert any type with a suitable `inspect` overload to a string if the type is
+  not recognized by `format`.
+
+### Deprecated
+
+- Calling `to_stream` or `to_typed_stream` on an actor is now deprecated. Simply
+  call `to_stream` or `to_typed_stream` directly on the `observable` instead.
+
+### Removed
+
+- The implementation of `operator<` for `caf::unordered_flat_map` was broken and
+  relied on the order of elements in the map. We have removed it, since it has
+  never worked correctly and a correct implementation would be too expensive.
+
+## [0.19.4] - 2023-09-29
+
+### Fixed
+
+- Stream batches are now properly serialized and deserialized when subscribing
+  to a stream from a remote node (#1566).
+
+## [0.19.3] - 2023-09-20
+
+### Added
+
+- The class `caf::telemetry::label` now has a new `compare` overload that
+  accepts a `caf::telemetry::label_view` to make the interface of the both
+  classes symmetrical.
+- The template class `caf::dictionary` now has new member functions for erasing
+  elements.
+- The CLI argument parser now supports a space separator when using long
+  argument names, e.g., `--foo bar`. This is in addition to the existing
+  `--foo=bar` syntax.
+- The functions `make_message` and `make_error` now support `std::string_view`
+  as input and automatically convert it to `std::string`.
+- To make it easier to set up asynchronous flows, CAF now provides a new class:
+  `caf::async::publisher`. Any observable can be transformed into a publisher by
+  calling `to_publisher`. The publisher can then be used to subscribe to the
+  observable from other actors or threads. The publisher has only a single
+  member function: `observe_on`. It converts the publisher back into an
+  observable. This new abstraction allows users to set up asynchronous flows
+  without having to manually deal with SPSC buffers.
+- The flow API received additional operators: `first`, `last`, `take_last`,
+  `skip_last`, `element_at`, and `ignore_elements`.
+
+### Changed
+
+- When using CAF to parse CLI arguments, the output of `--help` now includes all
+  user-defined options. Previously, only options in the global category or
+  options with a short name were included. Only CAF options are now excluded
+  from the output. They will still be included in the output of `--long-help`.
+- The output of `--dump-config` now only contains CAF options from loaded
+  modules. Previously, it also included options from modules that were not
+  loaded.
+- We renamed `caf::flow::item_publisher` to `caf::flow::multicaster` to better
+  reflect its purpose and to avoid confusion with the new
+  `caf::async::publisher`.
+- When failing to deserialize a request, the sender will receive an error of
+  kind `sec::malformed_message`.
+- When implementing custom protocol layers that sit on top of an octet stream,
+  the `delta` byte span passed to `consume` now resets whenever returning a
+  positive value from `consume`.
+- When constructing a `behavior` or `message_handler`, callbacks that take a
+  `message` argument are now treated as catch-all handlers.
+- When creating a message with a non-existing type ID, CAF now prints a
+  human-readable error message and calls `abort` instead of crashing the
+  application.
+
+### Fixed
+
+- Fix build errors with exceptions disabled.
+- Fix a regression in `--dump-config` that caused CAF applications to emit
+  malformed output.
+- Fix handling of WebSocket frames that are exactly on the 65535 byte limit.
+- Fix crash when using a fallback value for optional values (#1427).
+- Using `take(0)` on an observable now properly creates an observable that calls
+  `on_complete` on its subscriber on the first activity of the source
+  observable. Previously, the created observable would never reach its threshold
+  and attempt to buffer all values indefinitely.
+- The comparison operator of `intrusive_ptr` no longer accidentally creates new
+  `intrusive_ptr` instances when comparing to raw pointers.
+- Fix function object lifetimes in actions. This bug caused CAF to hold onto a
+  strong reference to actors that canceled a timeout until the timeout expired.
+  This could lead to actors being kept alive longer than necessary (#698).
+- Key lookups in `caf::net::http::request_header` are now case-insensitive, as
+  required by the HTTP specification. Further, `field_at` is now a `const`
+  member function (#1554).
+
+## [0.19.2] - 2023-06-13
+
+### Changed
+
+- Install CAF tools to `${CMAKE_INSTALL_BINDIR}` to make packaging easier.
+- The OpenSSL module no longer hard-codes calls to `SSL_CTX_set_cipher_list` in
+  order to use the system settings by default. Users can provide a custom cipher
+  list by providing a value for the configuration option
+  `caf.openssl.cipher-list`. To restore the previous behavior, set this
+  parameter to `HIGH:!aNULL:!MD5` when running with a certificate and
+  `AECDH-AES256-SHA@SECLEVEL=0` otherwise (or without `@SECLEVEL=0` for older
+  versions of OpenSSL). Please note that these lists are *not* recommended as
+  safe defaults, which is why we are no longer setting these values.
+
+### Fixed
+
+- Add missing initialization code for the new caf-net module when using the
+  `CAF_MAIN` macro. This fixes the `WSANOTINITIALISED` error on Windows (#1409).
+- The WebSocket implementation now properly re-assembles fragmented frames.
+  Previously, a bug in the framing protocol implementation caused CAF to sever
+  the connection when encountering continuation frames (#1417).
+
+### Added
+
+- Add new utilities in `caf::chrono` for making it easier to handle ISO 8601
+  timestamps. The new function `std::chrono::to_string` converts system time to
+  an ISO timestamp. For reading an ISO timestamp, CAF now provides the class
+  `caf::chrono::datetime`. It can parse ISO-formatted strings via `parse` (or
+  `datetime::from_string`) and convert them to a local representation via
+  `to_local_time`. Please refer to the class documentation for more details.
+
+## [0.19.1] - 2023-05-01
+
+### Added
+
+- The class `json_value` can now hold unsigned 64-bit integer values. This
+  allows it to store values that would otherwise overflow a signed integer.
+  Values that can be represented in both integer types will return `true` for
+  `is_integer()` as well as for the new `is_unsigned()` function. Users can
+  obtain the stored value as `uint64_t` via `to_unsigned()`.
+
+### Changed
+
+- With the addition of the unsigned type to `json_value`, there is now a new
+  edge case where `is_number()` returns `true` but neither `is_integer()` nor
+  `is_double()` return `true`: integer values larger than `INT64_MAX` will only
+  return true for `is_unsigned()`.
+
+### Fixed
+
+- Fix flow setup for servers that use `web_socket::with`. This bug caused
+  servers to immediately abort incoming connection (#1402).
+- Make sure that a protocol stack ships pending data before closing a socket.
+  This bug prevented clients from receiving error messages from servers if the
+  server shuts down immediately after writing the message.
+
+## [0.19.0] - 2023-04-17
+
+### Added
+
+- The new classes `json_value`, `json_array` and `json_object` allow working
+  with JSON inputs directly. Actors can also pass around JSON values safely.
+- Futures can now convert to observable values for making it easier to process
+  asynchronous results with data flows.
+- Add new `*_weak` variants of `scheduled_actor::run_{delayed, scheduled}`.
+  These functions add no reference count to their actor, allowing it to become
+  unreachable if other actors no longer reference it.
+- Typed actors that use a `typed_actor_pointer` can now access the
+  `run_{delayed,scheduled}` member functions.
+- Scheduled and delayed sends now return a disposable (#1362).
+- Typed response handles received support for converting them to observable or
+  single objects.
+- Typed actors that use the type-erased pointer-view type received access to the
+  new flow API functions (e.g., `make_observable`).
+- Not initializing the meta objects table now prints a diagnosis message before
+  aborting the program. Previously, the application would usually just crash due
+  to a `nullptr`-access inside some CAF function.
+- The class `expected` now implements the monadic member functions from C++23
+  `std::expected` as well as `value_or`.
+
+### Changed
+
+- After collecting experience and feedback on the new HTTP and WebSocket APIs
+  introduced with 0.19.0-rc.1, we decided to completely overhaul the
+  user-facing, high-level APIs. Please consult the manual for the new DSL to
+  start servers.
+
+### Fixed
+
+- When exporting metrics to Prometheus, CAF now normalizes label names to meet
+  the Prometheus name requirements, e.g., `label-1` becomes `label_1` (#1386).
+- The SPSC buffer now makes sure that subscribers get informed of a producer has
+  already left before the subscriber appeared and vice versa. This fixes a race
+  on the buffer that could cause indefinite hanging of an application.
+- Fused stages now properly forward errors during the initial subscription to
+  their observer.
+- The `fan_out_request` request now properly deals with actor handles that
+  respond with `void` (#1369).
+- Fix subscription and event handling in flow buffer operator.
+- The `mcast` and `ucast` operators now stop calling `on_next` immediately when
+  disposed.
+- Actors no longer terminate despite having open streams (#1377).
+- Actors reading from external sources such as SPSC buffers via a local flow
+  could end up in a long-running read loop. To avoid potentially starving other
+  actors or activities, scheduled actors now limit the amount of actions that
+  may run in one iteration (#1364).
+- Destroying a consumer or producer resource before opening it lead to a stall
+  of the consumer / producer. The buffer now keeps track of whether `close` or
+  `abort` were called prior to consumers or producers attaching.
+- The function `caf::net::make_tcp_accept_socket` now handles passing `0.0.0.0`
+  correctly by opening the socket in IPv4 mode. Passing an empty bind address
+  now defaults to `INADDR6_ANY` (but allowing IPv4 clients) with `INADDR_ANY` as
+  fallback in case opening the socket in IPv6 mode failed.
+- Add missing includes that prevented CAF from compiling on GCC 13.
+- Fix AddressSanitizer and LeakSanitizer findings in some flow operators.
+
+### Deprecated
+
+- All member functions from `caf::expected` that have no equivalent in
+  `std::expected` are now deprecated. Further, `caf::expected<unit_t>` as well
+  as constructing from `unit_t` are deprecated as well. The reasoning behind
+  this decision is that `caf::expected` should eventually become an alias for
+  `std::expected<T, caf::error>`.
+
+## [0.19.0-rc.1] - 2022-10-31
+
+### Added
+
+- CAF now ships an all-new "flow API". This allows users to express data flows
+  at a high level of abstraction with a ReactiveX-style interface. Please refer
+  to new examples and the documentation for more details, as this is a large
+  addition that we cannot cover in-depth here.
+- CAF has received a new module: `caf.net`. This module enables CAF applications
+  to interface with network protocols more directly than `caf.io`. The new
+  module contains many low-level building blocks for implementing bindings to
+  network protocols. However, CAF also ships ready-to-use, high-level APIs for
+  WebSocket and HTTP. Please have a look at our new examples that showcase the
+  new APIs!
+- To complement the flow API as well as the new networking module, CAF also
+  received a new set of `async` building blocks. Most notably, this includes
+  asynchronous buffers for the flow API and futures / promises that enable the
+  new HTTP request API. We plan on making these building blocks more general in
+  the future for supporting a wider range of use cases.
+- JSON inspectors now allow users to use a custom `type_id_mapper` to generate
+  and parse JSON text that uses different names for the types than the C++ API.
+
+### Fixed
+
+- Passing a response promise to a run-delayed continuation could result in a
+  heap-use-after-free if the actor terminates before the action runs. The
+  destructor of the promise now checks for this case.
+- Accessing URI fields now always returns the normalized string.
+- Module options (e.g. for the `middleman`) now show up in `--long-help` output.
+- Fix undefined behavior in the Qt group chat example (#1336).
+- The `..._instance` convenience functions on the registry metric now properly
+  support `double` metrics and histograms.
+- The spinlock-based work-stealing implementation had severe performance issues
+  on Windows in some cases. We have switched to a regular, mutex-based approach
+  to avoid performance degradations. The new implementation also uses the
+  mutexes for interruptible waiting on the work queues, which improves the
+  responsiveness of the actor system (#1343).
+
+### Changed
+
+- Remote spawning of actors is no longer considered experimental.
+- The output of `--dump-config` now prints valid config file syntax.
+- When starting a new thread via CAF, the thread hooks API now receives an
+  additional tag that identifies the component responsible for launching the new
+  thread.
+- Response promises now hold a strong reference to their parent actor to avoid
+  `broken_promise` errors in some (legitimate) edge cases (#1361).
+- The old, experimental `stream` API in CAF has been replaced by a new API that
+  is based on the new flow API.
+
+### Deprecated
+
+- The obsolete meta-programming utilities `replies_to` and `reacts_to` no longer
+  serve any purpose and are thus deprecated.
+- The types `caf::byte`, `caf::optional` and `caf::string_view` became obsolete
+  after switching to C++17. Consequently, these types are now deprecated in
+  favor of their standard library counterpart.
+- The group-based pub/sub mechanism never fit nicely into the typed messaging
+  API and the fact that group messages use the regular mailbox makes it hard to
+  separate regular communication from multi-cast messages. Hence, we decided to
+  drop the group API and instead focus on the new flows and streams that can
+  replace group-communication in many use cases.
+- The "actor-composition operator" was added as a means to enable the first
+  experimental streaming API. With that gone, there's no justification to keep
+  this feature. While it has some neat niche-applications, the prevent some
+  optimization we would like to apply to the messaging layer. Hence, we will
+  remove this feature without a replacement.
+
+### Removed
+
+- The template type `caf::variant` also became obsolete when switching to C++17.
+  Unfortunately, the implementation was not as standalone as its deprecated
+  companions and some of the free functions like `holds_alternative` were too
+  greedy and did not play nicely with ADL when using `std::variant` in the same
+  code base. Since fixing `caf::variant` does not seem to be worth the time
+  investment, we remove this type without a deprecation cycle.
+
+## [0.18.7] - 2023-02-08
+
+### Fixed
+
+- The JSON parser no longer chokes when encountering `null` as last value before
+  the closing parenthesis.
+- The JSON reader now automatically widens integers to doubles as necessary.
+- Parsing deeply nested JSON inputs no longer produces a stack overflow.
+  Instead, the parser rejects any JSON with too many nesting levels.
+- The `fan_out_request` request now properly deals with actor handles that
+  respond with `void` (#1369). Note: back-ported fix from 0.19.
+
+## [0.18.6] - 2022-03-24
+
 ### Added
 
 - When adding CAF with exceptions enabled (default), the unit test framework now
@@ -29,6 +452,8 @@ is based on [Keep a Changelog](https://keepachangelog.com).
   newer EC-curve API.
 - When working with settings, `put`, `put_missing`, `get_if`, etc. now
   gracefully handle the `global` category when explicitly using it.
+- Messages created from a `message_builder` did not call the destructors for
+  their values, potentially causing memory leaks (#1321).
 
 ### Changed
 
@@ -428,9 +853,9 @@ is based on [Keep a Changelog](https://keepachangelog.com).
   already did.
 - The `typed_actor_view` decorator lacked several member functions such as
   `link_to`, `send_exit`, etc. These are now available.
-- Constructing a `typed_actor` handle from a pointer view failed du to a missing
-  constructor overload. This (explicit) overload now exists and the conversion
-  should work as expected.
+- Constructing a `typed_actor` handle from a pointer view failed due to a
+  missing constructor overload. This (explicit) overload now exists and the
+  conversion should work as expected.
 - Sending floating points to remote actors changed `infinity` and `NaN` to
   garbage values (#1107). The fixed packing / unpacking routines for IEEE 754
   values keep these non-numeric values intact now. It is worth mentioning that
@@ -782,7 +1207,16 @@ is based on [Keep a Changelog](https://keepachangelog.com).
 - Setting the log level to `quiet` now properly suppresses any log output.
 - Configuring colored terminal output should now print colored output.
 
-[Unreleased]: https://github.com/actor-framework/actor-framework/compare/0.18.5...master
+[Unreleased]: https://github.com/actor-framework/actor-framework/compare/0.19.5...master
+[0.19.5]: https://github.com/actor-framework/actor-framework/releases/0.19.5
+[0.19.4]: https://github.com/actor-framework/actor-framework/releases/0.19.4
+[0.19.3]: https://github.com/actor-framework/actor-framework/releases/0.19.3
+[0.19.2]: https://github.com/actor-framework/actor-framework/releases/0.19.2
+[0.19.1]: https://github.com/actor-framework/actor-framework/releases/0.19.1
+[0.19.0]: https://github.com/actor-framework/actor-framework/releases/0.19.0
+[0.19.0-rc.1]: https://github.com/actor-framework/actor-framework/releases/0.19.0-rc.1
+[0.18.7]: https://github.com/actor-framework/actor-framework/releases/0.18.7
+[0.18.6]: https://github.com/actor-framework/actor-framework/releases/0.18.6
 [0.18.5]: https://github.com/actor-framework/actor-framework/releases/0.18.5
 [0.18.4]: https://github.com/actor-framework/actor-framework/releases/0.18.4
 [0.18.3]: https://github.com/actor-framework/actor-framework/releases/0.18.3

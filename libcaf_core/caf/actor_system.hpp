@@ -4,17 +4,6 @@
 
 #pragma once
 
-#include <array>
-#include <atomic>
-#include <condition_variable>
-#include <cstddef>
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <thread>
-#include <typeinfo>
-
 #include "caf/abstract_actor.hpp"
 #include "caf/actor_cast.hpp"
 #include "caf/actor_clock.hpp"
@@ -29,7 +18,6 @@
 #include "caf/detail/spawn_fwd.hpp"
 #include "caf/detail/spawnable.hpp"
 #include "caf/fwd.hpp"
-#include "caf/group_manager.hpp"
 #include "caf/infer_handle.hpp"
 #include "caf/is_typed_actor.hpp"
 #include "caf/logger.hpp"
@@ -40,6 +28,17 @@
 #include "caf/string_algorithms.hpp"
 #include "caf/telemetry/metric_registry.hpp"
 #include "caf/type_id.hpp"
+
+#include <array>
+#include <atomic>
+#include <condition_variable>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <typeinfo>
 
 namespace caf::detail {
 
@@ -64,8 +63,8 @@ struct typed_mpi_access<result<Out...>(In...)> {
   std::string operator()() const {
     static_assert(sizeof...(In) > 0, "typed MPI without inputs");
     static_assert(sizeof...(Out) > 0, "typed MPI without outputs");
-    std::vector<std::string> inputs{to_string(type_name_v<In>)...};
-    std::vector<std::string> outputs1{to_string(type_name_v<Out>)...};
+    std::vector<std::string> inputs{std::string{type_name_v<In>}...};
+    std::vector<std::string> outputs1{std::string{type_name_v<Out>}...};
     std::string result = "(";
     result += join(inputs, ",");
     result += ") -> (";
@@ -85,8 +84,8 @@ std::string get_rtti_from_mpi() {
 
 namespace caf {
 
-/// Actor environment including scheduler, registry, and optional components
-/// such as a middleman.
+/// Actor environment including scheduler, registry, and optional
+/// components such as a middleman.
 class CAF_CORE_EXPORT actor_system {
 public:
   friend class logger;
@@ -109,6 +108,39 @@ public:
   actor_system(const actor_system&) = delete;
   actor_system& operator=(const actor_system&) = delete;
 
+  /// Calls a cleanup function in its destructor for cleaning up global state.
+  class [[nodiscard]] global_state_guard {
+  public:
+    using void_fun_t = void (*)();
+
+    explicit global_state_guard(void_fun_t f) : fun_(f) {
+      // nop
+    }
+
+    global_state_guard(global_state_guard&& other) noexcept : fun_(other.fun_) {
+      other.fun_ = nullptr;
+    }
+
+    global_state_guard& operator=(global_state_guard&& other) noexcept {
+      std::swap(fun_, other.fun_);
+      return *this;
+    }
+
+    global_state_guard() = delete;
+
+    global_state_guard(const global_state_guard&) = delete;
+
+    global_state_guard& operator=(const global_state_guard&) = delete;
+
+    ~global_state_guard() {
+      if (fun_ != nullptr)
+        fun_();
+    }
+
+  private:
+    void_fun_t fun_;
+  };
+
   /// An (optional) component of the actor system.
   class CAF_CORE_EXPORT module {
   public:
@@ -122,7 +154,7 @@ public:
 
     virtual ~module();
 
-    /// Returns the human-redable name of the module.
+    /// Returns the human-readable name of the module.
     const char* name() const noexcept;
 
     /// Starts any background threads needed by the module.
@@ -146,7 +178,8 @@ public:
 
   using module_array = std::array<module_ptr, module::num_ids>;
 
-  /// An (optional) component of the actor system with networking capabilities.
+  /// An (optional) component of the actor system with networking
+  /// capabilities.
   class CAF_CORE_EXPORT networking_module : public module {
   public:
     ~networking_module() override;
@@ -226,8 +259,7 @@ public:
   /// A message passing interface (MPI) in run-time checkable representation.
   using mpi = std::set<std::string>;
 
-  template <class T,
-            class E = typename std::enable_if<!is_typed_actor<T>::value>::type>
+  template <class T, class E = std::enable_if_t<!is_typed_actor_v<T>>>
   mpi message_types(detail::type_list<T>) const {
     return mpi{};
   }
@@ -239,9 +271,7 @@ public:
     return result;
   }
 
-  template <class T,
-            class E
-            = typename std::enable_if<!detail::is_type_list<T>::value>::type>
+  template <class T, class E = std::enable_if_t<!detail::is_type_list_v<T>>>
   mpi message_types(const T&) const {
     detail::type_list<T> token;
     return message_types(token);
@@ -297,9 +327,6 @@ public:
 
   /// Returns the system-wide actor registry.
   actor_registry& registry();
-
-  /// Returns the system-wide group manager.
-  group_manager& groups();
 
   /// Returns `true` if the I/O module is available, `false` otherwise.
   bool has_middleman() const;
@@ -364,6 +391,7 @@ public:
   infer_handle_from_class_t<C> spawn(Ts&&... xs) {
     check_invariants<C>();
     actor_config cfg;
+    cfg.mbox_factory = mailbox_factory();
     return spawn_impl<C, Os>(cfg, detail::spawn_fwd<Ts>(xs)...);
   }
 
@@ -402,15 +430,15 @@ public:
     static_assert(spawnable,
                   "cannot spawn function-based actor with given arguments");
     actor_config cfg;
-    return spawn_functor<Os>(detail::bool_token<spawnable>{}, cfg, fun,
+    cfg.mbox_factory = mailbox_factory();
+    return spawn_functor<Os>(std::bool_constant<spawnable>{}, cfg, fun,
                              std::forward<Ts>(xs)...);
   }
 
   /// Returns a new actor with run-time type `name`, constructed
   /// with the arguments stored in `args`.
   /// @experimental
-  template <class Handle,
-            class E = typename std::enable_if<is_handle<Handle>::value>::type>
+  template <class Handle, class E = std::enable_if_t<is_handle_v<Handle>>>
   expected<Handle>
   spawn(const std::string& name, message args, execution_unit* ctx = nullptr,
         bool check_interface = true, const mpi* expected_ifs = nullptr) {
@@ -423,89 +451,6 @@ public:
     if (!res)
       return std::move(res.error());
     return actor_cast<Handle>(std::move(*res));
-  }
-
-  /// Spawns a class-based actor `T` immediately joining the groups in
-  /// range `[first, last)`.
-  /// @private
-  template <class T, spawn_options Os, class Iter, class... Ts>
-  infer_handle_from_class_t<T>
-  spawn_class_in_groups(actor_config& cfg, Iter first, Iter last, Ts&&... xs) {
-    static_assert(std::is_same<infer_handle_from_class_t<T>, actor>::value,
-                  "only dynamically-typed actors can be spawned in a group");
-    check_invariants<T>();
-    auto irange = make_input_range(first, last);
-    cfg.groups = &irange;
-    return spawn_class<T, Os>(cfg, std::forward<Ts>(xs)...);
-  }
-
-  /// Spawns a class-based actor `T` immediately joining the groups in
-  /// range `[first, last)`.
-  /// @private
-  template <spawn_options Os, class Iter, class F, class... Ts>
-  infer_handle_from_fun_t<F> spawn_fun_in_groups(actor_config& cfg, Iter first,
-                                                 Iter second, F& fun,
-                                                 Ts&&... xs) {
-    using impl = infer_impl_from_fun_t<F>;
-    check_invariants<impl>();
-    using traits = actor_traits<impl>;
-    static_assert(traits::is_dynamically_typed,
-                  "only dynamically-typed actors can join groups");
-    static constexpr bool spawnable = detail::spawnable<F, impl, Ts...>();
-    static_assert(spawnable,
-                  "cannot spawn function-based actor with given arguments");
-    static constexpr bool enabled = traits::is_dynamically_typed && spawnable;
-    auto irange = make_input_range(first, second);
-    cfg.groups = &irange;
-    return spawn_functor<Os>(detail::bool_token<enabled>{}, cfg, fun,
-                             std::forward<Ts>(xs)...);
-  }
-
-  /// Returns a new functor-based actor subscribed to all groups in `gs`.
-  template <spawn_options Os = no_spawn_options, class F, class... Ts>
-  infer_handle_from_fun_t<F>
-  spawn_in_groups(std::initializer_list<group> gs, F fun, Ts&&... xs) {
-    actor_config cfg;
-    return spawn_fun_in_groups<Os>(cfg, gs.begin(), gs.end(), fun,
-                                   std::forward<Ts>(xs)...);
-  }
-
-  /// Returns a new functor-based actor subscribed to all groups in `gs`.
-  template <spawn_options Os = no_spawn_options, class Gs, class F, class... Ts>
-  infer_handle_from_fun_t<F> spawn_in_groups(const Gs& gs, F fun, Ts&&... xs) {
-    actor_config cfg;
-    return spawn_fun_in_groups<Os>(cfg, gs.begin(), gs.end(), fun,
-                                   std::forward<Ts>(xs)...);
-  }
-
-  /// Returns a new functor-based actor subscribed to all groups in `gs`.
-  template <spawn_options Os = no_spawn_options, class F, class... Ts>
-  infer_handle_from_fun_t<F>
-  spawn_in_group(const group& grp, F fun, Ts&&... xs) {
-    return spawn_in_groups<Os>({grp}, std::move(fun), std::forward<Ts>(xs)...);
-  }
-
-  /// Returns a new class-based actor subscribed to all groups in `gs`.
-  template <class T, spawn_options Os = no_spawn_options, class... Ts>
-  infer_handle_from_class_t<T>
-  spawn_in_groups(std::initializer_list<group> gs, Ts&&... xs) {
-    actor_config cfg;
-    return spawn_class_in_groups<T, Os>(cfg, gs.begin(), gs.end(),
-                                        std::forward<Ts>(xs)...);
-  }
-
-  /// Returns a new class-based actor subscribed to all groups in `gs`.
-  template <class T, spawn_options Os = no_spawn_options, class Gs, class... Ts>
-  infer_handle_from_class_t<T> spawn_in_groups(const Gs& gs, Ts&&... xs) {
-    actor_config cfg;
-    return spawn_class_in_groups<T, Os>(cfg, gs.begin(), gs.end(),
-                                        std::forward<Ts>(xs)...);
-  }
-
-  /// Returns a new class-based actor subscribed to all groups in `gs`.
-  template <class T, spawn_options Os = no_spawn_options, class... Ts>
-  infer_handle_from_class_t<T> spawn_in_group(const group& grp, Ts&&... xs) {
-    return spawn_in_groups<T, Os>({grp}, std::forward<Ts>(xs)...);
   }
 
   /// Returns whether this actor system calls `await_all_actors_done`
@@ -535,19 +480,19 @@ public:
 
   /// Calls all thread started hooks
   /// @warning must be called by thread which is about to start
-  void thread_started();
+  void thread_started(thread_owner);
 
   /// Calls all thread terminates hooks
   /// @warning must be called by thread which is about to terminate
   void thread_terminates();
 
   template <class F>
-  std::thread launch_thread(const char* thread_name, F fun) {
-    auto body = [this, thread_name, f{std::move(fun)}](auto guard) {
+  std::thread launch_thread(const char* thread_name, thread_owner tag, F fun) {
+    auto body = [this, thread_name, tag, f{std::move(fun)}](auto guard) {
       CAF_IGNORE_UNUSED(guard);
       CAF_SET_LOGGER_SYS(this);
       detail::set_thread_name(thread_name);
-      thread_started();
+      thread_started(tag);
       f();
       thread_terminates();
     };
@@ -585,6 +530,103 @@ public:
 #endif
     ptr->launch(cfg.host, has_lazy_init_flag(Os), has_hide_flag(Os));
     return res;
+  }
+
+  /// Utility function object that allows users to explicitly launch an action
+  /// by calling `operator()` but calls it implicitly at scope exit.
+  template <class F>
+  class launcher {
+  public:
+    launcher() : ready(false) {
+      // nop
+    }
+
+    explicit launcher(F&& f) : ready(true) {
+      new (&fn) F(std::move(f));
+    }
+
+    launcher(launcher&& other) : ready(other.ready) {
+      if (ready) {
+        new (&fn) F(std::move(other.fn));
+        other.reset();
+      }
+    }
+
+    launcher& operator=(launcher&& other) {
+      if (this != &other) {
+        if (ready)
+          reset();
+        if (other.ready) {
+          ready = true;
+          new (&fn) F(std::move(other.fn));
+          other.reset();
+        }
+      }
+      return *this;
+    }
+
+    launcher(const launcher&) = delete;
+
+    launcher& operator=(const launcher&) = delete;
+
+    ~launcher() {
+      if (ready) {
+        fn();
+        fn.~F();
+      }
+    }
+
+    void operator()() {
+      if (ready) {
+        fn();
+        reset();
+      }
+    }
+
+  private:
+    // @pre `ready == true`
+    void reset() {
+      CAF_ASSERT(ready);
+      ready = false;
+      fn.~F();
+    }
+
+    bool ready;
+    union {
+      F fn;
+    };
+  };
+
+  /// Creates a new, cooperatively scheduled actor. The returned actor is
+  /// constructed but has not been added to the scheduler yet to allow the
+  /// caller to set up any additional logic on the actor before it starts.
+  /// @returns A pointer to the new actor and a function object that the caller
+  ///          must invoke to launch the actor. After the actor started running,
+  ///          the caller *must not* access the pointer again.
+  template <class Impl, spawn_options Os = no_spawn_options, class... Ts>
+  auto spawn_inactive(Ts&&... xs) {
+    static_assert(std::is_base_of_v<scheduled_actor, Impl>,
+                  "only scheduled actors may get spawned inactively");
+    CAF_SET_LOGGER_SYS(this);
+    actor_config cfg{dummy_execution_unit(), nullptr};
+    if constexpr (has_detach_flag(Os))
+      cfg.flags |= abstract_actor::is_detached_flag;
+    if constexpr (has_hide_flag(Os))
+      cfg.flags |= abstract_actor::is_hidden_flag;
+    cfg.mbox_factory = mailbox_factory();
+    auto res = make_actor<Impl>(next_actor_id(), node(), this, cfg,
+                                std::forward<Ts>(xs)...);
+    auto ptr = static_cast<Impl*>(actor_cast<abstract_actor*>(res));
+#ifdef CAF_ENABLE_ACTOR_PROFILER
+    profiler_add_actor(*ptr, cfg.parent);
+#endif
+    auto launch = [strong_ptr = std::move(res), host{cfg.host}] {
+      // Note: we pass `res` to this lambda instead of `ptr` to keep a strong
+      //       reference to the actor.
+      static_cast<Impl*>(actor_cast<abstract_actor*>(strong_ptr))
+        ->launch(host, has_lazy_init_flag(Os), has_hide_flag(Os));
+    };
+    return std::make_tuple(ptr, launcher<decltype(launch)>(std::move(launch)));
   }
 
   void profiler_add_actor(const local_actor& self, const local_actor* parent) {
@@ -647,14 +689,14 @@ public:
 private:
   template <class T>
   void check_invariants() {
-    static_assert(!std::is_base_of<prohibit_top_level_spawn_marker, T>::value,
+    static_assert(!std::is_base_of_v<prohibit_top_level_spawn_marker, T>,
                   "This actor type cannot be spawned through an actor system. "
                   "Probably you have tried to spawn a broker.");
   }
 
   expected<strong_actor_ptr>
   dyn_spawn_impl(const std::string& name, message& args, execution_unit* ctx,
-                 bool check_interface, optional<const mpi&> expected_ifs);
+                 bool check_interface, const mpi* expected_ifs);
 
   /// Sets the internal actor for dynamic spawn operations.
   void spawn_serv(strong_actor_ptr x) {
@@ -665,6 +707,8 @@ private:
   void config_serv(strong_actor_ptr x) {
     config_serv_ = std::move(x);
   }
+
+  detail::mailbox_factory* mailbox_factory();
 
   // -- member variables -------------------------------------------------------
 
@@ -689,9 +733,6 @@ private:
   /// Maps well-known actor names to actor handles.
   actor_registry registry_;
 
-  /// Maps well-known group names to group handles.
-  group_manager groups_;
-
   /// Stores optional actor system components.
   module_array modules_;
 
@@ -709,16 +750,6 @@ private:
 
   /// The system-wide, user-provided configuration.
   actor_system_config& cfg_;
-
-  /// Stores whether the logger has run its destructor and stopped any thread,
-  /// file handle, etc.
-  std::atomic<bool> logger_dtor_done_;
-
-  /// Guards `logger_dtor_done_`.
-  mutable std::mutex logger_dtor_mtx_;
-
-  /// Allows waiting on specific values for `logger_dtor_done_`.
-  mutable std::condition_variable logger_dtor_cv_;
 
   /// Stores the system-wide factory for deserializing tracing data.
   tracing_data_factory* tracing_context_;

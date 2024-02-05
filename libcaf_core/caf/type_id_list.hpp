@@ -4,21 +4,21 @@
 
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
-#include <cstring>
-#include <string>
-
 #include "caf/detail/comparable.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/implicit_conversions.hpp"
 #include "caf/span.hpp"
 #include "caf/type_id.hpp"
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <string>
+
 namespace caf {
 
 /// A list of type IDs, stored in a size-prefix, contiguous memory block.
-class type_id_list : detail::comparable<type_id_list> {
+class CAF_CORE_EXPORT type_id_list : detail::comparable<type_id_list> {
 public:
   using pointer = const type_id_t*;
 
@@ -146,7 +146,7 @@ struct to_type_id_list_helper;
 template <class... Ts>
 struct to_type_id_list_helper<type_list<Ts...>> {
   static constexpr type_id_list get() {
-    return make_type_id_list<typename strip_param<Ts>::type...>();
+    return make_type_id_list<Ts...>();
   }
 };
 

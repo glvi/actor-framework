@@ -1,10 +1,10 @@
 // showcases how to add custom message types to CAF
 // if friend access for serialization is available
 
+#include "caf/all.hpp"
+
 #include <iostream>
 #include <utility>
-
-#include "caf/all.hpp"
 
 class foo;
 
@@ -58,7 +58,7 @@ private:
 
 behavior testee(event_based_actor* self) {
   return {
-    [=](const foo& x) { aout(self) << deep_to_string(x) << endl; },
+    [self](const foo& x) { aout(self).println("{}", x); },
   };
 }
 

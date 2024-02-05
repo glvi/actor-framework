@@ -8,14 +8,15 @@
 
 #pragma once
 
-#include <cstdint>
-#include <string>
-#include <type_traits>
-
 #include "caf/default_enum_inspect.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/fwd.hpp"
 #include "caf/is_error_code_enum.hpp"
+
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <type_traits>
 
 namespace caf {
 
@@ -45,7 +46,7 @@ enum class exit_reason : uint8_t {
 CAF_CORE_EXPORT std::string to_string(exit_reason);
 
 /// @relates exit_reason
-CAF_CORE_EXPORT bool from_string(string_view, exit_reason&);
+CAF_CORE_EXPORT bool from_string(std::string_view, exit_reason&);
 
 /// @relates exit_reason
 CAF_CORE_EXPORT bool from_integer(std::underlying_type_t<exit_reason>,

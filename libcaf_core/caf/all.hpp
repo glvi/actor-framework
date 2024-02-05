@@ -4,14 +4,11 @@
 
 #pragma once
 
-#include "caf/config.hpp"
-
 #include "caf/abstract_actor.hpp"
-#include "caf/abstract_channel.hpp"
-#include "caf/abstract_group.hpp"
 #include "caf/actor.hpp"
 #include "caf/actor_addr.hpp"
 #include "caf/actor_clock.hpp"
+#include "caf/actor_from_state.hpp"
 #include "caf/actor_ostream.hpp"
 #include "caf/actor_pool.hpp"
 #include "caf/actor_proxy.hpp"
@@ -19,20 +16,15 @@
 #include "caf/actor_system_config.hpp"
 #include "caf/actor_traits.hpp"
 #include "caf/after.hpp"
-#include "caf/attach_continuous_stream_source.hpp"
-#include "caf/attach_continuous_stream_stage.hpp"
-#include "caf/attach_stream_sink.hpp"
-#include "caf/attach_stream_source.hpp"
-#include "caf/attach_stream_stage.hpp"
 #include "caf/attachable.hpp"
 #include "caf/behavior.hpp"
-#include "caf/behavior_policy.hpp"
 #include "caf/binary_deserializer.hpp"
 #include "caf/binary_serializer.hpp"
 #include "caf/blocking_actor.hpp"
 #include "caf/byte_buffer.hpp"
 #include "caf/byte_span.hpp"
 #include "caf/caf_main.hpp"
+#include "caf/config.hpp"
 #include "caf/config_option.hpp"
 #include "caf/config_option_adder.hpp"
 #include "caf/config_value.hpp"
@@ -42,7 +34,6 @@
 #include "caf/deep_to_string.hpp"
 #include "caf/defaults.hpp"
 #include "caf/deserializer.hpp"
-#include "caf/downstream_msg.hpp"
 #include "caf/error.hpp"
 #include "caf/event_based_actor.hpp"
 #include "caf/exec_main.hpp"
@@ -51,10 +42,9 @@
 #include "caf/expected.hpp"
 #include "caf/extend.hpp"
 #include "caf/function_view.hpp"
-#include "caf/fused_downstream_manager.hpp"
-#include "caf/group.hpp"
 #include "caf/hash/fnv.hpp"
 #include "caf/init_global_meta_objects.hpp"
+#include "caf/keep_behavior.hpp"
 #include "caf/local_actor.hpp"
 #include "caf/logger.hpp"
 #include "caf/make_config_option.hpp"
@@ -70,10 +60,10 @@
 #include "caf/proxy_registry.hpp"
 #include "caf/raise_error.hpp"
 #include "caf/ref_counted.hpp"
-#include "caf/replies_to.hpp"
 #include "caf/response_handle.hpp"
 #include "caf/result.hpp"
 #include "caf/resumable.hpp"
+#include "caf/scheduler/abstract_coordinator.hpp"
 #include "caf/scoped_actor.hpp"
 #include "caf/scoped_execution_unit.hpp"
 #include "caf/sec.hpp"
@@ -82,8 +72,6 @@
 #include "caf/skip.hpp"
 #include "caf/spawn_options.hpp"
 #include "caf/stateful_actor.hpp"
-#include "caf/stream.hpp"
-#include "caf/stream_slot.hpp"
 #include "caf/system_messages.hpp"
 #include "caf/term.hpp"
 #include "caf/thread_hook.hpp"
@@ -99,13 +87,7 @@
 #include "caf/typed_message_view.hpp"
 #include "caf/typed_response_promise.hpp"
 #include "caf/unit.hpp"
-#include "caf/upstream_msg.hpp"
 #include "caf/uuid.hpp"
-
-#include "caf/decorator/sequencer.hpp"
-
-#include "caf/scheduler/abstract_coordinator.hpp"
-#include "caf/scheduler/test_coordinator.hpp"
 
 ///
 /// @mainpage CAF
@@ -141,6 +123,33 @@
 ///
 /// @namespace caf::policy
 /// Contains policies encapsulating characteristics or algorithms.
+///
+/// @namespace caf::telemetry
+/// Contains classes and functions for collecting telemetry data.
+///
+/// @namespace caf::net
+/// Contains all classes and functions related to network protocols.
+///
+/// @namespace caf::net::dsl
+/// Contains building blocks to assemble protocol stacks in a declarative way.
+///
+/// @namespace caf::net::http
+/// Contains an implementation for HTTP.
+///
+/// @namespace caf::net::ssl
+/// Contains wrappers for convenient access to SSL.
+///
+/// @namespace caf::net::octet_stream
+/// Contains classes and utilities for transports that operate on raw octets.
+///
+/// @namespace caf::net::prometheus
+/// Contains a scraper for exposing metrics from an actor system to Prometheus.
+///
+/// @namespace caf::net::web_socket
+/// Contains an implementation for message exchange over the WebSocket protocol.
+///
+/// @namespace caf::net::lp
+/// Contains an implementation for message exchange over length-prefix framing.
 ///
 /// @namespace caf::io
 /// Contains all IO-related classes and functions.

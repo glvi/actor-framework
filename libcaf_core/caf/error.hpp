@@ -4,10 +4,6 @@
 
 #pragma once
 
-#include <cstdint>
-#include <memory>
-#include <utility>
-
 #include "caf/detail/comparable.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/error_code.hpp"
@@ -16,6 +12,10 @@
 #include "caf/message.hpp"
 #include "caf/none.hpp"
 #include "caf/type_id.hpp"
+
+#include <cstdint>
+#include <memory>
+#include <utility>
 
 namespace caf {
 
@@ -144,6 +144,30 @@ public:
   int compare(const error&) const noexcept;
 
   int compare(uint8_t code, type_id_t category) const noexcept;
+
+  /// Returns a copy of `this` if `!empty()` or else returns a new error from
+  /// given arguments.
+  template <class Enum, class... Ts>
+  error or_else(Enum code, Ts&&... args) const& {
+    if (!empty())
+      return *this;
+    if constexpr (sizeof...(Ts) > 0)
+      return error{code, make_message(std::forward<Ts>(args)...)};
+    else
+      return error{code};
+  }
+
+  /// Returns a copy of `this` if `!empty()` or else returns a new error from
+  /// given arguments.
+  template <class Enum, class... Ts>
+  error or_else(Enum code, Ts&&... args) && {
+    if (!empty())
+      return std::move(*this);
+    if constexpr (sizeof...(Ts) > 0)
+      return error{code, make_message(std::forward<Ts>(args)...)};
+    else
+      return error{code};
+  }
 
   // -- modifiers --------------------------------------------------------------
 

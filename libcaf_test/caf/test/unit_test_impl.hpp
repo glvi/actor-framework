@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "caf/config.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -13,11 +15,11 @@
 #include <regex>
 #include <thread>
 
-#include "caf/config.hpp"
-
 #ifndef CAF_WINDOWS
 #  include <unistd.h>
 #endif
+
+#include "caf/test/unit_test.hpp"
 
 #include "caf/config_option_adder.hpp"
 #include "caf/config_option_set.hpp"
@@ -25,9 +27,9 @@
 #include "caf/detail/set_thread_name.hpp"
 #include "caf/settings.hpp"
 #include "caf/string_algorithms.hpp"
-#include "caf/test/unit_test.hpp"
 
 namespace caf::test {
+inline namespace legacy {
 
 #ifdef CAF_ENABLE_EXCEPTIONS
 
@@ -48,7 +50,7 @@ public:
 
 private:
   watchdog(int secs) {
-    thread_ = std::thread{[=] {
+    thread_ = std::thread{[this, secs] {
       caf::detail::set_thread_name("test.watchdog");
       auto tp = std::chrono::high_resolution_clock::now()
                 + std::chrono::seconds(secs);
@@ -169,7 +171,8 @@ bool check(test* parent, const char* file, size_t line, const char* expr,
 }
 
 bool check_un(bool result, const char* file, size_t line, const char* expr) {
-  string_view rel_up = "../";
+  using namespace std::literals;
+  auto rel_up = "../"sv;
   while (strncmp(file, rel_up.data(), rel_up.size()) == 0)
     file += rel_up.size();
   auto parent = engine::current_test();
@@ -191,7 +194,8 @@ bool check_un(bool result, const char* file, size_t line, const char* expr) {
 
 bool check_bin(bool result, const char* file, size_t line, const char* expr,
                const std::string& lhs, const std::string& rhs) {
-  string_view rel_up = "../";
+  using namespace std::literals;
+  auto rel_up = "../"sv;
   while (strncmp(file, rel_up.data(), rel_up.size()) == 0)
     file += rel_up.size();
   auto parent = engine::current_test();
@@ -214,7 +218,8 @@ bool check_bin(bool result, const char* file, size_t line, const char* expr,
 }
 
 void require_un(bool result, const char* file, size_t line, const char* expr) {
-  string_view rel_up = "../";
+  using namespace std::literals;
+  auto rel_up = "../"sv;
   while (strncmp(file, rel_up.data(), rel_up.size()) == 0)
     file += rel_up.size();
   auto parent = engine::current_test();
@@ -240,7 +245,8 @@ void require_un(bool result, const char* file, size_t line, const char* expr) {
 
 void require_bin(bool result, const char* file, size_t line, const char* expr,
                  const std::string& lhs, const std::string& rhs) {
-  string_view rel_up = "../";
+  using namespace std::literals;
+  auto rel_up = "../"sv;
   while (strncmp(file, rel_up.data(), rel_up.size()) == 0)
     file += rel_up.size();
   auto parent = engine::current_test();
@@ -653,6 +659,7 @@ int main(int argc, char** argv) {
   return result ? 0 : 1;
 }
 
+} // namespace legacy
 } // namespace caf::test
 
 #ifndef CAF_TEST_NO_MAIN

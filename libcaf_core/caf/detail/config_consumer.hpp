@@ -4,13 +4,13 @@
 
 #pragma once
 
-#include <string>
-
 #include "caf/config_option_set.hpp"
 #include "caf/config_value.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/dictionary.hpp"
 #include "caf/settings.hpp"
+
+#include <string>
 
 namespace caf::detail {
 
@@ -59,8 +59,8 @@ private:
   // -- member variables -------------------------------------------------------
 
   const config_option_set* options_ = nullptr;
-  variant<none_t, config_consumer*, config_list_consumer*,
-          config_value_consumer*>
+  std::variant<none_t, config_consumer*, config_list_consumer*,
+               config_value_consumer*>
     parent_;
 };
 
@@ -102,7 +102,15 @@ public:
 
   template <class T>
   pec value(T&& x) {
-    return value_impl(config_value{std::forward<T>(x)});
+    using val_t = std::decay_t<T>;
+    if constexpr (std::is_same_v<val_t, uint64_t>) {
+      if (x <= INT64_MAX)
+        return value_impl(config_value{static_cast<int64_t>(x)});
+      else
+        return pec::integer_overflow;
+    } else {
+      return value_impl(config_value{std::forward<T>(x)});
+    }
   }
 
   const std::string& current_key() {
@@ -119,7 +127,7 @@ private:
   // -- member variables -------------------------------------------------------
 
   const config_option_set* options_ = nullptr;
-  variant<none_t, config_consumer*, config_list_consumer*> parent_;
+  std::variant<none_t, config_consumer*, config_list_consumer*> parent_;
   settings* cfg_ = nullptr;
   std::string current_key_;
   std::string category_;
@@ -132,7 +140,7 @@ public:
 
   template <class T>
   void value(T&& x) {
-    result = config_value{std::forward<T>(x)};
+    result = std::forward<T>(x);
   }
 
   config_list_consumer begin_list();

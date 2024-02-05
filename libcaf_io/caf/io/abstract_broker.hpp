@@ -4,11 +4,6 @@
 
 #pragma once
 
-#include <unordered_map>
-#include <vector>
-
-#include "caf/byte_buffer.hpp"
-#include "caf/detail/io_export.hpp"
 #include "caf/io/accept_handle.hpp"
 #include "caf/io/connection_handle.hpp"
 #include "caf/io/datagram_handle.hpp"
@@ -20,8 +15,14 @@
 #include "caf/io/network/stream_manager.hpp"
 #include "caf/io/receive_policy.hpp"
 #include "caf/io/system_messages.hpp"
+
+#include "caf/byte_buffer.hpp"
+#include "caf/detail/io_export.hpp"
 #include "caf/prohibit_top_level_spawn_marker.hpp"
 #include "caf/scheduled_actor.hpp"
+
+#include <unordered_map>
+#include <vector>
 
 namespace caf::io {
 
@@ -80,8 +81,6 @@ public:
   // -- overridden modifiers of abstract_actor ---------------------------------
 
   bool enqueue(mailbox_element_ptr, execution_unit*) override;
-
-  bool enqueue(strong_actor_ptr, message_id, message, execution_unit*) override;
 
   // -- overridden modifiers of local_actor ------------------------------------
 
@@ -145,7 +144,7 @@ public:
   void write(connection_handle hdl, size_t bs, const void* buf);
 
   /// Writes `buf` into the buffer for a given connection.
-  void write(connection_handle hdl, span<const byte> buf);
+  void write(connection_handle hdl, span<const std::byte> buf);
 
   /// Sends the content of the buffer for a given connection.
   void flush(connection_handle hdl);
@@ -179,8 +178,8 @@ public:
   /// Tries to connect to `host` on given `port` and creates
   /// a new scribe describing the connection afterwards.
   /// @returns The handle of the new `scribe` on success.
-  expected<connection_handle>
-  add_tcp_scribe(const std::string& host, uint16_t port);
+  expected<connection_handle> add_tcp_scribe(const std::string& host,
+                                             uint16_t port);
 
   /// Moves the initialized `scribe` instance `ptr` from another broker to this
   /// broker.
@@ -207,8 +206,8 @@ public:
   void add_datagram_servant(datagram_servant_ptr ptr);
 
   /// Adds the `datagram_servant` under an additional `hdl`.
-  void
-  add_hdl_for_datagram_servant(datagram_servant_ptr ptr, datagram_handle hdl);
+  void add_hdl_for_datagram_servant(datagram_servant_ptr ptr,
+                                    datagram_handle hdl);
 
   /// Creates and assigns a new `datagram_servant` from a given socket `fd`.
   datagram_handle add_datagram_servant(network::native_socket fd);
@@ -222,8 +221,8 @@ public:
   /// Creates a new `datagram_servant` for the remote endpoint `host` and
   /// `port`.
   /// @returns The handle to the new `datagram_servant`.
-  expected<datagram_handle>
-  add_udp_datagram_servant(const std::string& host, uint16_t port);
+  expected<datagram_handle> add_udp_datagram_servant(const std::string& host,
+                                                     uint16_t port);
 
   /// Tries to open a local port and creates a `datagram_servant` managing it on
   /// success. If `port == 0`, then the broker will ask the operating system to
@@ -386,12 +385,12 @@ protected:
 
   /// Returns a `scribe` or `doorman` identified by `hdl`.
   template <class Handle>
-  auto by_id(Handle hdl) -> optional<decltype(*ptr_of(hdl))> {
+  auto by_id(Handle hdl) -> decltype(ptr_of(hdl)) {
     auto& elements = get_map(hdl);
     auto i = elements.find(hdl);
     if (i == elements.end())
-      return none;
-    return *(i->second);
+      return nullptr;
+    return std::addressof(*(i->second));
   }
 
 private:

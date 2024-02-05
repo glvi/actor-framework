@@ -2,6 +2,11 @@
 // the main distribution directory for license terms and copyright or visit
 // https://github.com/actor-framework/actor-framework/blob/master/LICENSE.
 
+#include "caf/io/all.hpp"
+
+#include "caf/all.hpp"
+#include "caf/detail/base64.hpp"
+
 #include <unistd.h>
 
 #include <cstdio>
@@ -11,10 +16,6 @@
 #include <string>
 #include <vector>
 
-#include "caf/all.hpp"
-#include "caf/detail/base64.hpp"
-#include "caf/io/all.hpp"
-
 using namespace caf;
 
 using std::cerr;
@@ -22,7 +23,6 @@ using std::cout;
 using std::endl;
 using std::string;
 using std::vector;
-
 
 class host_desc {
 public:

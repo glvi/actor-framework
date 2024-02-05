@@ -4,20 +4,21 @@
 
 #pragma once
 
-#include <unordered_map>
-#include <vector>
-
-#include "caf/byte_buffer.hpp"
-#include "caf/detail/io_export.hpp"
 #include "caf/io/fwd.hpp"
 #include "caf/io/network/datagram_manager.hpp"
 #include "caf/io/network/event_handler.hpp"
 #include "caf/io/network/ip_endpoint.hpp"
 #include "caf/io/network/native_socket.hpp"
 #include "caf/io/receive_policy.hpp"
+
+#include "caf/byte_buffer.hpp"
+#include "caf/detail/io_export.hpp"
 #include "caf/logger.hpp"
 #include "caf/raise_error.hpp"
 #include "caf/ref_counted.hpp"
+
+#include <unordered_map>
+#include <vector>
 
 namespace caf::io::network {
 
@@ -56,7 +57,7 @@ public:
   /// @warning Must not be modified outside the IO multiplexers event loop
   ///          once the stream has been started.
   void enqueue_datagram(datagram_handle hdl, byte_buffer buf) {
-    wr_offline_buf_.emplace_back(hdl, move(buf));
+    wr_offline_buf_.emplace_back(hdl, std::move(buf));
   }
 
   /// Returns the read buffer of this stream.

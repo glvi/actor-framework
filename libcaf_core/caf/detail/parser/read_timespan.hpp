@@ -4,16 +4,16 @@
 
 #pragma once
 
-#include <chrono>
-#include <cstdint>
-#include <string>
-
 #include "caf/config.hpp"
 #include "caf/detail/parser/read_signed_integer.hpp"
 #include "caf/detail/scope_guard.hpp"
-#include "caf/optional.hpp"
 #include "caf/pec.hpp"
 #include "caf/timestamp.hpp"
+
+#include <chrono>
+#include <cstdint>
+#include <optional>
+#include <string>
 
 CAF_PUSH_UNUSED_LABEL_WARNING
 
@@ -24,7 +24,7 @@ namespace caf::detail::parser {
 /// Reads a timespan.
 template <class State, class Consumer>
 void read_timespan(State& ps, Consumer&& consumer,
-                   optional<int64_t> num = none) {
+                   std::optional<int64_t> num = std::nullopt) {
   using namespace std::chrono;
   struct interim_consumer {
     using value_type = int64_t;
@@ -37,10 +37,6 @@ void read_timespan(State& ps, Consumer&& consumer,
   };
   interim_consumer ic;
   timespan result;
-  auto g = make_scope_guard([&] {
-    if (ps.code <= pec::trailing_character)
-      consumer.value(std::move(result));
-  });
   // clang-format off
   start();
   state(init) {
@@ -72,6 +68,8 @@ void read_timespan(State& ps, Consumer&& consumer,
   }
   fin();
   // clang-format on
+  if (ps.code <= pec::trailing_character)
+    consumer.value(std::move(result));
 }
 
 } // namespace caf::detail::parser

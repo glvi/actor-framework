@@ -4,13 +4,14 @@
 
 #pragma once
 
-#include <cstddef>
-
 #include "caf/detail/double_ended_queue.hpp"
 #include "caf/detail/set_thread_name.hpp"
 #include "caf/execution_unit.hpp"
 #include "caf/logger.hpp"
 #include "caf/resumable.hpp"
+#include "caf/thread_owner.hpp"
+
+#include <cstddef>
 
 namespace caf::scheduler {
 
@@ -37,7 +38,8 @@ public:
 
   void start() {
     CAF_ASSERT(this_thread_.get_id() == std::thread::id{});
-    this_thread_ = system().launch_thread("caf.worker", [this] { run(); });
+    this_thread_ = system().launch_thread("caf.worker", thread_owner::scheduler,
+                                          [this] { run(); });
   }
 
   worker(const worker&) = delete;
