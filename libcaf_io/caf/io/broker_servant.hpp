@@ -8,8 +8,10 @@
 #include "caf/io/fwd.hpp"
 #include "caf/io/system_messages.hpp"
 
+#include "caf/detail/assert.hpp"
 #include "caf/fwd.hpp"
 #include "caf/mailbox_element.hpp"
+#include "caf/proxy_registry.hpp"
 
 namespace caf::io {
 
@@ -59,19 +61,20 @@ protected:
     ptr->erase(hdl_);
   }
 
-  void invoke_mailbox_element_impl(execution_unit* ctx, mailbox_element& x) {
+  void invoke_mailbox_element_impl(scheduler* ctx, mailbox_element& x) {
     auto self = this->parent();
-    auto pfac = self->proxy_registry_ptr();
-    if (pfac)
-      ctx->proxy_registry_ptr(pfac);
-    auto guard = detail::scope_guard{[=]() noexcept {
-      if (pfac)
-        ctx->proxy_registry_ptr(nullptr);
-    }};
-    self->activate(ctx, x);
+    if (auto pfac = self->proxy_registry_ptr()) {
+      proxy_registry::current(pfac);
+      auto guard = detail::scope_guard{[]() noexcept { //
+        proxy_registry::current(nullptr);
+      }};
+      self->activate(ctx, x);
+    } else {
+      self->activate(ctx, x);
+    }
   }
 
-  bool invoke_mailbox_element(execution_unit* ctx) {
+  bool invoke_mailbox_element(scheduler* ctx) {
     // hold on to a strong reference while "messing" with the parent actor
     strong_actor_ptr ptr_guard{this->parent()->ctrl()};
     auto prev = activity_tokens_;

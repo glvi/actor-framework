@@ -6,8 +6,11 @@
 
 #include "caf/actor_traits.hpp"
 #include "caf/config.hpp"
+#include "caf/detail/assert.hpp"
+#include "caf/detail/to_statically_typed_trait.hpp"
+#include "caf/event_based_mail.hpp"
+#include "caf/extend.hpp"
 #include "caf/mixin/requester.hpp"
-#include "caf/mixin/sender.hpp"
 #include "caf/none.hpp"
 #include "caf/scheduled_actor.hpp"
 #include "caf/stream.hpp"
@@ -26,15 +29,20 @@ auto typed_actor_view_flow_access(caf::scheduled_actor* self) {
   return static_cast<Self>(self);
 }
 
+template <class...>
+class typed_actor_view;
+
 /// Decorates a pointer to a @ref scheduled_actor with a statically typed actor
 /// interface.
-template <class... Sigs>
-class typed_actor_view
-  : public extend<typed_actor_view_base,
-                  typed_actor_view<Sigs...>>::template with<mixin::requester> {
+template <class TraitOrSignature>
+class typed_actor_view<TraitOrSignature>
+  : public extend<typed_actor_view_base, typed_actor_view<TraitOrSignature>>::
+      template with<mixin::requester> {
 public:
+  using trait = detail::to_statically_typed_trait_t<TraitOrSignature>;
+
   /// Stores the template parameter pack.
-  using signatures = detail::type_list<Sigs...>;
+  using signatures = typename trait::signatures;
 
   using pointer = scheduled_actor*;
 
@@ -208,6 +216,14 @@ public:
     self_->demonitor(whom);
   }
 
+  // -- messaging --------------------------------------------------------------
+
+  /// Starts a new message.
+  template <class... Args>
+  auto mail(Args&&... args) {
+    return event_based_mail(trait{}, self_, std::forward<Args>(args)...);
+  }
+
   // -- sending asynchronous messages ------------------------------------------
 
   /// @copydoc local_actor::send_exit
@@ -268,13 +284,16 @@ public:
     return self_->make_response_promise();
   }
 
-  void add_awaited_response_handler(message_id response_id, behavior bhvr) {
-    return self_->add_awaited_response_handler(response_id, std::move(bhvr));
+  void add_awaited_response_handler(message_id response_id, behavior bhvr,
+                                    disposable pending_timeout = {}) {
+    return self_->add_awaited_response_handler(response_id, std::move(bhvr),
+                                               std::move(pending_timeout));
   }
 
-  void add_multiplexed_response_handler(message_id response_id, behavior bhvr) {
-    return self_->add_multiplexed_response_handler(response_id,
-                                                   std::move(bhvr));
+  void add_multiplexed_response_handler(message_id response_id, behavior bhvr,
+                                        disposable pending_timeout = {}) {
+    return self_->add_multiplexed_response_handler(response_id, std::move(bhvr),
+                                                   std::move(pending_timeout));
   }
 
   template <class Handle, class... Ts>
@@ -296,6 +315,11 @@ public:
   /// @private
   void reset(scheduled_actor* ptr) {
     self_ = ptr;
+  }
+
+  /// @private
+  bool enqueue(mailbox_element_ptr what, scheduler* sched) {
+    return self_->enqueue(std::move(what), sched);
   }
 
   operator scheduled_actor*() const noexcept {
@@ -337,6 +361,17 @@ public:
 
 private:
   scheduled_actor* self_;
+};
+
+/// Decorates a pointer to a @ref scheduled_actor with a statically typed actor
+/// interface.
+/// @note This is a specialization for backwards compatibility with pre v1.0
+///       releases. Please use the trait based implementation.
+template <class T1, class T2, class... Ts>
+class typed_actor_view<T1, T2, Ts...>
+  : public typed_actor_view<statically_typed<T1, T2, Ts...>> {
+  using super = typed_actor_view<statically_typed<T1, T2, Ts...>>;
+  using super::super;
 };
 
 template <class... Sigs>

@@ -88,7 +88,7 @@ public:
   /// @post `pending() == false`
   template <class... Ts>
   void deliver(Ts... xs) {
-    using arg_types = detail::type_list<Ts...>;
+    using arg_types = type_list<Ts...>;
     static_assert(!detail::tl_exists_v<arg_types, detail::is_result>,
                   "delivering a result<T> is not supported");
     static_assert(!detail::tl_exists_v<arg_types, detail::is_expected>,
@@ -123,7 +123,7 @@ public:
   /// @post `pending() == false`
   template <message_priority P = message_priority::normal, class Handle,
             class... Ts>
-  delegated_response_type_t<typename Handle::signatures,
+  delegated_response_type_t<Handle,
                             detail::implicit_conversions_t<std::decay_t<Ts>>...>
   delegate(const Handle& receiver, Ts&&... args) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
@@ -131,8 +131,8 @@ public:
     if (pending()) {
       if constexpr (P == message_priority::high)
         state_->id = state_->id.with_high_priority();
-      if constexpr (std::is_same_v<detail::type_list<message>,
-                                   detail::type_list<std::decay_t<Ts>...>>)
+      if constexpr (std::is_same_v<type_list<message>,
+                                   type_list<std::decay_t<Ts>...>>)
         state_->delegate_impl(actor_cast<abstract_actor*>(receiver),
                               std::forward<Ts>(args)...);
       else

@@ -4,13 +4,16 @@
 
 #include "caf/actor_pool.hpp"
 
+#include "caf/anon_mail.hpp"
 #include "caf/default_attachable.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/sync_request_bouncer.hpp"
 #include "caf/mailbox_element.hpp"
-#include "caf/send.hpp"
 
 #include <atomic>
 #include <random>
+
+CAF_PUSH_DEPRECATED_WARNING
 
 namespace caf {
 
@@ -23,11 +26,11 @@ actor_pool::policy actor_pool::round_robin() {
       // nop
     }
     void operator()(actor_system&, guard_type& guard, const actor_vec& vec,
-                    mailbox_element_ptr& ptr, execution_unit* host) {
+                    mailbox_element_ptr& ptr, scheduler* sched) {
       CAF_ASSERT(!vec.empty());
       actor selected = vec[pos_++ % vec.size()];
       guard.unlock();
-      selected->enqueue(std::move(ptr), host);
+      selected->enqueue(std::move(ptr), sched);
     }
     std::atomic<size_t> pos_;
   };
@@ -38,11 +41,11 @@ namespace {
 
 void broadcast_dispatch(actor_system&, actor_pool::guard_type&,
                         const actor_pool::actor_vec& vec,
-                        mailbox_element_ptr& ptr, execution_unit* host) {
+                        mailbox_element_ptr& ptr, scheduler* sched) {
   CAF_ASSERT(!vec.empty());
   auto msg = ptr->payload;
   for (auto& worker : vec)
-    worker->enqueue(make_mailbox_element(ptr->sender, ptr->mid, msg), host);
+    worker->enqueue(make_mailbox_element(ptr->sender, ptr->mid, msg), sched);
 }
 
 } // namespace
@@ -60,11 +63,11 @@ actor_pool::policy actor_pool::random() {
       // nop
     }
     void operator()(actor_system&, guard_type& guard, const actor_vec& vec,
-                    mailbox_element_ptr& ptr, execution_unit* host) {
+                    mailbox_element_ptr& ptr, scheduler* sched) {
       auto selected
         = vec[dis_(rd_, decltype(dis_)::param_type(0, vec.size() - 1))];
       guard.unlock();
-      selected->enqueue(std::move(ptr), host);
+      selected->enqueue(std::move(ptr), sched);
     }
     std::random_device rd_;
     std::uniform_int_distribution<size_t> dis_;
@@ -76,10 +79,8 @@ actor_pool::~actor_pool() {
   // nop
 }
 
-actor actor_pool::make(execution_unit* eu, policy pol) {
-  CAF_ASSERT(eu);
-  auto& sys = eu->system();
-  actor_config cfg{eu};
+actor actor_pool::make(actor_system& sys, policy pol) {
+  actor_config cfg{&sys.scheduler()};
   auto res = make_actor<actor_pool, actor>(sys.next_actor_id(), sys.node(),
                                            &sys, cfg);
   auto ptr = static_cast<actor_pool*>(actor_cast<abstract_actor*>(res));
@@ -87,9 +88,9 @@ actor actor_pool::make(execution_unit* eu, policy pol) {
   return res;
 }
 
-actor actor_pool::make(execution_unit* eu, size_t num_workers,
+actor actor_pool::make(actor_system& sys, size_t num_workers,
                        const factory& fac, policy pol) {
-  auto res = make(eu, std::move(pol));
+  auto res = make(sys, std::move(pol));
   auto ptr = static_cast<actor_pool*>(actor_cast<abstract_actor*>(res));
   auto res_addr = ptr->address();
   for (size_t i = 0; i < num_workers; ++i) {
@@ -101,11 +102,11 @@ actor actor_pool::make(execution_unit* eu, size_t num_workers,
   return res;
 }
 
-bool actor_pool::enqueue(mailbox_element_ptr what, execution_unit* eu) {
+bool actor_pool::enqueue(mailbox_element_ptr what, scheduler* sched) {
   guard_type guard{workers_mtx_};
-  if (filter(guard, what->sender, what->mid, what->payload, eu))
+  if (filter(guard, what->sender, what->mid, what->payload, sched))
     return false;
-  policy_(home_system(), guard, workers_, what, eu);
+  policy_(home_system(), guard, workers_, what, sched);
   return true;
 }
 
@@ -118,34 +119,25 @@ const char* actor_pool::name() const {
   return "caf.actor-pool";
 }
 
-void actor_pool::on_destroy() {
+void actor_pool::on_cleanup([[maybe_unused]] const error& reason) {
   CAF_PUSH_AID_FROM_PTR(this);
-  if (!getf(is_cleaned_up_flag)) {
-    cleanup(exit_reason::unreachable, nullptr);
-    unregister_from_system();
-  }
-}
-
-void actor_pool::on_cleanup(const error& reason) {
-  CAF_PUSH_AID_FROM_PTR(this);
-  CAF_IGNORE_UNUSED(reason);
   CAF_LOG_TERMINATE_EVENT(this, reason);
 }
 
 bool actor_pool::filter(guard_type& guard, const strong_actor_ptr& sender,
-                        message_id mid, message& content, execution_unit* eu) {
-  CAF_LOG_TRACE(CAF_ARG(mid) << CAF_ARG(content));
+                        message_id mid, message& content, scheduler* sched) {
+  auto lg = log::core::trace("mid = {}, content = {}", mid, content);
   if (auto view = make_const_typed_message_view<exit_msg>(content)) {
     // acquire second mutex as well
     std::vector<actor> workers;
     auto reason = get<0>(view).reason;
-    if (cleanup(std::move(reason), eu)) {
+    if (cleanup(std::move(reason), sched)) {
       // send exit messages *always* to all workers and clear vector afterwards
       // but first swap workers_ out of the critical section
       workers_.swap(workers);
       guard.unlock();
       for (auto& w : workers)
-        anon_send(w, content);
+        anon_mail(content).send(w);
       unregister_from_system();
     }
     return true;
@@ -161,7 +153,7 @@ bool actor_pool::filter(guard_type& guard, const strong_actor_ptr& sender,
     if (workers_.empty()) {
       planned_reason_ = exit_reason::out_of_workers;
       guard.unlock();
-      quit(eu);
+      quit(sched);
     }
     return true;
   }
@@ -199,7 +191,7 @@ bool actor_pool::filter(guard_type& guard, const strong_actor_ptr& sender,
     auto cpy = workers_;
     guard.unlock();
     sender->enqueue(
-      make_mailbox_element(nullptr, mid.response_id(), std::move(cpy)), eu);
+      make_mailbox_element(nullptr, mid.response_id(), std::move(cpy)), sched);
     return true;
   }
   if (workers_.empty()) {
@@ -208,18 +200,24 @@ bool actor_pool::filter(guard_type& guard, const strong_actor_ptr& sender,
       // Tell client we have ignored this request message by sending and empty
       // message back.
       sender->enqueue(
-        make_mailbox_element(nullptr, mid.response_id(), message{}), eu);
+        make_mailbox_element(nullptr, mid.response_id(), message{}), sched);
     }
     return true;
   }
   return false;
 }
 
-void actor_pool::quit(execution_unit* host) {
+void actor_pool::quit(scheduler* sched) {
   // we can safely run our cleanup code here without holding
   // workers_mtx_ because abstract_actor has its own lock
-  if (cleanup(planned_reason_, host))
+  if (cleanup(planned_reason_, sched))
     unregister_from_system();
 }
 
+void actor_pool::force_close_mailbox() {
+  // nop
+}
+
 } // namespace caf
+
+CAF_POP_WARNINGS

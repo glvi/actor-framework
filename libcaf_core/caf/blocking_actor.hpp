@@ -4,17 +4,20 @@
 
 #pragma once
 
+#include "caf/abstract_blocking_actor.hpp"
 #include "caf/abstract_mailbox.hpp"
 #include "caf/actor_config.hpp"
 #include "caf/actor_traits.hpp"
 #include "caf/after.hpp"
 #include "caf/behavior.hpp"
+#include "caf/blocking_mail.hpp"
 #include "caf/detail/apply_args.hpp"
 #include "caf/detail/blocking_behavior.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/default_mailbox.hpp"
 #include "caf/detail/type_list.hpp"
 #include "caf/detail/type_traits.hpp"
+#include "caf/dynamically_typed.hpp"
 #include "caf/extend.hpp"
 #include "caf/fwd.hpp"
 #include "caf/intrusive/stack.hpp"
@@ -25,7 +28,6 @@
 #include "caf/mixin/sender.hpp"
 #include "caf/none.hpp"
 #include "caf/policy/arg.hpp"
-#include "caf/send.hpp"
 #include "caf/typed_actor.hpp"
 
 #include <chrono>
@@ -38,8 +40,8 @@ namespace caf {
 /// receive rather than a behavior-stack based message processing.
 /// @extends local_actor
 class CAF_CORE_EXPORT blocking_actor
-  : public extend<local_actor, blocking_actor>::with<mixin::sender,
-                                                     mixin::requester>,
+  : public extend<abstract_blocking_actor,
+                  blocking_actor>::with<mixin::sender, mixin::requester>,
     public dynamically_typed_actor_base,
     public blocking_actor_base {
 public:
@@ -162,7 +164,7 @@ public:
 
   // -- overridden functions of abstract_actor ---------------------------------
 
-  bool enqueue(mailbox_element_ptr, execution_unit*) override;
+  bool enqueue(mailbox_element_ptr, scheduler*) override;
 
   mailbox_element* peek_at_next_mailbox_element() override;
 
@@ -170,7 +172,7 @@ public:
 
   const char* name() const override;
 
-  void launch(execution_unit* eu, bool lazy, bool hide) override;
+  void launch(scheduler* sched, bool lazy, bool hide) override;
 
   // -- virtual modifiers ------------------------------------------------------
 
@@ -275,6 +277,12 @@ public:
   /// is signalized to other actors after `act()` returns.
   void fail_state(error err);
 
+  template <class... Args>
+  auto mail(Args&&... args) {
+    return blocking_mail(dynamically_typed{}, this,
+                         std::forward<Args>(args)...);
+  }
+
   // -- customization points ---------------------------------------------------
 
   /// Blocks until at least one message is in the mailbox.
@@ -285,7 +293,7 @@ public:
   virtual bool await_data(timeout_type timeout);
 
   /// Returns the next element from the mailbox or `nullptr`.
-  virtual mailbox_element_ptr dequeue();
+  mailbox_element_ptr dequeue();
 
   /// Returns the queue for storing incoming messages.
   abstract_mailbox& mailbox() {
@@ -326,7 +334,7 @@ public:
   void receive_impl(receive_cond& rcc, message_id mid,
                     detail::blocking_behavior& bhvr);
 
-  bool cleanup(error&& fail_state, execution_unit* host) override;
+  void on_cleanup(const error& reason) override;
 
   // -- backwards compatibility ------------------------------------------------
 
@@ -341,6 +349,10 @@ public:
   /// @endcond
 
 private:
+  void do_unstash(mailbox_element_ptr ptr) override;
+
+  void do_receive(message_id mid, behavior& bhvr, timespan timeout) override;
+
   size_t attach_functor(const actor&);
 
   size_t attach_functor(const actor_addr&);
@@ -348,6 +360,10 @@ private:
   size_t attach_functor(const strong_actor_ptr&);
 
   void unstash();
+
+  void close_mailbox(const error& reason);
+
+  void force_close_mailbox() final;
 
   template <class... Ts>
   size_t attach_functor(const typed_actor<Ts...>& x) {

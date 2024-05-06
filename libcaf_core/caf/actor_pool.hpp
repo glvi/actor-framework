@@ -7,7 +7,6 @@
 #include "caf/actor.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/split_join.hpp"
-#include "caf/execution_unit.hpp"
 #include "caf/mailbox_element.hpp"
 
 #include <functional>
@@ -45,7 +44,7 @@ public:
   using guard_type = std::unique_lock<std::mutex>;
   using policy
     = std::function<void(actor_system&, guard_type&, const actor_vec&,
-                         mailbox_element_ptr&, execution_unit*)>;
+                         mailbox_element_ptr&, scheduler*)>;
 
   /// Returns a simple round robin dispatching policy.
   static policy round_robin();
@@ -77,20 +76,20 @@ public:
   ~actor_pool() override;
 
   /// Returns an actor pool without workers using the dispatch policy `pol`.
-  static actor make(execution_unit* eu, policy pol);
+  [[deprecated("actor pools will be removed in the next major release")]]
+  static actor make(actor_system& sys, policy pol);
 
   /// Returns an actor pool with `n` workers created by the factory
   /// function `fac` using the dispatch policy `pol`.
-  static actor make(execution_unit* eu, size_t num_workers, const factory& fac,
-                    policy pol);
+  [[deprecated("actor pools will be removed in the next major release")]]
+  static actor
+  make(actor_system& sys, size_t num_workers, const factory& fac, policy pol);
 
-  bool enqueue(mailbox_element_ptr what, execution_unit* eu) override;
+  bool enqueue(mailbox_element_ptr what, scheduler* sched) override;
 
   actor_pool(actor_config& cfg);
 
   const char* name() const override;
-
-  void on_destroy() override;
 
   void setup_metrics() {
     // nop
@@ -101,10 +100,12 @@ protected:
 
 private:
   bool filter(guard_type&, const strong_actor_ptr& sender, message_id mid,
-              message& msg, execution_unit* eu);
+              message& msg, scheduler* sched);
 
   // call without workers_mtx_ held
-  void quit(execution_unit* host);
+  void quit(scheduler* sched);
+
+  void force_close_mailbox() override;
 
   std::mutex workers_mtx_;
   std::vector<actor> workers_;

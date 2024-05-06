@@ -15,7 +15,7 @@
 #include "caf/expected.hpp"
 #include "caf/ip_address.hpp"
 #include "caf/ipv4_address.hpp"
-#include "caf/logger.hpp"
+#include "caf/log/net.hpp"
 #include "caf/sec.hpp"
 
 namespace caf::net {
@@ -43,7 +43,8 @@ expected<tcp_accept_socket> new_tcp_acceptor_impl(uint16_t port,
                                                   const char* addr,
                                                   bool reuse_addr, bool any) {
   static_assert(Family == AF_INET || Family == AF_INET6, "invalid family");
-  CAF_LOG_TRACE(CAF_ARG(port) << ", addr = " << (addr ? addr : "nullptr"));
+  auto lg = log::net::trace("port = {}, addr = {}", port,
+                            (addr ? addr : "nullptr"));
   int socktype = SOCK_STREAM;
 #ifdef SOCK_CLOEXEC
   socktype |= SOCK_CLOEXEC;
@@ -75,7 +76,7 @@ expected<tcp_accept_socket> new_tcp_acceptor_impl(uint16_t port,
   CAF_NET_SYSCALL("bind", res, !=, 0,
                   bind(fd, reinterpret_cast<sockaddr*>(&sa),
                        static_cast<socket_size_type>(sizeof(sa))));
-  CAF_LOG_DEBUG("bound socket" << fd << "to listen on port" << port);
+  log::net::debug("bound socket {} to listen on port {}", fd, port);
   return sguard.release();
 }
 
@@ -83,7 +84,7 @@ expected<tcp_accept_socket> new_tcp_acceptor_impl(uint16_t port,
 
 expected<tcp_accept_socket> make_tcp_accept_socket(ip_endpoint node,
                                                    bool reuse_addr) {
-  CAF_LOG_TRACE(CAF_ARG(node) << CAF_ARG(reuse_addr));
+  auto lg = log::net::trace("node = {}, reuse_addr = {}", node, reuse_addr);
   auto addr = to_string(node.address());
   bool is_v4 = node.address().embeds_v4();
   bool is_zero = is_v4 ? node.address().embedded_v4().bits() == 0
@@ -94,19 +95,18 @@ expected<tcp_accept_socket> make_tcp_accept_socket(ip_endpoint node,
     auto sock = socket_cast<tcp_accept_socket>(*p);
     auto sguard = make_socket_guard(sock);
     CAF_NET_SYSCALL("listen", tmp, !=, 0, listen(sock.id, SOMAXCONN));
-    CAF_LOG_DEBUG(CAF_ARG(sock.id));
+    log::net::debug("sock.id = {}", sock.id);
     return sguard.release();
   } else {
-    CAF_LOG_WARNING("could not create tcp socket:" << CAF_ARG(node)
-                                                   << CAF_ARG(p.error()));
-    return make_error(sec::cannot_open_port, "tcp socket creation failed",
-                      to_string(node), std::move(p.error()));
+    return format_to_error(
+      sec::cannot_open_port,
+      "could not create tcp socket: node = {}, p.error = {}", node, p.error());
   }
 }
 
 expected<tcp_accept_socket>
 make_tcp_accept_socket(const uri::authority_type& node, bool reuse_addr) {
-  CAF_LOG_TRACE(CAF_ARG(node) << CAF_ARG(reuse_addr));
+  auto lg = log::net::trace("node = {}, reuse_addr = {}", node, reuse_addr);
   if (auto ip = std::get_if<ip_address>(&node.host))
     return make_tcp_accept_socket(ip_endpoint{*ip, node.port}, reuse_addr);
   const auto& host = std::get<std::string>(node.host);
@@ -121,8 +121,9 @@ make_tcp_accept_socket(const uri::authority_type& node, bool reuse_addr) {
   }
   auto addrs = ip::local_addresses(host);
   if (addrs.empty())
-    return make_error(sec::cannot_open_port, "no local interface available",
-                      to_string(node));
+    return format_to_error(sec::cannot_open_port,
+                           "no local interface available for {}",
+                           to_string(node));
   // Prefer ipv6 addresses.
   std::stable_partition(std::begin(addrs), std::end(addrs),
                         [](const ip_address& ip) { return !ip.embeds_v4(); });
@@ -131,13 +132,14 @@ make_tcp_accept_socket(const uri::authority_type& node, bool reuse_addr) {
                                            reuse_addr))
       return *sock;
   }
-  return make_error(sec::cannot_open_port, "tcp socket creation failed",
-                    to_string(node));
+  return format_to_error(sec::cannot_open_port, "failed to open port: {}",
+                         node);
 }
 
 expected<tcp_accept_socket>
 make_tcp_accept_socket(uint16_t port, std::string addr, bool reuse_addr) {
-  CAF_LOG_TRACE(CAF_ARG(port) << CAF_ARG(addr) << CAF_ARG(reuse_addr));
+  auto lg = log::net::trace("port = {}, addr = {}, reuse_addr = {}", port, addr,
+                            reuse_addr);
   uri::authority_type auth;
   auth.port = port;
   auth.host = std::move(addr);
@@ -145,17 +147,17 @@ make_tcp_accept_socket(uint16_t port, std::string addr, bool reuse_addr) {
 }
 
 expected<tcp_stream_socket> accept(tcp_accept_socket x) {
-  CAF_LOG_TRACE(CAF_ARG(x));
+  auto lg = log::net::trace("x = {}", x);
   auto sock = ::accept(x.id, nullptr, nullptr);
   if (sock == net::invalid_socket_id) {
     auto err = net::last_socket_error();
     if (err != std::errc::operation_would_block
         && err != std::errc::resource_unavailable_try_again) {
-      return caf::make_error(sec::unavailable_or_would_block);
+      return make_error(sec::unavailable_or_would_block);
     }
-    return caf::make_error(sec::socket_operation_failed, "tcp accept failed");
+    return make_error(sec::socket_operation_failed, "tcp accept failed");
   }
-  CAF_LOG_DEBUG("accepted TCP socket" << sock << "on accept socket" << x.id);
+  log::net::debug("accepted TCP socket {} on accept socket {}", sock, x.id);
   return tcp_stream_socket{sock};
 }
 

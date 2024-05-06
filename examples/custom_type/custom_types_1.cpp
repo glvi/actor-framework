@@ -74,12 +74,12 @@ struct testee_state {
       // note: we sent a foo_pair2, but match on foo_pair
       // that works because both are aliases for std::pair<int, int>
       [this](const foo_pair& val) {
-        aout(self).println("foo_pair{}", val);
+        self->println("foo_pair{}", val);
         if (--remaining == 0)
           self->quit();
       },
       [this](const foo& val) {
-        aout(self).println("{}", val);
+        self->println("{}", val);
         if (--remaining == 0)
           self->quit();
       },
@@ -120,9 +120,9 @@ void caf_main(actor_system& sys) {
   auto t = sys.spawn(actor_from_state<testee_state>, 2u);
   scoped_actor self{sys};
   // send t a foo
-  self->send(t, foo{std::vector<int>{1, 2, 3, 4}, 5});
+  self->mail(foo{std::vector<int>{1, 2, 3, 4}, 5}).send(t);
   // send t a foo_pair2
-  self->send(t, foo_pair2{3, 4});
+  self->mail(foo_pair2{3, 4}).send(t);
 }
 
 CAF_MAIN(id_block::custom_types_1)

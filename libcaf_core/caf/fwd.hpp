@@ -21,6 +21,8 @@ namespace caf {
 // -- 1 param templates --------------------------------------------------------
 
 template <class> class [[nodiscard]] error_code;
+
+template <class> class actor_from_state_t;
 template <class> class basic_cow_string;
 template <class> class callback;
 template <class> class cow_vector;
@@ -32,7 +34,6 @@ template <class> class span;
 template <class> class typed_stream;
 template <class> class weak_intrusive_ptr;
 
-template <class> struct actor_from_state_t;
 template <class> struct inspector_access;
 template <class> struct timeout_definition;
 template <class> struct type_id;
@@ -53,9 +54,13 @@ class unordered_flat_map;
 
 // -- variadic templates -------------------------------------------------------
 
+template <class...> class blocking_delayed_response_handle;
+template <class...> class blocking_response_handle;
 template <class...> class const_typed_message_view;
 template <class...> class cow_tuple;
 template <class...> class delegated;
+template <class...> class event_based_delayed_response_handle;
+template <class...> class event_based_response_handle;
 template <class...> class result;
 template <class...> class typed_actor;
 template <class...> class typed_actor_pointer;
@@ -80,11 +85,11 @@ class actor_companion;
 class actor_config;
 class actor_control_block;
 class actor_pool;
-class actor_profiler;
 class actor_proxy;
 class actor_registry;
 class actor_system;
 class actor_system_config;
+class actor_system_module;
 class attachable;
 class behavior;
 class binary_deserializer;
@@ -99,7 +104,6 @@ class config_value;
 class deserializer;
 class disposable;
 class event_based_actor;
-class execution_unit;
 class forwarding_actor_proxy;
 class hashed_node_id;
 class ipv4_address;
@@ -115,6 +119,7 @@ class json_value;
 class json_writer;
 class local_actor;
 class logger;
+class mail_cache;
 class mailbox_element;
 class message;
 class message_builder;
@@ -132,8 +137,6 @@ class serializer;
 class skip_t;
 class skippable_result;
 class stream;
-class tracing_data;
-class tracing_data_factory;
 class type_id_list;
 class uri;
 class uri_builder;
@@ -147,6 +150,7 @@ class stateful_actor;
 // -- structs ------------------------------------------------------------------
 
 struct down_msg;
+struct dynamically_typed;
 struct exit_msg;
 struct illegal_message_element;
 struct invalid_actor_addr_t;
@@ -161,6 +165,7 @@ struct stream_cancel_msg;
 struct stream_close_msg;
 struct stream_demand_msg;
 struct stream_open_msg;
+struct timeout_msg;
 struct unit_t;
 
 // -- free template functions --------------------------------------------------
@@ -264,6 +269,8 @@ using int_gauge_family = metric_family_impl<int_gauge>;
 
 namespace detail {
 
+class actor_system_access;
+class actor_system_config_access;
 class mailbox_factory;
 class monotonic_buffer_resource;
 
@@ -297,9 +304,10 @@ using gauge = detail::gauge_oracle_t<ValueType>;
 
 namespace io {
 
-class hook;
 class broker;
 class middleman;
+template <class...>
+class typed_broker;
 
 namespace basp {
 
@@ -319,12 +327,7 @@ class middleman;
 
 // -- scheduler classes --------------------------------------------------------
 
-namespace scheduler {
-
-class abstract_worker;
-class abstract_coordinator;
-
-} // namespace scheduler
+class scheduler;
 
 // -- log classes --------------------------------------------------------------
 
@@ -382,7 +385,6 @@ using strong_actor_ptr = intrusive_ptr<actor_control_block>;
 // -- unique pointer aliases ---------------------------------------------------
 
 using mailbox_element_ptr = std::unique_ptr<mailbox_element>;
-using tracing_data_ptr = std::unique_ptr<tracing_data>;
 
 // -- shared pointer aliases ---------------------------------------------------
 

@@ -6,21 +6,21 @@
 
 #include "caf/actor_system.hpp"
 #include "caf/config.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/set_thread_name.hpp"
-#include "caf/logger.hpp"
+#include "caf/log/core.hpp"
 #include "caf/resumable.hpp"
-#include "caf/scoped_execution_unit.hpp"
 #include "caf/thread_owner.hpp"
 
 namespace caf::detail {
 
 void private_thread::run(actor_system* sys) {
-  CAF_LOG_TRACE("");
-  scoped_execution_unit ctx{sys};
-  auto resume = [&ctx](resumable* job) {
-    auto res = job->resume(&ctx, std::numeric_limits<size_t>::max());
+  auto lg = log::core::trace("");
+  auto resume = [&sys](resumable* job) {
+    auto res = job->resume(&sys->scheduler(),
+                           std::numeric_limits<size_t>::max());
     while (res == resumable::resume_later)
-      res = job->resume(&ctx, std::numeric_limits<size_t>::max());
+      res = job->resume(&sys->scheduler(), std::numeric_limits<size_t>::max());
     return res;
   };
   for (;;) {

@@ -4,9 +4,10 @@
 
 #include "caf/response_promise.hpp"
 
+#include "caf/detail/assert.hpp"
 #include "caf/detail/profiled_send.hpp"
 #include "caf/local_actor.hpp"
-#include "caf/logger.hpp"
+#include "caf/log/core.hpp"
 
 #include <algorithm>
 #include <utility>
@@ -77,7 +78,7 @@ message_id response_promise::id() const noexcept {
 // -- delivery -----------------------------------------------------------------
 
 void response_promise::deliver(message msg) {
-  CAF_LOG_TRACE(CAF_ARG(msg));
+  auto lg = log::core::trace("msg = {}", msg);
   if (pending()) {
     state_->deliver_impl(std::move(msg));
     state_.reset();
@@ -85,7 +86,7 @@ void response_promise::deliver(message msg) {
 }
 
 void response_promise::deliver(error x) {
-  CAF_LOG_TRACE(CAF_ARG(x));
+  auto lg = log::core::trace("x = {}", x);
   if (pending()) {
     state_->deliver_impl(make_message(std::move(x)));
     state_.reset();
@@ -93,7 +94,7 @@ void response_promise::deliver(error x) {
 }
 
 void response_promise::deliver() {
-  CAF_LOG_TRACE(CAF_ARG(""));
+  auto lg = log::core::trace("");
   if (pending()) {
     state_->deliver_impl(make_message());
     state_.reset();
@@ -133,7 +134,7 @@ response_promise::state::~state() {
   //       storing the promise in a run-later continuation. Hence, we can't call
   //       deliver_impl here since it calls self->context().
   if (self && source) {
-    CAF_LOG_DEBUG("broken promise!");
+    log::core::debug("broken promise!");
     auto element = make_mailbox_element(self, id.response_id(),
                                         make_error(sec::broken_promise));
     source->enqueue(std::move(element), nullptr);
@@ -145,13 +146,13 @@ void response_promise::state::cancel() {
 }
 
 void response_promise::state::deliver_impl(message msg) {
-  CAF_LOG_TRACE(CAF_ARG(msg));
+  auto lg = log::core::trace("msg = {}", msg);
   // Even though we are holding a weak pointer, we can access the pointer
   // without any additional check here because only the actor itself is allowed
   // to call this function.
   auto selfptr = static_cast<local_actor*>(self->get());
   if (msg.empty() && id.is_async()) {
-    CAF_LOG_DEBUG("drop response: empty response to asynchronous input");
+    log::core::debug("drop response: empty response to asynchronous input");
   } else if (source != nullptr) {
     detail::profiled_send(selfptr, self, source, id.response_id(),
                           selfptr->context(), std::move(msg));
@@ -161,13 +162,13 @@ void response_promise::state::deliver_impl(message msg) {
 
 void response_promise::state::delegate_impl(abstract_actor* receiver,
                                             message msg) {
-  CAF_LOG_TRACE(CAF_ARG(msg));
+  auto lg = log::core::trace("msg = {}", msg);
   if (receiver != nullptr) {
     auto selfptr = static_cast<local_actor*>(self->get());
     detail::profiled_send(selfptr, std::move(source), receiver, id,
                           selfptr->context(), std::move(msg));
   } else {
-    CAF_LOG_DEBUG("drop response: invalid delegation target");
+    log::core::debug("drop response: invalid delegation target");
   }
   cancel();
 }

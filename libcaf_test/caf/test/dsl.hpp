@@ -10,7 +10,11 @@
 #include "caf/binary_serializer.hpp"
 #include "caf/byte_buffer.hpp"
 #include "caf/config.hpp"
+#include "caf/detail/actor_system_access.hpp"
+#include "caf/detail/assert.hpp"
+#include "caf/fwd.hpp"
 #include "caf/init_global_meta_objects.hpp"
+#include "caf/log/test.hpp"
 
 #include <tuple>
 #include <type_traits>
@@ -281,11 +285,17 @@ bool received(caf_handle x) {
   return try_extract<T, Ts...>(x) != std::nullopt;
 }
 
-class test_coordinator : public caf::scheduler::abstract_coordinator {
+class test_coordinator : public caf::scheduler {
 public:
-  using super = caf::scheduler::abstract_coordinator;
+  using super = caf::scheduler;
 
-  using super::super;
+  explicit test_coordinator(caf::actor_system& sys) : sys_(&sys) {
+    // nop
+  }
+
+  caf::actor_system& system() {
+    return *sys_;
+  }
 
   /// A double-ended queue representing our current job queue.
   std::deque<caf::resumable*> jobs;
@@ -308,6 +318,8 @@ public:
 
 private:
   virtual bool prioritize_impl(caf::resumable* ptr) = 0;
+
+  caf::actor_system* sys_;
 };
 
 template <class... Ts>
@@ -495,7 +507,7 @@ public:
     if (dest_ == nullptr)
       CAF_FAIL("missing .to() in inject() statement", src_line_);
     else if (src_ == nullptr)
-      caf::anon_send(caf::actor_cast<caf::actor>(dest_), msg_);
+      caf::anon_mail(msg_).send(caf::actor_cast<caf::actor>(dest_));
     else
       caf::detail::send_as(caf::actor_cast<caf::actor>(src_),
                            caf::actor_cast<caf::actor>(dest_), msg_);
@@ -824,17 +836,28 @@ public:
   /// A deterministic scheduler type.
   class test_coordinator_impl : public test_coordinator {
   public:
-    using super = abstract_coordinator;
+    using super = scheduler;
 
-    class dummy_worker : public caf::execution_unit {
+    class dummy_worker : public caf::scheduler {
     public:
-      dummy_worker(test_coordinator* parent)
-        : execution_unit(&parent->system()), parent_(parent) {
+      dummy_worker(test_coordinator* parent) : parent_(parent) {
         // nop
       }
 
-      void exec_later(caf::resumable* ptr) override {
+      void schedule(caf::resumable* ptr) override {
         parent_->jobs.push_back(ptr);
+      }
+
+      void delay(caf::resumable* ptr) override {
+        parent_->jobs.push_back(ptr);
+      }
+
+      void start() override {
+        // nop
+      }
+
+      void stop() override {
+        // nop
       }
 
     private:
@@ -849,8 +872,7 @@ public:
         });
       }
 
-      bool enqueue(caf::mailbox_element_ptr what,
-                   caf::execution_unit*) override {
+      bool enqueue(caf::mailbox_element_ptr what, caf::scheduler*) override {
         mh_(what->content());
         return true;
       }
@@ -864,6 +886,10 @@ public:
       }
 
     private:
+      void force_close_mailbox() final {
+        // nop
+      }
+
       caf::message_handler mh_;
     };
 
@@ -980,23 +1006,27 @@ public:
     }
 
     /// Returns whether at least one pending timeout exists.
-    bool has_pending_timeout() const {
-      return clock_.has_pending_timeout();
+    bool has_pending_timeout() {
+      auto& clock = dynamic_cast<test_actor_clock&>(system().clock());
+      return clock.has_pending_timeout();
     }
 
     /// Tries to trigger a single timeout.
     bool trigger_timeout() {
-      return clock_.trigger_timeout();
+      auto& clock = dynamic_cast<test_actor_clock&>(system().clock());
+      return clock.trigger_timeout();
     }
 
     /// Triggers all pending timeouts.
     size_t trigger_timeouts() {
-      return clock_.trigger_timeouts();
+      auto& clock = dynamic_cast<test_actor_clock&>(system().clock());
+      return clock.trigger_timeouts();
     }
 
     /// Advances simulation time and returns the number of triggered timeouts.
     size_t advance_time(caf::timespan x) {
-      return clock_.advance_time(x);
+      auto& clock = dynamic_cast<test_actor_clock&>(system().clock());
+      return clock.advance_time(x);
     }
 
     /// Call `f` after the next enqueue operation.
@@ -1017,21 +1047,9 @@ public:
       after_next_enqueue([this] { inline_all_enqueues_helper(); });
     }
 
-    bool detaches_utility_actors() const override {
-      return false;
-    }
-
-    test_actor_clock& clock() noexcept override {
-      return clock_;
-    }
-
   protected:
     void start() override {
-      dummy_worker worker{this};
-      caf::actor_config cfg{&worker};
-      auto& sys = system();
-      utility_actors_[printer_id] = caf::make_actor<dummy_printer, caf::actor>(
-        sys.next_actor_id(), sys.node(), &sys, cfg);
+      // nop
     }
 
     void stop() override {
@@ -1039,14 +1057,18 @@ public:
         trigger_timeouts();
     }
 
-    void enqueue(caf::resumable* ptr) override {
+    void schedule(caf::resumable* ptr) override {
       jobs.push_back(ptr);
       if (after_next_enqueue_ != nullptr) {
-        CAF_LOG_DEBUG("inline this enqueue");
+        caf::log::test::debug("inline this enqueue");
         std::function<void()> f;
         f.swap(after_next_enqueue_);
         f();
       }
+    }
+
+    void delay(caf::resumable* ptr) override {
+      schedule(ptr);
     }
 
   private:
@@ -1055,14 +1077,18 @@ public:
       run_once_lifo();
     }
 
-    /// Allows users to fake time at will.
-    test_actor_clock clock_;
-
     /// User-provided callback for triggering custom code in `enqueue`.
     std::function<void()> after_next_enqueue_;
   };
 
   using scheduler_type = test_coordinator_impl;
+
+  static void custom_sys_setup(caf::actor_system& sys,
+                               caf::actor_system_config&, void*) {
+    auto setter = caf::detail::actor_system_access{sys};
+    setter.clock(std::make_unique<test_actor_clock>());
+    setter.scheduler(std::make_unique<test_coordinator_impl>(sys));
+  }
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -1070,10 +1096,6 @@ public:
     if (auto err = cfg.parse(caf::test::engine::argc(),
                              caf::test::engine::argv()))
       CAF_FAIL("failed to parse config: " << to_string(err));
-    cfg.module_factories.push_back(
-      [](caf::actor_system& sys) -> caf::actor_system::module* {
-        return new scheduler_type(sys);
-      });
     if (cfg.custom_options().has_category("caf.middleman")) {
       cfg.set("caf.middleman.workers", size_t{0});
       cfg.set("caf.middleman.heartbeat-interval", caf::timespan{0});
@@ -1081,14 +1103,18 @@ public:
     return cfg;
   }
 
+  test_actor_clock& clock() {
+    return dynamic_cast<test_actor_clock&>(sys.clock());
+  }
+
   template <class... Ts>
   explicit test_coordinator_fixture(Ts&&... xs)
     : cfg(std::forward<Ts>(xs)...),
-      sys(init_config(cfg)),
+      sys(init_config(cfg), custom_sys_setup, nullptr),
       self(sys, true),
       sched(dynamic_cast<scheduler_type&>(sys.scheduler())) {
     // Make sure the current time isn't 0.
-    sched.clock().current_time += std::chrono::hours(1);
+    clock().current_time += std::chrono::hours(1);
   }
 
   virtual ~test_coordinator_fixture() {
@@ -1164,7 +1190,7 @@ public:
   ///          timeouts triggered.
   template <class BoolPredicate>
   size_t run_until(BoolPredicate predicate) {
-    CAF_LOG_TRACE("");
+    auto lg = caf::log::test::trace("");
     // Bookkeeping.
     size_t events = 0;
     // Loop until no activity remains.
@@ -1174,7 +1200,7 @@ public:
         ++progress;
         ++events;
         if (predicate()) {
-          CAF_LOG_DEBUG("stop due to predicate:" << CAF_ARG(events));
+          caf::log::test::debug("stop due to predicate: events = {}", events);
           return events;
         }
       }
@@ -1182,7 +1208,7 @@ public:
         ++progress;
         ++events;
         if (predicate()) {
-          CAF_LOG_DEBUG("stop due to predicate:" << CAF_ARG(events));
+          caf::log::test::debug("stop due to predicate: events = {}", events);
           return events;
         }
       }
@@ -1191,7 +1217,7 @@ public:
         ++events;
       }
       if (progress == 0) {
-        CAF_LOG_DEBUG("no activity left:" << CAF_ARG(events));
+        caf::log::test::debug("no activity left: events = {}", events);
         return events;
       }
     }

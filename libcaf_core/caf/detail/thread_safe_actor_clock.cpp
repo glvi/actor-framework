@@ -6,12 +6,22 @@
 
 #include "caf/actor_control_block.hpp"
 #include "caf/actor_system.hpp"
-#include "caf/logger.hpp"
+#include "caf/log/core.hpp"
 #include "caf/sec.hpp"
 #include "caf/system_messages.hpp"
 #include "caf/thread_owner.hpp"
 
 namespace caf::detail {
+
+thread_safe_actor_clock::thread_safe_actor_clock(caf::actor_system& sys) {
+  dispatcher_ = sys.launch_thread("caf.clock", thread_owner::system,
+                                  [qptr = &queue_] { run(qptr); });
+}
+
+thread_safe_actor_clock::~thread_safe_actor_clock() {
+  queue_.push(nullptr);
+  dispatcher_.join();
+}
 
 disposable thread_safe_actor_clock::schedule(time_point abs_time, action f) {
   queue_.push(schedule_entry_ptr{new schedule_entry{abs_time, f}});
@@ -19,7 +29,7 @@ disposable thread_safe_actor_clock::schedule(time_point abs_time, action f) {
 }
 
 void thread_safe_actor_clock::run(queue_type* queue) {
-  CAF_LOG_TRACE("");
+  auto lg = log::core::trace("");
   std::vector<schedule_entry_ptr> tbl;
   tbl.reserve(buffer_size * 2);
   auto is_disposed = [](auto& x) { return !x || x->f.disposed(); };
@@ -53,16 +63,6 @@ void thread_safe_actor_clock::run(queue_type* queue) {
     i = std::stable_partition(i, tbl.end(), is_disposed);
     tbl.erase(tbl.begin(), i);
   }
-}
-
-void thread_safe_actor_clock::start_dispatch_loop(caf::actor_system& sys) {
-  dispatcher_ = sys.launch_thread("caf.clock", thread_owner::system,
-                                  [qptr = &queue_] { run(qptr); });
-}
-
-void thread_safe_actor_clock::stop_dispatch_loop() {
-  queue_.push(nullptr);
-  dispatcher_.join();
 }
 
 } // namespace caf::detail

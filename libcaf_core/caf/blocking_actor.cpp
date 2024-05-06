@@ -6,12 +6,15 @@
 
 #include "caf/actor_registry.hpp"
 #include "caf/actor_system.hpp"
+#include "caf/anon_mail.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/default_invoke_result_visitor.hpp"
 #include "caf/detail/invoke_result_visitor.hpp"
 #include "caf/detail/private_thread.hpp"
 #include "caf/detail/set_thread_name.hpp"
 #include "caf/detail/sync_request_bouncer.hpp"
 #include "caf/invoke_message_result.hpp"
+#include "caf/log/system.hpp"
 #include "caf/logger.hpp"
 #include "caf/scheduled_actor.hpp"
 #include "caf/telemetry/timer.hpp"
@@ -49,10 +52,10 @@ blocking_actor::~blocking_actor() {
   // avoid weak-vtables warning
 }
 
-bool blocking_actor::enqueue(mailbox_element_ptr ptr, execution_unit*) {
+bool blocking_actor::enqueue(mailbox_element_ptr ptr, scheduler*) {
   CAF_ASSERT(ptr != nullptr);
   CAF_ASSERT(getf(is_blocking_flag));
-  CAF_LOG_TRACE(CAF_ARG(*ptr));
+  auto lg = log::core::trace("ptr = {}", *ptr);
   CAF_LOG_SEND_EVENT(ptr);
   auto mid = ptr->mid;
   auto src = ptr->sender;
@@ -107,11 +110,11 @@ public:
     intrusive_ptr_add_ref(self->ctrl());
   }
 
-  resumable::subtype_t subtype() const override {
+  resumable::subtype_t subtype() const noexcept final {
     return resumable::function_object;
   }
 
-  resumable::resume_result resume(execution_unit* ctx, size_t) override {
+  resumable::resume_result resume(scheduler* ctx, size_t) override {
     CAF_PUSH_AID_FROM_PTR(self_);
     self_->context(ctx);
     self_->initialize();
@@ -124,33 +127,27 @@ public:
       auto ptr = std::current_exception();
       rsn = scheduled_actor::default_exception_handler(self_, ptr);
     }
-    try {
-      self_->on_exit();
-    } catch (...) {
-      // simply ignore exception
-    }
 #else
     self_->act();
     rsn = self_->fail_state();
-    self_->on_exit();
 #endif
     self_->cleanup(std::move(rsn), ctx);
     intrusive_ptr_release(self_->ctrl());
-    auto& sys = ctx->system();
+    auto& sys = self_->system();
     sys.release_private_thread(thread_);
     if (!hidden_) {
       [[maybe_unused]] auto count = sys.registry().dec_running();
-      CAF_LOG_DEBUG("actor" << self_->id() << "decreased running count to"
-                            << count);
+      log::system::debug("actor {} decreased running count to {}", self_->id(),
+                         count);
     }
     return resumable::done;
   }
 
-  void intrusive_ptr_add_ref_impl() override {
+  void ref_resumable() const noexcept final {
     // nop
   }
 
-  void intrusive_ptr_release_impl() override {
+  void deref_resumable() const noexcept final {
     delete this;
   }
 
@@ -162,9 +159,9 @@ private:
 
 } // namespace
 
-void blocking_actor::launch(execution_unit*, bool, bool hide) {
+void blocking_actor::launch(scheduler*, bool, bool hide) {
   CAF_PUSH_AID_FROM_PTR(this);
-  CAF_LOG_TRACE(CAF_ARG(hide));
+  auto lg = log::core::trace("hide = {}", hide);
   CAF_ASSERT(getf(is_blocking_flag));
   // Try to acquire a thread before incrementing the running count, since this
   // may throw.
@@ -174,7 +171,7 @@ void blocking_actor::launch(execution_unit*, bool, bool hide) {
   // decrementing the count before releasing the thread.
   if (!hide) {
     [[maybe_unused]] auto count = sys.registry().inc_running();
-    CAF_LOG_DEBUG("actor" << id() << "increased running count to" << count);
+    log::system::debug("actor {} increased running count to {}", id(), count);
   }
   thread->resume(new blocking_actor_runner(this, thread, hide));
 }
@@ -195,7 +192,7 @@ void blocking_actor::await_all_other_actors_done() {
 }
 
 void blocking_actor::act() {
-  CAF_LOG_TRACE("");
+  auto lg = log::core::trace("");
   if (initial_behavior_fac_)
     initial_behavior_fac_(this);
 }
@@ -206,7 +203,7 @@ void blocking_actor::fail_state(error err) {
 
 void blocking_actor::receive_impl(receive_cond& rcc, message_id mid,
                                   detail::blocking_behavior& bhvr) {
-  CAF_LOG_TRACE(CAF_ARG(mid));
+  auto lg = log::core::trace("mid = {}", mid);
   unstash();
   // Convenience function for trying to consume a message.
   auto consume = [this, mid, &bhvr] {
@@ -284,7 +281,6 @@ void blocking_actor::receive_impl(receive_cond& rcc, message_id mid,
     // Dispatch on the current mailbox element.
     if (consume()) {
       unstash();
-      CAF_AFTER_PROCESSING(this, invoke_message_result::consumed);
       CAF_LOG_FINALIZE_EVENT();
       if (getf(abstract_actor::collects_metrics_flag)) {
         auto& builtins = builtin_metrics();
@@ -299,7 +295,6 @@ void blocking_actor::receive_impl(receive_cond& rcc, message_id mid,
       continue;
     }
     // Message was skipped.
-    CAF_AFTER_PROCESSING(this, invoke_message_result::skipped);
     CAF_LOG_SKIP_EVENT();
     stash_.push(ptr.release());
   }
@@ -360,27 +355,48 @@ size_t blocking_actor::attach_functor(const strong_actor_ptr& ptr) {
   if (!ptr)
     return 0;
   actor self{this};
-  auto f = [self](const error&) { caf::anon_send(self, wait_for_atom_v); };
+  auto f = [self](const error&) { caf::anon_mail(wait_for_atom_v).send(self); };
   ptr->get()->attach_functor(std::move(f));
   return 1;
 }
 
-bool blocking_actor::cleanup(error&& fail_state, execution_unit* host) {
-  if (!mailbox_.closed()) {
-    unstash();
-    auto dropped = mailbox_.close(fail_state);
-    while (dropped > 0 && getf(abstract_actor::collects_metrics_flag)) {
-      auto val = static_cast<int64_t>(dropped);
-      metrics_.mailbox_size->dec(val);
-    }
-  }
-  // Dispatch to parent's `cleanup` function.
-  return super::cleanup(std::move(fail_state), host);
+void blocking_actor::on_cleanup(const error& reason) {
+  close_mailbox(reason);
+  on_exit();
+  return super::on_cleanup(reason);
 }
 
 void blocking_actor::unstash() {
   while (auto stashed = stash_.pop())
     mailbox().push_front(mailbox_element_ptr{stashed});
+}
+
+void blocking_actor::close_mailbox(const error& reason) {
+  if (!mailbox_.closed()) {
+    unstash();
+    auto dropped = mailbox_.close(reason);
+    if (dropped > 0 && metrics_.mailbox_size)
+      metrics_.mailbox_size->dec(static_cast<int64_t>(dropped));
+  }
+}
+
+void blocking_actor::force_close_mailbox() {
+  close_mailbox(make_error(exit_reason::unreachable));
+}
+
+void blocking_actor::do_unstash(mailbox_element_ptr ptr) {
+  mailbox().push_front(std::move(ptr));
+}
+
+void blocking_actor::do_receive(message_id mid, behavior& bhvr,
+                                timespan timeout) {
+  accept_one_cond cond;
+  auto tmp = after(timeout) >> [&] {
+    auto err = make_message(make_error(sec::request_timeout));
+    bhvr(err);
+  };
+  auto fun = detail::make_blocking_behavior(&bhvr, std::move(tmp));
+  receive_impl(cond, mid, fun);
 }
 
 } // namespace caf

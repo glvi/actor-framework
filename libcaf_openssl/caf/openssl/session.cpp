@@ -13,6 +13,7 @@ CAF_POP_WARNINGS
 #include "caf/openssl/manager.hpp"
 
 #include "caf/actor_system_config.hpp"
+#include "caf/log/openssl.hpp"
 #include "caf/log/system.hpp"
 
 // On Linux we need to block SIGPIPE whenever we access OpenSSL functions.
@@ -49,6 +50,8 @@ CAF_POP_WARNINGS
 
 #endif // CAF_LINUX
 
+using namespace std::literals;
+
 namespace caf::openssl {
 
 namespace {
@@ -72,7 +75,7 @@ session::session(actor_system& sys)
 }
 
 bool session::init() {
-  CAF_LOG_TRACE("");
+  auto lg = log::openssl::trace("");
   ctx_ = create_ssl_context();
   ssl_ = SSL_new(ctx_);
   if (ssl_ == nullptr) {
@@ -94,24 +97,23 @@ rw_state session::do_some(int (*f)(SSL*, void*, int), size_t& result, void* buf,
     result = 0;
     switch (SSL_get_error(ssl_, res)) {
       default:
-        CAF_LOG_INFO("SSL error:" << get_ssl_error());
+        log::openssl::info("SSL error: {}", get_ssl_error());
         return rw_state::failure;
       case SSL_ERROR_WANT_READ:
-        CAF_LOG_DEBUG("SSL_ERROR_WANT_READ reported");
+        log::openssl::debug("SSL_ERROR_WANT_READ reported");
         return rw_state::want_read;
       case SSL_ERROR_WANT_WRITE:
-        CAF_LOG_DEBUG("SSL_ERROR_WANT_WRITE reported");
+        log::openssl::debug("SSL_ERROR_WANT_WRITE reported");
         // Report success to poll on this socket.
         return rw_state::success;
     }
   };
-  CAF_LOG_TRACE(CAF_ARG(len) << CAF_ARG(debug_name));
-  CAF_IGNORE_UNUSED(debug_name);
+  auto lg = log::openssl::trace("len = {}, debug_name = {}", len, debug_name);
   if (connecting_) {
-    CAF_LOG_DEBUG(debug_name << ": connecting");
+    log::openssl::debug("{} : connecting", debug_name);
     auto res = SSL_connect(ssl_);
     if (res == 1) {
-      CAF_LOG_DEBUG("SSL connection established");
+      log::openssl::debug("SSL connection established");
       connecting_ = false;
     } else {
       result = 0;
@@ -119,17 +121,17 @@ rw_state session::do_some(int (*f)(SSL*, void*, int), size_t& result, void* buf,
     }
   }
   if (accepting_) {
-    CAF_LOG_DEBUG(debug_name << ": accepting");
+    log::openssl::debug("{} : accepting", debug_name);
     auto res = SSL_accept(ssl_);
     if (res == 1) {
-      CAF_LOG_DEBUG("SSL connection accepted");
+      log::openssl::debug("SSL connection accepted");
       accepting_ = false;
     } else {
       result = 0;
       return check_ssl_res(res);
     }
   }
-  CAF_LOG_DEBUG(debug_name << ": calling SSL_write or SSL_read");
+  log::openssl::debug("{} : calling SSL_write or SSL_read", debug_name);
   if (len == 0) {
     result = 0;
     return rw_state::indeterminate;
@@ -145,13 +147,13 @@ rw_state session::do_some(int (*f)(SSL*, void*, int), size_t& result, void* buf,
 
 rw_state session::read_some(size_t& result, native_socket, void* buf,
                             size_t len) {
-  CAF_LOG_TRACE(CAF_ARG(len));
+  auto lg = log::openssl::trace("len = {}", len);
   return do_some(SSL_read, result, buf, len, "read_some");
 }
 
 rw_state session::write_some(size_t& result, native_socket, const void* buf,
                              size_t len) {
-  CAF_LOG_TRACE(CAF_ARG(len));
+  auto lg = log::openssl::trace("len = {}", len);
   auto wr_fun = [](SSL* sptr, void* vptr, int ptr_size) {
     return SSL_write(sptr, vptr, ptr_size);
   };
@@ -159,7 +161,7 @@ rw_state session::write_some(size_t& result, native_socket, const void* buf,
 }
 
 bool session::try_connect(native_socket fd) {
-  CAF_LOG_TRACE(CAF_ARG(fd));
+  auto lg = log::openssl::trace("fd = {}", fd);
   CAF_BLOCK_SIGPIPE();
   SSL_set_fd(ssl_, fd);
   SSL_set_connect_state(ssl_);
@@ -171,7 +173,7 @@ bool session::try_connect(native_socket fd) {
 }
 
 bool session::try_accept(native_socket fd) {
-  CAF_LOG_TRACE(CAF_ARG(fd));
+  auto lg = log::openssl::trace("fd = {}", fd);
   CAF_BLOCK_SIGPIPE();
   SSL_set_fd(ssl_, fd);
   SSL_set_accept_state(ssl_);
@@ -200,29 +202,27 @@ SSL_CTX* session::create_ssl_context() {
   if (!ctx)
     CAF_RAISE_ERROR("cannot create OpenSSL context");
   auto& cfg = sys_.config();
+  auto key = get_or(cfg, "caf.openssl.key", ""sv);
+  auto certificate = get_or(cfg, "caf.openssl.certificate", ""sv);
+  openssl_passphrase_ = get_or(cfg, "caf.openssl.passphrase", ""sv);
+  auto capath = get_or(cfg, "caf.openssl.capath", ""sv);
+  auto cafile = get_or(cfg, "caf.openssl.cafile", ""sv);
   if (sys_.openssl_manager().authentication_enabled()) {
     // Require valid certificates on both sides.
-    if (!cfg.openssl_certificate.empty()
-        && SSL_CTX_use_certificate_chain_file(ctx,
-                                              cfg.openssl_certificate.c_str())
-             != 1)
+    if (!certificate.empty()
+        && SSL_CTX_use_certificate_chain_file(ctx, certificate.c_str()) != 1)
       CAF_RAISE_ERROR("cannot load certificate");
-    if (!cfg.openssl_passphrase.empty()) {
-      openssl_passphrase_ = cfg.openssl_passphrase;
+    if (!openssl_passphrase_.empty()) {
       SSL_CTX_set_default_passwd_cb(ctx, pem_passwd_cb);
       SSL_CTX_set_default_passwd_cb_userdata(ctx, this);
     }
-    if (!cfg.openssl_key.empty()
-        && SSL_CTX_use_PrivateKey_file(ctx, cfg.openssl_key.c_str(),
-                                       SSL_FILETYPE_PEM)
-             != 1)
+    if (!key.empty()
+        && SSL_CTX_use_PrivateKey_file(ctx, key.c_str(), SSL_FILETYPE_PEM) != 1)
       CAF_RAISE_ERROR("cannot load private key");
-    auto cafile = (!cfg.openssl_cafile.empty() ? cfg.openssl_cafile.c_str()
-                                               : nullptr);
-    auto capath = (!cfg.openssl_capath.empty() ? cfg.openssl_capath.c_str()
-                                               : nullptr);
-    if (cafile || capath) {
-      if (SSL_CTX_load_verify_locations(ctx, cafile, capath) != 1)
+    auto cafile_cstr = !cafile.empty() ? cafile.c_str() : nullptr;
+    auto capath_cstr = !capath.empty() ? capath.c_str() : nullptr;
+    if (cafile_cstr || capath_cstr) {
+      if (SSL_CTX_load_verify_locations(ctx, cafile_cstr, capath_cstr) != 1)
         CAF_RAISE_ERROR("cannot load trusted CA certificates");
     }
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
@@ -271,16 +271,16 @@ bool session::handle_ssl_result(int ret) {
   auto err = SSL_get_error(ssl_, ret);
   switch (err) {
     case SSL_ERROR_WANT_READ:
-      CAF_LOG_DEBUG("Nonblocking call to SSL returned want_read");
+      log::openssl::debug("Nonblocking call to SSL returned want_read");
       return true;
     case SSL_ERROR_WANT_WRITE:
-      CAF_LOG_DEBUG("Nonblocking call to SSL returned want_write");
+      log::openssl::debug("Nonblocking call to SSL returned want_write");
       return true;
     case SSL_ERROR_ZERO_RETURN: // Regular remote connection shutdown.
     case SSL_ERROR_SYSCALL:     // Socket connection closed.
       return false;
     default: // Other error
-      CAF_LOG_INFO("SSL call failed:" << get_ssl_error());
+      log::openssl::info("SSL call failed: {}", get_ssl_error());
       return false;
   }
 }

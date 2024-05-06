@@ -14,10 +14,11 @@
 #include "caf/detail/unique_function.hpp"
 #include "caf/expected.hpp"
 #include "caf/fwd.hpp"
+#include "caf/infer_handle.hpp"
 #include "caf/node_id.hpp"
-#include "caf/proxy_registry.hpp"
 #include "caf/send.hpp"
 #include "caf/timespan.hpp"
+#include "caf/version.hpp"
 
 #include <chrono>
 #include <list>
@@ -83,7 +84,7 @@ public:
   template <class Handle>
   expected<uint16_t> publish(Handle&& whom, uint16_t port,
                              const char* in = nullptr, bool reuse = false) {
-    detail::type_list<std::decay_t<Handle>> tk;
+    type_list<std::decay_t<Handle>> tk;
     return publish(actor_cast<strong_actor_ptr>(std::forward<Handle>(whom)),
                    system().message_types(tk), port, in, reuse);
   }
@@ -103,7 +104,7 @@ public:
   ///          a remote actor or an `error`.
   template <class ActorHandle = actor>
   expected<ActorHandle> remote_actor(std::string host, uint16_t port) {
-    detail::type_list<ActorHandle> tk;
+    type_list<ActorHandle> tk;
     auto x = remote_actor(system().message_types(tk), std::move(host), port);
     if (!x)
       return x.error();
@@ -217,7 +218,7 @@ public:
             class F = std::function<void(broker*)>, class... Ts>
   expected<infer_handle_from_fun_t<F>>
   spawn_client(F fun, const std::string& host, uint16_t port, Ts&&... xs) {
-    using impl = typename infer_handle_from_fun<F>::impl;
+    using impl = typename infer_handle_from_fun_trait_t<F>::impl;
     return spawn_client_impl<Os, impl>(std::move(fun), host, port,
                                        std::forward<Ts>(xs)...);
   }
@@ -228,7 +229,7 @@ public:
             class F = std::function<void(broker*)>, class... Ts>
   expected<infer_handle_from_fun_t<F>>
   spawn_server(F fun, uint16_t& port, Ts&&... xs) {
-    using impl = typename infer_handle_from_fun<F>::impl;
+    using impl = typename infer_handle_from_fun_trait_t<F>::impl;
     return spawn_server_impl<Os, impl>(std::move(fun), port,
                                        std::forward<Ts>(xs)...);
   }
@@ -240,7 +241,7 @@ public:
   expected<infer_handle_from_fun_t<F>>
   spawn_server(F fun, const uint16_t& port, Ts&&... xs) {
     uint16_t dummy = port;
-    using impl = typename infer_handle_from_fun<F>::impl;
+    using impl = typename infer_handle_from_fun_trait_t<F>::impl;
     return spawn_server_impl<Os, impl>(std::move(fun), dummy,
                                        std::forward<Ts>(xs)...);
   }
@@ -248,27 +249,12 @@ public:
   /// Adds module-specific options to the config before loading the module.
   static void add_module_options(actor_system_config& cfg);
 
-  /// Returns a middleman using the default network backend.
-  static actor_system::module* make(actor_system&, detail::type_list<>);
+  /// Creates a new middleman instance.
+  static actor_system_module* make(actor_system&);
 
-  template <class Backend>
-  static actor_system::module*
-  make(actor_system& sys, detail::type_list<Backend>) {
-    class impl : public middleman {
-    public:
-      impl(actor_system& ref) : middleman(ref), backend_(&ref) {
-        // nop
-      }
-
-      network::multiplexer& backend() override {
-        return backend_;
-      }
-
-    private:
-      Backend backend_;
-    };
-    return new impl(sys);
-  }
+  /// Checks whether the ABI of the middleman is compatible with the CAF core.
+  /// Otherwise, calls `abort`.
+  static void check_abi_compatibility(version::abi_token token);
 
   /// @private
   actor get_named_broker(const std::string& name) {
@@ -337,8 +323,6 @@ private:
 
   expected<strong_actor_ptr> remote_actor(std::set<std::string> ifs,
                                           std::string host, uint16_t port);
-
-  static int exec_slave_mode(actor_system&, const actor_system_config&);
 
   /// The actor environment.
   actor_system& system_;

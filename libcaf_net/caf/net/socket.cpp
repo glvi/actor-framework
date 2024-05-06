@@ -7,7 +7,7 @@
 #include "caf/config.hpp"
 #include "caf/detail/net_syscall.hpp"
 #include "caf/detail/socket_sys_includes.hpp"
-#include "caf/logger.hpp"
+#include "caf/log/net.hpp"
 #include "caf/sec.hpp"
 
 #include <system_error>
@@ -17,7 +17,7 @@ namespace caf::net {
 #ifdef CAF_WINDOWS
 
 void close(socket fd) {
-  CAF_LOG_DEBUG("close" << CAF_ARG2("socket", fd.id));
+  log::net::debug("close socket = {}", fd.id);
   closesocket(fd.id);
 }
 
@@ -149,7 +149,7 @@ error nonblocking(socket x, bool new_value) {
 #else // CAF_WINDOWS
 
 void close(socket fd) {
-  CAF_LOG_DEBUG("close" << CAF_ARG2("socket", fd.id));
+  log::net::debug("close socket = {}", fd.id);
   ::close(fd.id);
 }
 
@@ -192,7 +192,7 @@ bool probe(socket x) {
 }
 
 error child_process_inherit(socket x, bool new_value) {
-  CAF_LOG_TRACE(CAF_ARG(x) << CAF_ARG(new_value));
+  auto lg = log::net::trace("x = {}, new_value = {}", x, new_value);
   // read flags for x
   CAF_NET_SYSCALL("fcntl", rf, ==, -1, fcntl(x.id, F_GETFD));
   // calculate and set new flags
@@ -202,7 +202,7 @@ error child_process_inherit(socket x, bool new_value) {
 }
 
 error nonblocking(socket x, bool new_value) {
-  CAF_LOG_TRACE(CAF_ARG(x) << CAF_ARG(new_value));
+  auto lg = log::net::trace("x = {}, new_value = {}", x, new_value);
   // read flags for x
   CAF_NET_SYSCALL("fcntl", rf, ==, -1, fcntl(x.id, F_GETFL, 0));
   // calculate and set new flags

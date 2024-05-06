@@ -4,7 +4,9 @@
 
 #pragma once
 
+#include "caf/async_mail.hpp"
 #include "caf/detail/core_export.hpp"
+#include "caf/dynamically_typed.hpp"
 #include "caf/extend.hpp"
 #include "caf/fwd.hpp"
 #include "caf/keep_behavior.hpp"
@@ -49,9 +51,9 @@ public:
 
   // -- overridden functions ---------------------------------------------------
 
-  bool enqueue(mailbox_element_ptr ptr, execution_unit* host) override;
+  bool enqueue(mailbox_element_ptr ptr, scheduler* sched) override;
 
-  void launch(execution_unit* eu, bool lazy, bool hide) override;
+  void launch(scheduler* sched, bool lazy, bool hide) override;
 
   void on_exit() override;
 
@@ -67,6 +69,14 @@ public:
 
   /// Sets the handler for incoming messages.
   void on_exit(on_exit_handler handler);
+
+  // -- messaging --------------------------------------------------------------
+
+  /// Starts a new message.
+  template <class... Args>
+  [[nodiscard]] auto mail(Args&&... args) {
+    return async_mail(dynamically_typed{}, this, std::forward<Args>(args)...);
+  }
 
   // -- behavior management ----------------------------------------------------
 

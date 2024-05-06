@@ -7,8 +7,9 @@
 #include "caf/io/basp/message_queue.hpp"
 
 #include "caf/actor_system.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/proxy_registry.hpp"
-#include "caf/scheduler/abstract_coordinator.hpp"
+#include "caf/scheduler.hpp"
 
 namespace caf::io::basp {
 
@@ -16,7 +17,8 @@ namespace caf::io::basp {
 
 worker::worker(hub_type& hub, message_queue& queue, proxy_registry& proxies)
   : hub_(&hub), queue_(&queue), proxies_(&proxies), system_(&proxies.system()) {
-  CAF_IGNORE_UNUSED(pad_);
+  // Silence unused private field warning.
+  static_cast<void>(pad_);
 }
 
 worker::~worker() {
@@ -35,14 +37,17 @@ void worker::launch(const node_id& last_hop, const basp::header& hdr,
   memcpy(&hdr_, &hdr, sizeof(basp::header));
   payload_.assign(payload.begin(), payload.end());
   ref();
-  system_->scheduler().enqueue(this);
+  system_->scheduler().schedule(this);
 }
 
 // -- implementation of resumable ----------------------------------------------
 
-resumable::resume_result worker::resume(execution_unit* ctx, size_t) {
-  ctx->proxy_registry_ptr(proxies_);
-  handle_remote_message(ctx);
+resumable::resume_result worker::resume(scheduler* sched, size_t) {
+  proxy_registry::current(proxies_);
+  auto guard = detail::scope_guard{[]() noexcept { //
+    proxy_registry::current(nullptr);
+  }};
+  handle_remote_message(*system_, sched);
   hub_->push(this);
   return resumable::awaiting_message;
 }

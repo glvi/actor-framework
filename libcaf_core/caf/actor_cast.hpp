@@ -67,16 +67,16 @@ template <class To, class From>
 class actor_cast_access<To, From, raw_ptr_cast> {
 public:
   To operator()(actor_control_block* x) const {
-    return x;
+    return To{x};
   }
 
   To operator()(abstract_actor* x) const {
-    return x->ctrl();
+    return To{x->ctrl()};
   }
 
   template <class T, class = std::enable_if_t<!std::is_pointer_v<T>>>
   To operator()(const T& x) const {
-    return x.get();
+    return To{x.get()};
   }
 };
 
@@ -134,7 +134,7 @@ template <class To, class From>
 class actor_cast_access<To, From, neutral_cast> {
 public:
   To operator()(const From& x) const {
-    return x.get();
+    return To{x.get()};
   }
 
   To operator()(From&& x) const {
@@ -142,8 +142,8 @@ public:
   }
 };
 
-/// Converts actor handle `what` to a different actor
-/// handle or raw pointer of type `T`.
+/// Converts the actor handle `what` to a different actor handle or raw pointer
+/// of type `T`.
 template <class T, class U>
 T actor_cast(U&& what) {
   // Should use remove_cvref in C++20.
@@ -160,6 +160,13 @@ T actor_cast(U&& what) {
   // perform cast
   actor_cast_access<T, from_type, x * y> f;
   return f(std::forward<U>(what));
+}
+
+/// Converts the actor handle `what` to a different actor handle or raw pointer
+/// of type `Tag::handle_type`.
+template <class U, class Tag>
+auto actor_cast(U&& what, Tag) {
+  return actor_cast<typename Tag::handle_type>(std::forward<U>(what));
 }
 
 } // namespace caf

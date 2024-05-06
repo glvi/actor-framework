@@ -238,7 +238,7 @@ private:
 template <class F, class... Args>
 net::http::route_ptr
 make_http_route_impl(std::string& path, std::optional<net::http::method> method,
-                     F& f, detail::type_list<net::http::responder&, Args...>) {
+                     F& f, type_list<net::http::responder&, Args...>) {
   if constexpr (sizeof...(Args) == 0) {
     using impl_t = http_simple_route_impl<F>;
     return make_counted<impl_t>(std::move(path), method, std::move(f));
@@ -298,7 +298,7 @@ template <class F>
 expected<route_ptr> make_route(F f) {
   // F must have signature void (responder&).
   using f_trait = detail::get_callable_trait_t<F>;
-  static_assert(std::is_same_v<typename f_trait::f_sig, void(responder&)>);
+  static_assert(std::is_same_v<typename f_trait::fun_sig, void(responder&)>);
   using impl_t = detail::http_catch_all_route_impl<F>;
   return make_counted<impl_t>(std::move(f));
 }

@@ -8,14 +8,14 @@
 
 namespace caf::io::network {
 
-multiplexer::multiplexer(actor_system* sys)
-  : execution_unit(sys), tid_(std::this_thread::get_id()) {
+multiplexer::multiplexer(actor_system& sys)
+  : tid_(std::this_thread::get_id()), sys_(&sys) {
   // nop
 }
 
 multiplexer_ptr multiplexer::make(actor_system& sys) {
-  CAF_LOG_TRACE("");
-  return multiplexer_ptr{new default_multiplexer(&sys)};
+  auto lg = log::io::trace("");
+  return multiplexer_ptr{new default_multiplexer(sys)};
 }
 
 multiplexer_backend* multiplexer::pimpl() {
@@ -26,16 +26,24 @@ multiplexer::supervisor::~supervisor() {
   // nop
 }
 
-resumable::subtype_t multiplexer::runnable::subtype() const {
+resumable::subtype_t multiplexer::runnable::subtype() const noexcept {
   return resumable::function_object;
 }
 
-void multiplexer::runnable::intrusive_ptr_add_ref_impl() {
-  intrusive_ptr_add_ref(this);
+void multiplexer::runnable::ref_resumable() const noexcept {
+  ref();
 }
 
-void multiplexer::runnable::intrusive_ptr_release_impl() {
-  intrusive_ptr_release(this);
+void multiplexer::runnable::deref_resumable() const noexcept {
+  deref();
+}
+
+void multiplexer::start() {
+  // nop
+}
+
+void multiplexer::stop() {
+  // nop
 }
 
 } // namespace caf::io::network

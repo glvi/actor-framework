@@ -2,6 +2,7 @@
 // if friend access for serialization is available
 
 #include "caf/all.hpp"
+#include "caf/anon_mail.hpp"
 
 #include <iostream>
 #include <utility>
@@ -58,12 +59,12 @@ private:
 
 behavior testee(event_based_actor* self) {
   return {
-    [self](const foo& x) { aout(self).println("{}", x); },
+    [self](const foo& x) { self->println("{}", x); },
   };
 }
 
 void caf_main(actor_system& sys) {
-  anon_send(sys.spawn(testee), foo{1, 2});
+  anon_mail(foo{1, 2}).send(sys.spawn(testee));
 }
 
 CAF_MAIN(id_block::custom_types_2)

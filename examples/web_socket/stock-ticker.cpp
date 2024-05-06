@@ -1,9 +1,12 @@
 // Pseudo "Stock Ticker" that publishes random updates once per second via
 // WebSocket feed.
 
+#include "caf/net/acceptor_resource.hpp"
 #include "caf/net/middleman.hpp"
+#include "caf/net/web_socket/frame.hpp"
 #include "caf/net/web_socket/with.hpp"
 
+#include "caf/actor_from_state.hpp"
 #include "caf/actor_system.hpp"
 #include "caf/actor_system_config.hpp"
 #include "caf/caf_main.hpp"
@@ -18,6 +21,7 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <random>
 #include <utility>
 
 using namespace std::literals;
@@ -56,12 +60,10 @@ bool inspect(Inspector& f, info& x) {
 // -- actor for generating a random feed ---------------------------------------
 
 struct random_feed_state {
-  using trait = caf::net::web_socket::default_trait;
   using frame = caf::net::web_socket::frame;
-  using accept_event = trait::accept_event<>;
 
   random_feed_state(caf::event_based_actor* selfptr,
-                    trait::acceptor_resource<> events,
+                    caf::net::acceptor_resource<frame> events,
                     caf::timespan update_interval)
     : self(selfptr), val_dist(0, 100000), index_dist(0, 19) {
     // Init random number generator.
@@ -104,7 +106,7 @@ struct random_feed_state {
     auto n = std::make_shared<int>(0);
     events
       .observe_on(self) //
-      .for_each([this, n](const accept_event& ev) {
+      .for_each([this, n](const auto& ev) {
         std::cout << "*** added listener (n = " << ++*n << ")" << std::endl;
         auto [pull, push] = ev.data();
         pull.observe_on(self)
@@ -131,6 +133,12 @@ struct random_feed_state {
     return val_dist(rng) / 100.0;
   }
 
+  caf::behavior make_behavior() {
+    // Returning a default-constructed behavior will terminate the actor once
+    // the flows are done.
+    return {};
+  }
+
   caf::event_based_actor* self;
   caf::flow::observable<frame> feed;
   caf::json_writer writer;
@@ -139,8 +147,6 @@ struct random_feed_state {
   std::uniform_int_distribution<int> val_dist;
   std::uniform_int_distribution<size_t> index_dist;
 };
-
-using random_feed_impl = caf::stateful_actor<random_feed_state>;
 
 // -- configuration setup ------------------------------------------------------
 
@@ -184,7 +190,6 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
     return EXIT_FAILURE;
   }
   // Open up a TCP port for incoming connections and start the server.
-  using trait = ws::default_trait;
   auto server
     = ws::with(sys)
         // Optionally enable TLS.
@@ -202,8 +207,9 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
           acc.accept();
         })
         // When started, run our worker actor to handle incoming connections.
-        .start([&sys, interval](trait::acceptor_resource<> events) {
-          sys.spawn<random_feed_impl>(std::move(events), interval);
+        .start([&sys, interval](auto events) {
+          sys.spawn(caf::actor_from_state<random_feed_state>, std::move(events),
+                    interval);
         });
   // Report any error to the user.
   if (!server) {

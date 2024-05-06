@@ -4,6 +4,8 @@
 
 #include "caf/flow/scoped_coordinator.hpp"
 
+#include "caf/detail/assert.hpp"
+
 namespace caf::flow {
 
 // -- factories ----------------------------------------------------------------
@@ -65,6 +67,13 @@ void scoped_coordinator::ref_execution_context() const noexcept {
 
 void scoped_coordinator::deref_execution_context() const noexcept {
   deref();
+}
+
+// -- properties ---------------------------------------------------------------
+
+size_t scoped_coordinator::pending_actions() const noexcept {
+  std::unique_lock guard{mtx_};
+  return actions_.size() + delayed_.size();
 }
 
 // -- lifetime management ------------------------------------------------------

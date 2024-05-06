@@ -4,7 +4,8 @@
 
 #include "caf/io/datagram_servant.hpp"
 
-#include "caf/logger.hpp"
+#include "caf/detail/assert.hpp"
+#include "caf/log/io.hpp"
 
 namespace caf::io {
 
@@ -21,10 +22,10 @@ message datagram_servant::detach_message() {
   return make_message(datagram_servant_closed_msg{hdls()});
 }
 
-bool datagram_servant::consume(execution_unit* ctx, datagram_handle hdl,
+bool datagram_servant::consume(scheduler* ctx, datagram_handle hdl,
                                network::receive_buffer& buf) {
   CAF_ASSERT(ctx != nullptr);
-  CAF_LOG_TRACE(CAF_ARG(buf.size()));
+  auto lg = log::io::trace("buf.size = {}", buf.size());
   if (detached()) {
     // we are already disconnected from the broker while the multiplexer
     // did not yet remove the socket, this can happen if an I/O event causes
@@ -45,9 +46,9 @@ bool datagram_servant::consume(execution_unit* ctx, datagram_handle hdl,
   return result;
 }
 
-void datagram_servant::datagram_sent(execution_unit* ctx, datagram_handle hdl,
+void datagram_servant::datagram_sent(scheduler* ctx, datagram_handle hdl,
                                      size_t written, byte_buffer buffer) {
-  CAF_LOG_TRACE(CAF_ARG(written));
+  auto lg = log::io::trace("written = {}", written);
   if (detached())
     return;
   using sent_t = datagram_sent_msg;

@@ -31,10 +31,10 @@ behavior server(event_based_actor* self) {
 
 behavior client(event_based_actor* self, const actor& serv) {
   self->link_to(serv);
-  self->send(serv, idle_atom_v, self);
+  self->mail(idle_atom_v, self).send(serv);
   return {
     [self, serv](ping_atom) {
-      self->send(serv, idle_atom_v, self);
+      self->mail(idle_atom_v, self).send(serv);
       return pong_atom_v;
     },
   };
@@ -44,17 +44,16 @@ void caf_main(actor_system& sys) {
   auto serv = sys.spawn(server);
   auto worker = sys.spawn(client, serv);
   scoped_actor self{sys};
-  self->request(serv, 10s, ping_atom_v)
+  self->mail(ping_atom_v)
+    .request(serv, 10s)
     .receive(
       [&self, worker](pong_atom) {
-        aout(self).println("received response from {}",
-                           self->current_sender() == worker ? "worker"
-                                                            : "server");
+        self->println("received response from {}",
+                      self->current_sender() == worker ? "worker" : "server");
       },
       [&self, worker](error& err) {
-        aout(self).println("received error {} from {}", err,
-                           self->current_sender() == worker ? "worker"
-                                                            : "server");
+        self->println("received error {} from {}", err,
+                      self->current_sender() == worker ? "worker" : "server");
       });
   self->send_exit(serv, exit_reason::user_shutdown);
 }

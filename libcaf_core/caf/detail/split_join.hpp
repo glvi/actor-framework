@@ -8,6 +8,9 @@
 #include "caf/actor_system.hpp"
 #include "caf/event_based_actor.hpp"
 
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 namespace caf::detail {
@@ -78,7 +81,7 @@ public:
 
   void operator()(actor_system& sys, std::unique_lock<std::shared_mutex>& ulock,
                   const std::vector<actor>& workers, mailbox_element_ptr& ptr,
-                  execution_unit* host) {
+                  scheduler* sched) {
     if (!ptr->sender)
       return;
     actor_msg_vec xs;
@@ -89,7 +92,7 @@ public:
     using collector_t = split_join_collector<T, Split, Join>;
     auto hdl = sys.spawn<collector_t, lazy_init>(init_, sf_, jf_,
                                                  std::move(xs));
-    hdl->enqueue(std::move(ptr), host);
+    hdl->enqueue(std::move(ptr), sched);
   }
 
 private:

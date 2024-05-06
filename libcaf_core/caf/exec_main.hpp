@@ -18,7 +18,7 @@ template <class>
 struct exec_main_helper;
 
 template <class System>
-struct exec_main_helper<detail::type_list<System&>> {
+struct exec_main_helper<type_list<System&>> {
   using config = actor_system_config;
 
   template <class F>
@@ -28,7 +28,7 @@ struct exec_main_helper<detail::type_list<System&>> {
 };
 
 template <class System, class Config>
-struct exec_main_helper<detail::type_list<System&, const Config&>> {
+struct exec_main_helper<type_list<System&, const Config&>> {
   using config = Config;
 
   template <class F>
@@ -39,7 +39,7 @@ struct exec_main_helper<detail::type_list<System&, const Config&>> {
 
 template <class T>
 void exec_main_init_meta_objects_single() {
-  if constexpr (std::is_base_of_v<actor_system::module, T>)
+  if constexpr (std::is_base_of_v<actor_system_module, T>)
     T::init_global_meta_objects();
   else
     init_global_meta_objects<T>();
@@ -52,7 +52,7 @@ void exec_main_init_meta_objects() {
 
 template <class T>
 void exec_main_load_module(actor_system_config& cfg) {
-  if constexpr (std::is_base_of_v<actor_system::module, T>)
+  if constexpr (std::is_base_of_v<actor_system_module, T>)
     cfg.template load<T>();
 }
 
@@ -84,25 +84,17 @@ int exec_main(F fun, int argc, char** argv) {
     return EXIT_FAILURE;
   }
   // Return immediately if a help text was printed.
-  if (cfg.cli_helptext_printed)
+  if (cfg.helptext_printed())
     return EXIT_SUCCESS;
   // Initialize the actor system.
   actor_system system{cfg};
-  if (cfg.slave_mode) {
-    if (!cfg.slave_mode_fun) {
-      fprintf(stderr, "cannot run slave mode, I/O module not loaded\n");
-      return EXIT_FAILURE;
-    }
-    return cfg.slave_mode_fun(system, cfg);
-  }
   helper f;
   using result_type = decltype(f(fun, system, cfg));
   if constexpr (std::is_convertible_v<result_type, int>) {
     return f(fun, system, cfg);
-  } else {
-    f(fun, system, cfg);
-    return EXIT_SUCCESS;
   }
+  f(fun, system, cfg);
+  return EXIT_SUCCESS;
 }
 
 } // namespace caf
@@ -128,7 +120,7 @@ auto do_init_host_system(type_list<Module...>, type_list<T, Ts...>) {
 #define CAF_MAIN(...)                                                          \
   int main(int argc, char** argv) {                                            \
     [[maybe_unused]] auto host_init_guard = caf::detail::do_init_host_system(  \
-      caf::detail::type_list<>{}, caf::detail::type_list<__VA_ARGS__>{});      \
+      caf::type_list<>{}, caf::type_list<__VA_ARGS__>{});                      \
     caf::exec_main_init_meta_objects<__VA_ARGS__>();                           \
     caf::core::init_global_meta_objects();                                     \
     return caf::exec_main<__VA_ARGS__>(caf_main, argc, argv);                  \

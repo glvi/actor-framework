@@ -8,6 +8,16 @@ is based on [Keep a Changelog](https://keepachangelog.com).
 ### Fixed
 
 - Fix building CAF with shared libraries (DLLs) enabled on Windows (#1715).
+- The `actor_from_state` utility now evaluates spawn options such as `linked`
+  (#1771). Previously, passing this option to `actor_from_state` resulted in a
+  compiler error.
+- Sending a message to an already terminated actor from a `function_view` now
+  properly reports an error (#1801).
+- URIs now support support username and password in the user-info sub-component
+  (#1814). Consequently, the `userinfo` field of the URI class now has two
+  member variables: `name` and (an optional) `password`. Further, the `userinfo`
+  field is now optional in order to differentiate between an empty user-info and
+  no user-info at all.
 
 ### Removed
 
@@ -17,6 +27,14 @@ is based on [Keep a Changelog](https://keepachangelog.com).
 - All `to_stream` and `to_typed_stream` member functions on actors (they are
   available on `caf::flow::observable` directly).
 - The `group` API has been removed entirely.
+- The experimental APIs for actor profiling and inserting tracing data have been
+  removed. Neither API has a clear use case at the moment and since we have not
+  received any feedback on either API, we have decided to remove them to
+  simplify the code base.
+- The `actor_system_config` no longer contains special member variables for the
+  OpenSSL module. The module now uses the regular configuration system.
+- The `caf-run` tool no longer ships with CAF. The tool has not been maintained
+  for a long time, has never been thoroughly tested, and has no documentation.
 
 ### Changed
 
@@ -24,6 +42,29 @@ is based on [Keep a Changelog](https://keepachangelog.com).
   setting the configuration option `caf.net.prometheus-http`. The option has the
   following fields: `port`, `address`, `tls.key-file`, and `tls.cert-file`. When
   setting the TLS options, the server will use HTTPS instead of HTTP.
+- Sending messages from cleanup code (e.g., the destructor of a state class) is
+  now safe. Previously, doing so could cause undefined behavior by forming a
+  strong reference to a destroyed actor.
+- Actors will now always send an error message if an incoming message triggered
+  an unhandled exception. Previously, CAF would only send an error message if
+  the incoming message was a request (#1684).
+- Stateful actors now provide a getter function `state()` instead of declaring a
+  public `state` member variable. This change enables more flexibility in the
+  implementation for future CAF versions.
+- Passing a class to `spawn_inactive` is now optional and defaults to
+  `event_based_actor`. The next major release will remove the class parameter
+  altogether.
+
+### Deprecated
+
+- Spawning an actor sub-type via the `actor_system` now emits a deprecation
+  warning. Sub-typing actors has several pitfalls and limits design space.
+  Instead of sub-typing, users should prefer state classes and the new
+  `actor_from_state` utility.
+- With similar reasoning, `spawn_inactive` now emits a deprecation warning when
+  passing a class other than `event_based_actor`.
+- The experimental `actor_pool` API has been deprecated. The API has not seen
+  much use and is too cumbersome.
 
 ## [0.19.5] - 2024-01-08
 

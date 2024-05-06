@@ -9,9 +9,14 @@
 #include "caf/typed_event_based_actor.hpp"
 
 using namespace caf;
+using namespace std::literals;
 
 // --(rst-promise-begin)--
-using adder_actor = typed_actor<result<int32_t>(add_atom, int32_t, int32_t)>;
+struct adder_trait {
+  using signatures
+    = caf::type_list<result<int32_t>(add_atom, int32_t, int32_t)>;
+};
+using adder_actor = typed_actor<adder_trait>;
 
 adder_actor::behavior_type worker_impl() {
   return {
@@ -23,7 +28,8 @@ adder_actor::behavior_type server_impl(adder_actor::pointer self,
   return {
     [=](add_atom, int32_t y, int32_t z) {
       auto rp = self->make_response_promise<int32_t>();
-      self->request(worker, infinite, add_atom_v, y, z)
+      self->mail(add_atom_v, y, z)
+        .request(worker, infinite)
         .then([rp](int32_t result) mutable { rp.deliver(result); },
               [rp](error& err) mutable { rp.deliver(std::move(err)); });
       return rp;
@@ -33,9 +39,8 @@ adder_actor::behavior_type server_impl(adder_actor::pointer self,
 
 void client_impl(event_based_actor* self, adder_actor adder, int32_t x,
                  int32_t y) {
-  using namespace std::literals::chrono_literals;
-  self->request(adder, 10s, add_atom_v, x, y).then([=](int32_t result) {
-    aout(self).println("{} + {} = {}", x, y, result);
+  self->mail(add_atom_v, x, y).request(adder, 10s).then([=](int32_t result) {
+    self->println("{} + {} = {}", x, y, result);
   });
 }
 

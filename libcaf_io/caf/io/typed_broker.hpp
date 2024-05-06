@@ -9,7 +9,7 @@
 #include "caf/io/middleman.hpp"
 
 #include "caf/actor_registry.hpp"
-#include "caf/config.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/scope_guard.hpp"
 #include "caf/detail/sync_request_bouncer.hpp"
 #include "caf/extend.hpp"
@@ -54,7 +54,7 @@ class typed_broker
     public statically_typed_actor_base {
   // clang-format on
 public:
-  using signatures = detail::type_list<Sigs...>;
+  using signatures = type_list<Sigs...>;
 
   using actor_hdl = typed_actor<Sigs...>;
 
@@ -67,21 +67,23 @@ public:
   /// @cond PRIVATE
 
   std::set<std::string> message_types() const override {
-    detail::type_list<typed_actor<Sigs...>> hdl;
+    type_list<typed_actor<Sigs...>> hdl;
     return this->system().message_types(hdl);
   }
 
   /// @endcond
 
   void initialize() override {
-    CAF_LOG_TRACE("");
+    auto lg = log::io::trace("");
     this->init_broker();
     auto bhvr = make_behavior();
-    CAF_LOG_DEBUG_IF(!bhvr, "make_behavior() did not return a behavior:"
-                              << CAF_ARG2("alive", this->alive()));
+    if (!bhvr) {
+      log::io::debug("make_behavior() did not return a behavior: alive = {}",
+                     this->alive());
+    }
     if (bhvr) {
       // make_behavior() did return a behavior instead of using become()
-      CAF_LOG_DEBUG("make_behavior() did return a valid behavior");
+      log::io::debug("make_behavior() did return a valid behavior");
       this->do_become(std::move(bhvr.unbox()), true);
     }
   }
@@ -91,7 +93,7 @@ public:
     CAF_ASSERT(this->context() != nullptr);
     auto sptr = this->take(hdl);
     CAF_ASSERT(sptr->hdl() == hdl);
-    using impl = typename infer_handle_from_fun<F>::impl;
+    using impl = typename infer_handle_from_fun_trait_t<F>::impl;
     static_assert(
       std::is_convertible<typename impl::actor_hdl, connection_handler>::value,
       "Cannot fork: new broker misses required handlers");

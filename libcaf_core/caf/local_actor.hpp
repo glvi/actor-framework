@@ -10,10 +10,10 @@
 #include "caf/actor_config.hpp"
 #include "caf/actor_system.hpp"
 #include "caf/behavior.hpp"
-#include "caf/delegated.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/core_export.hpp"
+#include "caf/detail/monitor_action.hpp"
 #include "caf/detail/send_type_check.hpp"
-#include "caf/detail/type_traits.hpp"
 #include "caf/detail/typed_actor_util.hpp"
 #include "caf/detail/unique_function.hpp"
 #include "caf/disposable.hpp"
@@ -21,22 +21,16 @@
 #include "caf/fwd.hpp"
 #include "caf/mailbox_element.hpp"
 #include "caf/message.hpp"
-#include "caf/message_handler.hpp"
 #include "caf/message_id.hpp"
 #include "caf/message_priority.hpp"
 #include "caf/response_promise.hpp"
 #include "caf/response_type.hpp"
-#include "caf/resumable.hpp"
+#include "caf/send.hpp"
 #include "caf/spawn_options.hpp"
 #include "caf/telemetry/histogram.hpp"
 #include "caf/timespan.hpp"
-#include "caf/typed_actor.hpp"
-#include "caf/typed_response_promise.hpp"
 
-#include <atomic>
 #include <cstdint>
-#include <exception>
-#include <functional>
 #include <type_traits>
 #include <utility>
 
@@ -46,6 +40,10 @@ namespace caf {
 /// living in an own thread or cooperatively scheduled.
 class CAF_CORE_EXPORT local_actor : public abstract_actor {
 public:
+  // -- friends ----------------------------------------------------------------
+
+  friend class mail_cache;
+
   // -- member types -----------------------------------------------------------
 
   /// Defines a monotonic clock suitable for measuring intervals.
@@ -90,7 +88,7 @@ public:
 
   ~local_actor() override;
 
-  void on_destroy() override;
+  void on_cleanup(const error&) override;
 
   // This function performs additional steps to initialize actor-specific
   // metrics. It calls virtual functions and thus cannot run as part of the
@@ -99,7 +97,7 @@ public:
 
   // -- pure virtual modifiers -------------------------------------------------
 
-  virtual void launch(execution_unit* eu, bool lazy, bool hide) = 0;
+  virtual void launch(scheduler* sched, bool lazy, bool hide) = 0;
 
   // -- time -------------------------------------------------------------------
 
@@ -112,13 +110,39 @@ public:
   /// @pre `mid.is_request()`
   disposable request_response_timeout(timespan d, message_id mid);
 
+  // -- printing ---------------------------------------------------------------
+
+  /// Adds a new line to stdout.
+  template <class... Args>
+  void println(std::string_view fmt, Args&&... args) {
+    system().println(fmt, std::forward<Args>(args)...);
+  }
+
+  /// Adds a new line to stdout.
+  template <class... Args>
+  void println(term color, std::string_view fmt, Args&&... args) {
+    system().println(color, fmt, std::forward<Args>(args)...);
+  }
+
   // -- spawn functions --------------------------------------------------------
 
   template <class T, spawn_options Os = no_spawn_options, class... Ts>
+  [[deprecated("use state-based actors and actor_from_state instead")]]
   infer_handle_from_class_t<T> spawn(Ts&&... xs) {
     actor_config cfg{context(), this};
+    cfg.mbox_factory = system().mailbox_factory();
     return eval_opts(Os, system().spawn_class<T, make_unbound(Os)>(
                            cfg, std::forward<Ts>(xs)...));
+  }
+
+  template <spawn_options Options = no_spawn_options, class CustomSpawn,
+            class... Args>
+  typename CustomSpawn::handle_type spawn(CustomSpawn, Args&&... args) {
+    actor_config cfg{context(), this};
+    cfg.mbox_factory = system().mailbox_factory();
+    return eval_opts(Options,
+                     CustomSpawn::template do_spawn<make_unbound(Options)>(
+                       system(), cfg, std::forward<Args>(args)...));
   }
 
   template <spawn_options Os = no_spawn_options, class F, class... Ts>
@@ -128,6 +152,7 @@ public:
     static_assert(spawnable,
                   "cannot spawn function-based actor with given arguments");
     actor_config cfg{context(), this};
+    cfg.mbox_factory = system().mailbox_factory();
     static constexpr spawn_options unbound = make_unbound(Os);
     std::bool_constant<spawnable> enabled;
     return eval_opts(Os, system().spawn_functor<unbound>(
@@ -183,12 +208,12 @@ public:
   // -- miscellaneous actor operations -----------------------------------------
 
   /// Returns the execution unit currently used by this actor.
-  execution_unit* context() const noexcept {
+  scheduler* context() const noexcept {
     return context_;
   }
 
   /// Sets the execution unit for this actor.
-  void context(execution_unit* x) noexcept {
+  void context(scheduler* x) noexcept {
     context_ = x;
   }
 
@@ -261,6 +286,28 @@ public:
   template <message_priority P = message_priority::normal, class Handle>
   void monitor(const Handle& whom) {
     monitor(actor_cast<abstract_actor*>(whom), P);
+  }
+
+  /// Adds a unidirectional `monitor` to `whom` with custom callback.
+  /// @returns a disposable object for canceling the monitoring of `whom`.
+  /// @note This overload does not work with the @ref demonitor member function.
+  template <typename Handle, typename Fn>
+  disposable monitor(Handle whom, Fn func) {
+    static_assert(!Handle::has_weak_ptr_semantics);
+    static_assert(std::is_invocable_v<Fn, error>);
+    auto* ptr = actor_cast<abstract_actor*>(whom);
+    using impl_t = detail::monitor_action<Fn>;
+    auto on_down = make_counted<impl_t>(std::move(func));
+    ptr->attach_functor([self = address(), on_down](error reason) {
+      // Failing to set the arg means the action was disposed.
+      if (on_down->arg(std::move(reason))) {
+        if (auto shdl = actor_cast<actor>(self))
+          shdl->enqueue(make_mailbox_element(nullptr, make_message_id(),
+                                             action{on_down}),
+                        nullptr);
+      }
+    });
+    return on_down->as_disposable();
   }
 
   /// Removes a monitor from `whom`.
@@ -343,11 +390,25 @@ public:
     return res;
   }
 
-  // returns 0 if last_dequeued() is an asynchronous or sync request message,
-  // a response id generated from the request id otherwise
-  message_id get_response_id() const {
-    auto mid = current_element_->mid;
-    return (mid.is_request()) ? mid.response_id() : message_id();
+  // Send an error message to the sender of the current message as a result of a
+  // delegate operation that failed.
+  void do_delegate_error();
+
+  // Get the sender and message ID for the current message and mark the message
+  // ID as answered.
+  template <message_priority Priority>
+  std::pair<message_id, strong_actor_ptr> do_delegate() {
+    auto& mid = current_element_->mid;
+    if (mid.is_response() || mid.is_answered())
+      return {make_message_id(Priority), std::move(current_element_->sender)};
+    message_id result;
+    if constexpr (Priority == message_priority::high) {
+      result = mid.with_high_priority();
+    } else {
+      result = mid;
+    }
+    mid.mark_as_answered();
+    return {result, std::move(current_element_->sender)};
   }
 
   template <message_priority P = message_priority::normal, class Handle = actor,
@@ -361,8 +422,6 @@ public:
   }
 
   virtual void initialize();
-
-  bool cleanup(error&& fail_state, execution_unit* host) override;
 
   message_id new_request_id(message_priority mp) noexcept;
 
@@ -414,7 +473,7 @@ protected:
   // -- member variables -------------------------------------------------------
 
   // identifies the execution unit this actor is currently executed by
-  execution_unit* context_;
+  scheduler* context_;
 
   // pointer to the sender of the currently processed message
   mailbox_element* current_element_;
@@ -426,6 +485,9 @@ protected:
   detail::unique_function<behavior(local_actor*)> initial_behavior_fac_;
 
   metrics_t metrics_;
+
+private:
+  virtual void do_unstash(mailbox_element_ptr ptr) = 0;
 };
 
 } // namespace caf

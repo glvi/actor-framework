@@ -11,6 +11,8 @@
 
 #include <iostream>
 
+using namespace std::literals;
+
 // --(rst-math-error-begin)--
 enum class math_error : uint8_t {
   division_by_zero = 1,
@@ -64,7 +66,11 @@ using std::flush;
 using namespace caf;
 
 // --(rst-divider-begin)--
-using divider = typed_actor<result<double>(div_atom, double, double)>;
+struct divider_trait {
+  using signatures = type_list<result<double>(div_atom, double, double)>;
+};
+
+using divider = typed_actor<divider_trait>;
 
 divider::behavior_type divider_impl() {
   return {
@@ -87,11 +93,11 @@ void caf_main(actor_system& system) {
   // --(rst-request-begin)--
   auto div = system.spawn(divider_impl);
   scoped_actor self{system};
-  self->request(div, std::chrono::seconds(10), div_atom_v, x, y)
-    .receive([&](double z) { aout(self).println("{} / {} = {}", x, y, z); },
+  self->mail(div_atom_v, x, y)
+    .request(div, 10s)
+    .receive([&](double z) { self->println("{} / {} = {}", x, y, z); },
              [&](const error& err) {
-               aout(self).println("*** cannot compute {} / {} => {}", x, y,
-                                  err);
+               self->println("*** cannot compute {} / {} => {}", x, y, err);
              });
   // --(rst-request-end)--
 }

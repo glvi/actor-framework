@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "caf/detail/assert.hpp"
 #include "caf/detail/comparable.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/implicit_conversions.hpp"
@@ -12,6 +13,7 @@
 #include "caf/fwd.hpp"
 #include "caf/intrusive_cow_ptr.hpp"
 #include "caf/raise_error.hpp"
+#include "caf/type_id.hpp"
 
 #include <sstream>
 #include <tuple>
@@ -72,6 +74,10 @@ public:
 
   size_t empty() const noexcept {
     return size() == 0;
+  }
+
+  bool unique() const noexcept {
+    return data_ && data_->unique();
   }
 
   template <class... Ts>

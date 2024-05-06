@@ -6,12 +6,14 @@
 #include "caf/net/http/with.hpp"
 #include "caf/net/middleman.hpp"
 
+#include "caf/actor_from_state.hpp"
 #include "caf/actor_system.hpp"
 #include "caf/actor_system_config.hpp"
 #include "caf/caf_main.hpp"
 #include "caf/deep_to_string.hpp"
 #include "caf/defaults.hpp"
 #include "caf/event_based_actor.hpp"
+#include "caf/format_to_error.hpp"
 #include "caf/scheduled_actor/flow.hpp"
 
 #include <algorithm>
@@ -63,7 +65,7 @@ struct kvs_actor_state {
         if (auto i = data.find(key); i != data.end())
           return i->second;
         else
-          return make_error(caf::sec::no_such_key, key + " not found");
+          return format_to_error(caf::sec::no_such_key, "{} not found", key);
       },
       [this](caf::put_atom, const std::string& key, std::string& value) {
         data.insert_or_assign(key, std::move(value));
@@ -74,8 +76,6 @@ struct kvs_actor_state {
 
   std::map<std::string, std::string> data;
 };
-
-using kvs_actor_impl = caf::stateful_actor<kvs_actor_state>;
 
 // -- utility functions --------------------------------------------------------
 
@@ -121,7 +121,7 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
     return EXIT_FAILURE;
   }
   // Spin up our key-value store actor.
-  auto kvs = sys.spawn<kvs_actor_impl>();
+  auto kvs = sys.spawn(caf::actor_from_state<kvs_actor_state>);
   // Open up a TCP port for incoming connections and start the server.
   auto server
     = http::with(sys)

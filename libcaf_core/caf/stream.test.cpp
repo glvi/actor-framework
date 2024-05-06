@@ -49,6 +49,20 @@ TEST("default-constructed streams are invalid") {
   check_eq(uut, serialization_roundtrip(uut));
 }
 
+TEST("streams are comparable") {
+  auto dummy = sys.spawn([] { return behavior{[](int) {}}; });
+  auto dummy_guard = make_actor_scope_guard(dummy);
+  auto uut = stream{actor_cast<strong_actor_ptr>(dummy), type_id_v<int32_t>,
+                    "foo", 42};
+  check_eq(uut.compare(uut), 0);
+  auto uut2 = stream{actor_cast<strong_actor_ptr>(dummy), type_id_v<int32_t>,
+                     "foo", 43};
+  check_eq(uut.compare(uut2), -1);
+  auto uut3 = stream{actor_cast<strong_actor_ptr>(dummy), type_id_v<int32_t>,
+                     "foo", 41};
+  check_eq(uut.compare(uut3), 1);
+}
+
 TEST("streams are serializable") {
   auto dummy = sys.spawn([] { return behavior{[](int) {}}; });
   // Note: we need to terminate the dummy actor manually because the registry
@@ -79,8 +93,8 @@ TEST("streams allow actors to transmit flow items to other actors") {
                     .iota(1)
                     .take(256)
                     .to_stream("foo", 10ms, 10);
-      self->send(s1, vals);
-      self->send(s2, vals);
+      self->mail(vals).send(s1);
+      self->mail(vals).send(s2);
     });
     expect<stream>().from(src).to(s1);
     expect<stream>().from(src).to(s2);
@@ -102,7 +116,7 @@ TEST("streams allow actors to transmit flow items to other actors") {
                     .iota(1)
                     .take(256)
                     .to_stream("foo", 10ms, 10);
-      self->send(s1, vals);
+      self->mail(vals).send(s1);
     });
     expect<stream>().from(src).to(s1);
     expect<stream_open_msg>().from(s1).to(src);
@@ -120,7 +134,7 @@ TEST("streams allow actors to transmit flow items to other actors") {
                     .iota(1)
                     .take(256)
                     .to_stream("foo", 10ms, 10);
-      self->send(s1, vals);
+      self->mail(vals).send(s1);
     });
     expect<stream>().from(src).to(s1);
     expect<stream_open_msg>().from(s1).to(src);

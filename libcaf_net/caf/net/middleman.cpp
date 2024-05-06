@@ -11,6 +11,7 @@
 
 #include "caf/actor_system_config.hpp"
 #include "caf/expected.hpp"
+#include "caf/log/net.hpp"
 #include "caf/log/system.hpp"
 #include "caf/raise_error.hpp"
 #include "caf/thread_owner.hpp"
@@ -73,7 +74,7 @@ void launch_prom_server(actor_system& sys, const prom_config& cfg) {
         .route("/metrics", prometheus::scraper(sys))
         .start();
   if (!server)
-    CAF_LOG_WARNING("failed to start Prometheus server: " << server.error());
+    log::net::warning("failed to start Prometheus server: {}", server.error());
 }
 
 void launch_background_tasks(actor_system& sys) {
@@ -131,16 +132,12 @@ void middleman::init(actor_system_config&) {
   }
 }
 
-middleman::module::id_t middleman::id() const {
-  return module::network_manager;
+middleman::actor_system_module::id_t middleman::id() const {
+  return actor_system_module::network_manager;
 }
 
 void* middleman::subtype_ptr() {
   return this;
-}
-
-actor_system::module* middleman::make(actor_system& sys, detail::type_list<>) {
-  return new middleman(sys);
 }
 
 void middleman::add_module_options(actor_system_config& cfg) {
@@ -150,6 +147,16 @@ void middleman::add_module_options(actor_system_config& cfg) {
   config_option_adder{cfg.custom_options(), "caf.net.prometheus-http.tls"}
     .add<std::string>("key-file", "path to the Promehteus private key file")
     .add<std::string>("cert-file", "path to the Promehteus private cert file");
+}
+
+actor_system_module* middleman::make(actor_system& sys) {
+  return new middleman(sys);
+}
+
+void middleman::check_abi_compatibility(version::abi_token token) {
+  if (static_cast<int>(token) != CAF_VERSION_MAJOR) {
+    CAF_CRITICAL("CAF ABI token mismatch");
+  }
 }
 
 } // namespace caf::net

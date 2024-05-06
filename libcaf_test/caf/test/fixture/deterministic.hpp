@@ -17,7 +17,6 @@
 #include "caf/mailbox_element.hpp"
 #include "caf/resumable.hpp"
 
-#include <cassert>
 #include <list>
 #include <memory>
 
@@ -162,17 +161,22 @@ private:
 public:
   // -- public member types ----------------------------------------------------
 
-  /// The configuration type for this fixture.
-  class config : public actor_system_config {
+  /// The custom system implementation for this fixture.
+  class system_impl : public actor_system {
   public:
-    config(deterministic* fix);
+    system_impl(actor_system_config& cfg, deterministic* fix);
 
-    ~config() override;
+    detail::actor_local_printer_ptr printer_for(local_actor* self) override;
 
   private:
-    detail::mailbox_factory* mailbox_factory() override;
+    static actor_system_config& prepare(actor_system_config& cfg,
+                                        deterministic* fix);
 
-    std::unique_ptr<detail::mailbox_factory> factory_;
+    static void custom_setup(actor_system& sys, actor_system_config& cfg,
+                             void* custom_setup_data);
+
+    /// Maps actors to their designated printer.
+    std::map<actor_id, detail::actor_local_printer_ptr> printers_;
   };
 
   /// Configures the algorithm to evaluate for an `evaluator` instances.
@@ -265,6 +269,11 @@ public:
       return std::move(*this);
     }
 
+    evaluator&& priority(message_priority priority) && {
+      priority_ = priority;
+      return std::move(*this);
+    }
+
     /// Sets the target actor for this evaluator and evaluate the predicate.
     template <class T>
     bool to(const T& dst) && {
@@ -308,6 +317,13 @@ public:
           ctx.fail({"no matching message found", loc_});
         return false;
       }
+      if (priority_) {
+        if (event->item->mid.priority() != *priority_) {
+          if (fail_on_mismatch)
+            ctx.fail({"message priority does not match", loc_});
+          return false;
+        }
+      }
       fix_->prepone_event_impl(dst);
       if (fail_on_mismatch) {
         if (!fix_->dispatch_message())
@@ -334,6 +350,7 @@ public:
     evaluator_algorithm algo_;
     actor_predicate from_;
     message_predicate<Ts...> with_;
+    std::optional<message_priority> priority_;
   };
 
   /// Utility class for injecting messages into the mailbox of an actor and then
@@ -617,13 +634,13 @@ public:
   expected<T> serialization_roundtrip(const T& value) {
     byte_buffer buf;
     {
-      binary_serializer sink{sys.dummy_execution_unit(), buf};
+      binary_serializer sink{sys, buf};
       if (!sink.apply(value))
         return sink.get_error();
     }
     T result;
     {
-      binary_deserializer source{sys.dummy_execution_unit(), buf};
+      binary_deserializer source{sys, buf};
       if (!source.apply(result))
         return source.get_error();
     }
@@ -648,10 +665,10 @@ private:
 
 public:
   /// Configures the actor system with deterministic scheduling.
-  config cfg;
+  actor_system_config cfg;
 
   /// The actor system instance for the tests.
-  actor_system sys;
+  system_impl sys;
 
 private:
   /// Removes all events from the queue.

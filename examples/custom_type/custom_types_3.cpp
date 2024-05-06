@@ -74,12 +74,12 @@ bool inspect(Inspector& f, foo& x) {
 
 behavior testee(event_based_actor* self) {
   return {
-    [self](const foo& x) { aout(self).println("{}", x); },
+    [self](const foo& x) { self->println("{}", x); },
   };
 }
 
 void caf_main(actor_system& system) {
-  anon_send(system.spawn(testee), foo{1, 2});
+  anon_mail(foo{1, 2}).send(system.spawn(testee));
 }
 
 CAF_MAIN(id_block::custom_types_3)

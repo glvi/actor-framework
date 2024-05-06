@@ -6,7 +6,7 @@
 
 #include "caf/io/abstract_broker.hpp"
 
-#include "caf/logger.hpp"
+#include "caf/log/io.hpp"
 
 namespace caf::io::network {
 
@@ -26,15 +26,16 @@ abstract_broker* manager::parent() {
   return parent_ ? static_cast<abstract_broker*>(parent_->get()) : nullptr;
 }
 
-void manager::detach(execution_unit*, bool invoke_disconnect_message) {
-  CAF_LOG_TRACE(CAF_ARG(invoke_disconnect_message));
+void manager::detach(scheduler*, bool invoke_disconnect_message) {
+  auto lg = log::io::trace("invoke_disconnect_message = {}",
+                           invoke_disconnect_message);
   // This function gets called from the multiplexer when an error occurs or
   // from the broker when closing this manager. In both cases, we need to make
   // sure this manager does not receive further socket events.
   remove_from_loop();
   // Disconnect from the broker if not already detached.
   if (!detached()) {
-    CAF_LOG_DEBUG("disconnect servant from broker");
+    log::io::debug("disconnect servant from broker");
     auto raw_ptr = parent();
     // Keep a strong reference to our parent until we go out of scope.
     strong_actor_ptr ptr;
@@ -51,16 +52,15 @@ void manager::detach(execution_unit*, bool invoke_disconnect_message) {
           raw_ptr->push_to_cache(std::move(mptr));
           break;
         case invoke_message_result::dropped:
-          CAF_LOG_INFO("broker dropped disconnect message");
+          log::io::info("broker dropped disconnect message");
           break;
       }
     }
   }
 }
 
-void manager::io_failure(execution_unit* ctx, operation op) {
-  CAF_LOG_TRACE(CAF_ARG(op));
-  CAF_IGNORE_UNUSED(op);
+void manager::io_failure(scheduler* ctx, operation op) {
+  auto lg = log::io::trace("op = {}", op);
   detach(ctx, true);
 }
 

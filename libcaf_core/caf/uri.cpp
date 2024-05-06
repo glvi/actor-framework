@@ -8,6 +8,7 @@
 #include "caf/binary_serializer.hpp"
 #include "caf/deserializer.hpp"
 #include "caf/detail/append_hex.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/overload.hpp"
 #include "caf/detail/parse.hpp"
 #include "caf/detail/parser/read_uri.hpp"
@@ -134,6 +135,11 @@ public:
     return *this;
   }
 
+  template <class... Ts>
+  nop_builder& userinfo(Ts&&...) {
+    return *this;
+  }
+
   template <class T>
   nop_builder& host(T&&) {
     return *this;
@@ -248,8 +254,12 @@ std::string to_string(const uri& x) {
 
 std::string to_string(const uri::authority_type& x) {
   std::string str;
-  if (!x.userinfo.empty()) {
-    uri::encode(str, x.userinfo);
+  if (x.userinfo) {
+    uri::encode(str, x.userinfo->name);
+    if (auto& pw = x.userinfo->password) {
+      str += ':';
+      uri::encode(str, *pw);
+    }
     str += '@';
   }
   auto f = caf::detail::make_overload(
@@ -276,7 +286,7 @@ error parse(std::string_view str, uri& dest) {
   parse(ps, dest);
   if (ps.code == pec::success)
     return none;
-  return make_error(ps);
+  return ps.error();
 }
 
 expected<uri> make_uri(std::string_view str) {

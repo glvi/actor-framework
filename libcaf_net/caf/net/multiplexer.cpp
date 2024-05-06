@@ -16,11 +16,13 @@
 #include "caf/async/execution_context.hpp"
 #include "caf/config.hpp"
 #include "caf/detail/atomic_ref_counted.hpp"
+#include "caf/detail/critical.hpp"
+#include "caf/detail/latch.hpp"
 #include "caf/detail/net_export.hpp"
 #include "caf/error.hpp"
 #include "caf/expected.hpp"
+#include "caf/log/net.hpp"
 #include "caf/log/system.hpp"
-#include "caf/logger.hpp"
 #include "caf/make_counted.hpp"
 #include "caf/ref_counted.hpp"
 #include "caf/sec.hpp"
@@ -32,6 +34,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -83,6 +86,7 @@ public:
     shutdown_reading,
     shutdown_writing,
     run_action,
+    delay_action,
     shutdown,
   };
 
@@ -192,12 +196,22 @@ public:
   }
 
   void schedule(action what) override {
-    CAF_LOG_TRACE("");
+    auto lg = log::net::trace("");
     if (std::this_thread::get_id() == tid_) {
       pending_actions.push_back(what);
     } else {
       auto ptr = std::move(what).as_intrusive_ptr().release();
       write_to_pipe(pollset_updater::code::run_action, ptr);
+    }
+  }
+
+  void schedule(steady_time_point when, action what) override {
+    auto lg = log::net::trace("");
+    if (std::this_thread::get_id() == tid_) {
+      scheduled_actions.emplace(when, std::move(what));
+    } else {
+      auto ptr = new scheduled_actions_map::value_type{when, std::move(what)};
+      write_to_pipe(pollset_updater::code::delay_action, ptr);
     }
   }
 
@@ -208,7 +222,7 @@ public:
   // -- thread-safe signaling --------------------------------------------------
 
   void start(socket_manager_ptr mgr) override {
-    CAF_LOG_TRACE(CAF_ARG2("socket", mgr->handle().id));
+    auto lg = log::net::trace("socket = {}", mgr->handle().id);
     if (std::this_thread::get_id() == tid_) {
       do_start(mgr);
     } else {
@@ -217,11 +231,11 @@ public:
   }
 
   void shutdown() override {
-    CAF_LOG_TRACE("");
+    auto lg = log::net::trace("");
     // Note: there is no 'shortcut' when calling the function in the
     // default_multiplexer's thread, because do_shutdown calls apply_updates.
     // This must only be called from the pollset_updater.
-    CAF_LOG_DEBUG("push shutdown event to pipe");
+    log::net::debug("push shutdown event to pipe");
     write_to_pipe(pollset_updater::code::shutdown,
                   static_cast<socket_manager*>(nullptr));
   }
@@ -229,27 +243,27 @@ public:
   // -- callbacks for socket managers ------------------------------------------
 
   void register_reading(socket_manager* mgr) override {
-    CAF_LOG_TRACE(CAF_ARG2("socket", mgr->handle().id));
+    auto lg = log::net::trace("socket = {}", mgr->handle().id);
     update_for(mgr).events |= input_mask;
   }
 
   void register_writing(socket_manager* mgr) override {
-    CAF_LOG_TRACE(CAF_ARG2("socket", mgr->handle().id));
+    auto lg = log::net::trace("socket = {}", mgr->handle().id);
     update_for(mgr).events |= output_mask;
   }
 
   void deregister_reading(socket_manager* mgr) override {
-    CAF_LOG_TRACE(CAF_ARG2("socket", mgr->handle().id));
+    auto lg = log::net::trace("socket = {}", mgr->handle().id);
     update_for(mgr).events &= ~input_mask;
   }
 
   void deregister_writing(socket_manager* mgr) override {
-    CAF_LOG_TRACE(CAF_ARG2("socket", mgr->handle().id));
+    auto lg = log::net::trace("socket = {}", mgr->handle().id);
     update_for(mgr).events &= ~output_mask;
   }
 
   void deregister(socket_manager* mgr) override {
-    CAF_LOG_TRACE(CAF_ARG2("socket", mgr->handle().id));
+    auto lg = log::net::trace("socket = {}", mgr->handle().id);
     update_for(mgr).events = 0;
   }
 
@@ -264,22 +278,35 @@ public:
   // -- control flow -----------------------------------------------------------
 
   bool poll_once(bool blocking) override {
-    CAF_LOG_TRACE(CAF_ARG(blocking));
+    auto lg = log::net::trace("blocking = {}", blocking);
     if (pollset_.empty())
       return false;
     // We'll call poll() until poll() succeeds or fails.
     for (;;) {
+      int timeout = 0;
+      if (!blocking) {
+        // nop
+      } else if (scheduled_actions.empty()) {
+        timeout = -1;
+      } else {
+        auto now = std::chrono::steady_clock::now();
+        auto tout = scheduled_actions.begin()->first;
+        if (tout > now) {
+          namespace sc = std::chrono;
+          auto ms = sc::duration_cast<sc::milliseconds>(tout - now).count();
+          timeout = std::max(1, static_cast<int>(ms));
+        }
+      }
       int presult =
 #ifdef CAF_WINDOWS
         ::WSAPoll(pollset_.data(), static_cast<ULONG>(pollset_.size()),
-                  blocking ? -1 : 0);
+                  timeout);
 #else
-        ::poll(pollset_.data(), static_cast<nfds_t>(pollset_.size()),
-               blocking ? -1 : 0);
+        ::poll(pollset_.data(), static_cast<nfds_t>(pollset_.size()), timeout);
 #endif
       if (presult > 0) {
-        CAF_LOG_DEBUG("poll() on" << pollset_.size() << "sockets reported"
-                                  << presult << "event(s)");
+        log::net::debug("poll() on {} sockets reported event(s) {}",
+                        pollset_.size(), presult);
         // Scan pollset for events.
         if (auto revents = pollset_[0].revents; revents != 0) {
           // Index 0 is always the pollset updater. This is the only handler
@@ -297,40 +324,54 @@ public:
             --presult;
           }
         }
-        apply_updates();
+        run_timeouts();
         return true;
-      } else if (presult == 0) {
+      }
+      if (presult == 0) {
         // No activity.
+        run_timeouts();
         return false;
-      } else {
-        auto code = last_socket_error();
-        switch (code) {
-          case std::errc::interrupted: {
-            // A signal was caught. Simply try again.
-            CAF_LOG_DEBUG("received errc::interrupted, try again");
-            break;
-          }
-          case std::errc::not_enough_memory: {
-            log::system::error("poll() failed due to insufficient memory");
-            // There's not much we can do other than try again in hope someone
-            // else releases memory.
-            break;
-          }
-          default: {
-            // Must not happen.
-            auto int_code = static_cast<int>(code);
-            auto msg = std::generic_category().message(int_code);
-            std::string_view prefix = "poll() failed: ";
-            msg.insert(msg.begin(), prefix.begin(), prefix.end());
-            CAF_CRITICAL(msg.c_str());
-          }
+      }
+      auto code = last_socket_error();
+      switch (code) {
+        case std::errc::interrupted: {
+          // A signal was caught. Simply try again.
+          log::net::debug("received errc::interrupted, try again");
+          break;
+        }
+        case std::errc::not_enough_memory: {
+          log::system::error("poll() failed due to insufficient memory");
+          // There's not much we can do other than try again in hope someone
+          // else releases memory.
+          break;
+        }
+        default: {
+          // Must not happen.
+          auto int_code = static_cast<int>(code);
+          auto msg = std::generic_category().message(int_code);
+          std::string_view prefix = "poll() failed: ";
+          msg.insert(msg.begin(), prefix.begin(), prefix.end());
+          CAF_CRITICAL(msg.c_str());
         }
       }
     }
   }
 
+  void run_timeouts() {
+    // Run all timeouts.
+    auto now = std::chrono::steady_clock::now();
+    while (!scheduled_actions.empty()
+           && scheduled_actions.begin()->first <= now) {
+      auto i = scheduled_actions.begin();
+      auto next = std::move(i->second);
+      scheduled_actions.erase(i);
+      next.run();
+    }
+    apply_updates();
+  }
+
   void apply_updates() override {
-    CAF_LOG_DEBUG("apply" << updates_.size() << "updates");
+    log::net::debug("apply {} updates", updates_.size());
     for (;;) {
       if (!updates_.empty()) {
         for (auto& [fd, update] : updates_) {
@@ -361,15 +402,15 @@ public:
   }
 
   void set_thread_id() override {
-    CAF_LOG_TRACE("");
+    auto lg = log::net::trace("");
     tid_ = std::this_thread::get_id();
   }
 
   void run() override {
-    CAF_LOG_TRACE("");
-    CAF_LOG_DEBUG("run default_multiplexer" << CAF_ARG(input_mask)
-                                            << CAF_ARG(error_mask)
-                                            << CAF_ARG(output_mask));
+    auto lg = log::net::trace("");
+    log::net::debug("run default_multiplexer input_mask = {}, error_mask = {}, "
+                    "output_mask = {}",
+                    input_mask, error_mask, output_mask);
     // On systems like Linux, we cannot disable sigpipe on the socket alone. We
     // need to block the signal at thread level since some APIs (such as
     // OpenSSL) are unsafe to call otherwise.
@@ -391,7 +432,7 @@ public:
   void do_shutdown() {
     // Note: calling apply_updates here is only safe because we know that the
     // pollset updater runs outside of the for-loop in run_once.
-    CAF_LOG_DEBUG("initiate shutdown");
+    log::net::debug("initiate shutdown");
     shutting_down_ = true;
     apply_updates();
     // Skip the first manager (the pollset updater).
@@ -401,12 +442,12 @@ public:
   }
 
   void do_start(const socket_manager_ptr& mgr) {
-    CAF_LOG_TRACE(CAF_ARG2("socket", mgr->handle().id));
+    auto lg = log::net::trace("socket = {}", mgr->handle().id);
     if (!shutting_down_) {
       error err;
       err = mgr->start();
       if (err) {
-        CAF_LOG_DEBUG("mgr->init failed: " << err);
+        log::net::debug("mgr->init failed: {}", err);
         // The socket manager should not register itself for any events if
         // initialization fails. Purge any state just in case.
         update_for(mgr.get()).events = 0;
@@ -436,12 +477,12 @@ public:
   /// Handles an I/O event on given manager.
   void handle(const socket_manager_ptr& mgr, [[maybe_unused]] short events,
               short revents) {
-    CAF_LOG_TRACE(CAF_ARG2("socket", mgr->handle().id)
-                  << CAF_ARG(events) << CAF_ARG(revents));
+    auto lg = log::net::trace("socket = {}, events = {}, revents = {}",
+                              mgr->handle().id, events, revents);
     CAF_ASSERT(mgr != nullptr);
     bool checkerror = true;
-    CAF_LOG_DEBUG("handle event on socket"
-                  << mgr->handle().id << CAF_ARG(events) << CAF_ARG(revents));
+    log::net::debug("handle event on socket {}, events = {}, revents = {}",
+                    mgr->handle().id, events, revents);
     // Note: we double-check whether the manager is actually reading because a
     // previous action from the pipe may have disabled reading.
     if ((revents & input_mask) != 0 && is_reading(mgr.get())) {
@@ -509,8 +550,13 @@ public:
       if (write_handle_ != invalid_socket)
         res = write(write_handle_, buf);
     }
-    if (res <= 0 && ptr)
-      intrusive_ptr_release(ptr);
+    if constexpr (std::is_base_of_v<detail::atomic_ref_counted, T>) {
+      if (res <= 0 && ptr)
+        intrusive_ptr_release(ptr);
+    } else {
+      if (res <= 0 && ptr)
+        delete ptr;
+    }
   }
 
   /// @copydoc write_to_pipe
@@ -531,8 +577,14 @@ public:
     }
   }
 
-  /// Pending actions via `schedule`.
+  /// Pending actions to run immediately.
   std::deque<action> pending_actions;
+
+  /// The container type for delayed actions.
+  using scheduled_actions_map = std::multimap<steady_time_point, action>;
+
+  /// Scheduled actions.
+  scheduled_actions_map scheduled_actions;
 
 private:
   // -- member variables -------------------------------------------------------
@@ -569,20 +621,25 @@ private:
 };
 
 error pollset_updater::start(socket_manager* owner) {
-  CAF_LOG_TRACE("");
+  auto lg = log::net::trace("");
   owner_ = owner;
   mpx_ = static_cast<default_multiplexer*>(owner->mpx_ptr());
   return nonblocking(fd_, true);
 }
 
 void pollset_updater::handle_read_event() {
-  CAF_LOG_TRACE("");
+  auto lg = log::net::trace("");
   auto as_mgr = [](intptr_t ptr) {
     return intrusive_ptr{reinterpret_cast<socket_manager*>(ptr), false};
   };
   auto add_action = [this](intptr_t ptr) {
     auto f = action{intrusive_ptr{reinterpret_cast<action::impl*>(ptr), false}};
     mpx_->pending_actions.push_back(std::move(f));
+  };
+  auto delay_action = [this](intptr_t ptr) {
+    using value_type = default_multiplexer::scheduled_actions_map::value_type;
+    auto val = std::unique_ptr<value_type>{reinterpret_cast<value_type*>(ptr)};
+    mpx_->scheduled_actions.emplace(val->first, std::move(val->second));
   };
   for (;;) {
     CAF_ASSERT((buf_.size() - buf_size_) > 0);
@@ -602,6 +659,9 @@ void pollset_updater::handle_read_event() {
           case code::run_action:
             add_action(ptr);
             break;
+          case code::delay_action:
+            delay_action(ptr);
+            break;
           case code::shutdown:
             CAF_ASSERT(ptr == 0);
             mpx_->do_shutdown();
@@ -612,7 +672,7 @@ void pollset_updater::handle_read_event() {
         }
       }
     } else if (num_bytes == 0) {
-      CAF_LOG_DEBUG("pipe closed, assume shutdown");
+      log::net::debug("pipe closed, assume shutdown");
       owner_->deregister();
       return;
     } else if (last_socket_error_is_temporary()) {
@@ -656,6 +716,21 @@ multiplexer* multiplexer::from(actor_system& sys) {
 
 multiplexer::~multiplexer() {
   // nop
+}
+
+// -- initialization ---------------------------------------------------------
+
+std::thread multiplexer::launch() {
+  auto l = std::make_shared<detail::latch>(2);
+  auto fn = [mpx = multiplexer_ptr{this}, l]() mutable {
+    mpx->set_thread_id();
+    l->count_down();
+    l = nullptr;
+    mpx->run();
+  };
+  auto result = std::thread{fn};
+  l->count_down_and_wait();
+  return result;
 }
 
 } // namespace caf::net

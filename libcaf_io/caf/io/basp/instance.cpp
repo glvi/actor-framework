@@ -12,6 +12,8 @@
 #include "caf/binary_deserializer.hpp"
 #include "caf/binary_serializer.hpp"
 #include "caf/defaults.hpp"
+#include "caf/detail/assert.hpp"
+#include "caf/log/io.hpp"
 #include "caf/settings.hpp"
 #include "caf/telemetry/histogram.hpp"
 #include "caf/telemetry/timer.hpp"
@@ -30,7 +32,10 @@ instance::callee::~callee() {
 }
 
 instance::instance(abstract_broker* parent, callee& lstnr)
-  : tbl_(parent), this_node_(parent->system().node()), callee_(lstnr) {
+  : sys_(&parent->system()),
+    tbl_(parent),
+    this_node_(parent->system().node()),
+    callee_(lstnr) {
   CAF_ASSERT(this_node_ != none);
   size_t workers;
   if (auto workers_cfg = get_as<size_t>(config(), "caf.middleman.workers"))
@@ -41,9 +46,9 @@ instance::instance(abstract_broker* parent, callee& lstnr)
     hub_.add_new_worker(queue_, proxies());
 }
 
-connection_state instance::handle(execution_unit* ctx, new_data_msg& dm,
-                                  header& hdr, bool is_payload) {
-  CAF_LOG_TRACE(CAF_ARG(dm) << CAF_ARG(is_payload));
+connection_state instance::handle(scheduler* ctx, new_data_msg& dm, header& hdr,
+                                  bool is_payload) {
+  auto lg = log::io::trace("dm = {}, is_payload = {}", dm, is_payload);
   // function object providing cleanup code on errors
   auto err = [&](connection_state code) {
     if (auto nid = tbl_.erase_direct(dm.handle))
@@ -54,33 +59,34 @@ connection_state instance::handle(execution_unit* ctx, new_data_msg& dm,
   if (is_payload) {
     payload = &dm.buf;
     if (payload->size() != hdr.payload_len) {
-      CAF_LOG_WARNING("received invalid payload, expected"
-                      << hdr.payload_len << "bytes, got" << payload->size());
+      log::io::warning("received invalid payload, expected {} bytes, got {}",
+                       hdr.payload_len, payload->size());
       return err(malformed_message);
     }
   } else {
-    binary_deserializer source{ctx, dm.buf};
+    binary_deserializer source{*sys_, dm.buf};
     if (!source.apply(hdr)) {
-      CAF_LOG_WARNING("failed to receive header:" << source.get_error());
+      log::io::warning("failed to receive header: {}", source.get_error());
       return err(malformed_message);
     }
     if (!valid(hdr)) {
-      CAF_LOG_WARNING("received invalid header:" << CAF_ARG(hdr));
+      log::io::warning("received invalid header: hdr = {}", hdr);
       return err(malformed_message);
     }
     if (hdr.payload_len > 0) {
-      CAF_LOG_DEBUG("await payload before processing further");
+      log::io::debug("await payload before processing further");
       return await_payload;
     }
   }
-  CAF_LOG_DEBUG(CAF_ARG(hdr));
+  log::io::debug("hdr = {}", hdr);
   return handle(ctx, dm.handle, hdr, payload);
 }
 
-void instance::handle_heartbeat(execution_unit* ctx) {
-  CAF_LOG_TRACE("");
+void instance::handle_heartbeat(scheduler* ctx) {
+  auto lg = log::io::trace("");
   for (auto& kvp : tbl_.direct_by_hdl_) {
-    CAF_LOG_TRACE(CAF_ARG(kvp.first) << CAF_ARG(kvp.second));
+    auto lg = log::io::trace("kvp.first = {}, kvp.second = {}", kvp.first,
+                             kvp.second);
     write_heartbeat(ctx, callee_.get_buffer(kvp.first));
     callee_.flush(kvp.first);
   }
@@ -94,19 +100,20 @@ void instance::flush(const routing_table::route& path) {
   callee_.flush(path.hdl);
 }
 
-void instance::write(execution_unit* ctx, const routing_table::route& r,
-                     header& hdr, payload_writer* writer) {
-  CAF_LOG_TRACE(CAF_ARG(hdr));
+void instance::write(scheduler* ctx, const routing_table::route& r, header& hdr,
+                     payload_writer* writer) {
+  auto lg = log::io::trace("hdr = {}", hdr);
   CAF_ASSERT(hdr.payload_len == 0 || writer != nullptr);
-  write(ctx, callee_.get_buffer(r.hdl), hdr, writer);
+  write(*sys_, ctx, callee_.get_buffer(r.hdl), hdr, writer);
   flush(r);
 }
 
 void instance::add_published_actor(uint16_t port,
                                    strong_actor_ptr published_actor,
                                    std::set<std::string> published_interface) {
-  CAF_LOG_TRACE(CAF_ARG(port)
-                << CAF_ARG(published_actor) << CAF_ARG(published_interface));
+  auto lg = log::io::trace(
+    "port = {}, published_actor = {}, published_interface = {}", port,
+    published_actor, published_interface);
   using std::swap;
   auto& entry = published_actors_[port];
   swap(entry.first, published_actor);
@@ -115,7 +122,7 @@ void instance::add_published_actor(uint16_t port,
 
 size_t instance::remove_published_actor(uint16_t port,
                                         removed_published_actor* cb) {
-  CAF_LOG_TRACE(CAF_ARG(port));
+  auto lg = log::io::trace("port = {}", port);
   auto i = published_actors_.find(port);
   if (i == published_actors_.end())
     return 0;
@@ -127,7 +134,7 @@ size_t instance::remove_published_actor(uint16_t port,
 
 size_t instance::remove_published_actor(const actor_addr& whom, uint16_t port,
                                         removed_published_actor* cb) {
-  CAF_LOG_TRACE(CAF_ARG(whom) << CAF_ARG(port));
+  auto lg = log::io::trace("whom = {}, port = {}", whom, port);
   size_t result = 0;
   if (port != 0) {
     auto i = published_actors_.find(port);
@@ -153,11 +160,11 @@ size_t instance::remove_published_actor(const actor_addr& whom, uint16_t port,
   return result;
 }
 
-bool instance::dispatch(execution_unit* ctx, const strong_actor_ptr& sender,
+bool instance::dispatch(scheduler* ctx, const strong_actor_ptr& sender,
                         const node_id& dest_node, uint64_t dest_actor,
                         uint8_t flags, message_id mid, const message& msg) {
-  CAF_LOG_TRACE(CAF_ARG(sender)
-                << CAF_ARG(dest_node) << CAF_ARG(mid) << CAF_ARG(msg));
+  auto lg = log::io::trace("sender = {}, dest_node = {}, mid = {}, msg = {}",
+                           sender, dest_node, mid, msg);
   CAF_ASSERT(dest_node && this_node_ != dest_node);
   auto path = lookup(dest_node);
   if (!path)
@@ -173,7 +180,7 @@ bool instance::dispatch(execution_unit* ctx, const strong_actor_ptr& sender,
     auto writer = make_callback([&](binary_serializer& sink) { //
       return sink.apply(msg);
     });
-    write(ctx, callee_.get_buffer(path->hdl), hdr, &writer);
+    write(*sys_, ctx, callee_.get_buffer(path->hdl), hdr, &writer);
   } else {
     header hdr{message_type::routed_message,
                flags,
@@ -182,32 +189,32 @@ bool instance::dispatch(execution_unit* ctx, const strong_actor_ptr& sender,
                sender ? sender->id() : invalid_actor_id,
                dest_actor};
     auto writer = make_callback([&](binary_serializer& sink) {
-      CAF_LOG_DEBUG("send routed message: " << CAF_ARG(source_node)
-                                            << CAF_ARG(dest_node)
-                                            << CAF_ARG(msg));
+      log::io::debug(
+        "send routed message: source_node = {} dest_node = {} msg = {}",
+        source_node, dest_node, msg);
       return sink.apply(source_node)  //
              && sink.apply(dest_node) //
              && sink.apply(msg);
     });
-    write(ctx, callee_.get_buffer(path->hdl), hdr, &writer);
+    write(*sys_, ctx, callee_.get_buffer(path->hdl), hdr, &writer);
   }
   flush(*path);
   return true;
 }
 
-void instance::write(execution_unit* ctx, byte_buffer& buf, header& hdr,
-                     payload_writer* pw) {
+void instance::write(actor_system& sys, scheduler* ctx, byte_buffer& buf,
+                     header& hdr, payload_writer* pw) {
   CAF_ASSERT(ctx != nullptr);
-  CAF_LOG_TRACE(CAF_ARG(hdr));
-  binary_serializer sink{ctx, buf};
+  auto lg = log::io::trace("hdr = {}", hdr);
+  binary_serializer sink{sys, buf};
   if (pw != nullptr) {
     // Write the BASP header after the payload.
     auto header_offset = buf.size();
     sink.skip(header_size);
-    auto& mm_metrics = ctx->system().middleman().metric_singletons;
+    auto& mm_metrics = sys.middleman().metric_singletons;
     auto t0 = telemetry::timer::clock_type::now();
     if (!(*pw)(sink)) {
-      CAF_LOG_ERROR(sink.get_error());
+      log::io::error("{}", sink.get_error());
       return;
     }
     telemetry::timer::observe(mm_metrics.serialization_time, t0);
@@ -218,12 +225,12 @@ void instance::write(execution_unit* ctx, byte_buffer& buf, header& hdr,
     hdr.payload_len = static_cast<uint32_t>(payload_len);
   }
   if (!sink.apply(hdr))
-    CAF_LOG_ERROR(sink.get_error());
+    log::io::error("{}", sink.get_error());
 }
 
-void instance::write_server_handshake(execution_unit* ctx, byte_buffer& out_buf,
+void instance::write_server_handshake(scheduler* ctx, byte_buffer& out_buf,
                                       std::optional<uint16_t> port) {
-  CAF_LOG_TRACE(CAF_ARG(port));
+  auto lg = log::io::trace("port = {}", port);
   using namespace detail;
   published_actor* pa = nullptr;
   if (port) {
@@ -231,7 +238,9 @@ void instance::write_server_handshake(execution_unit* ctx, byte_buffer& out_buf,
     if (i != published_actors_.end())
       pa = &i->second;
   }
-  CAF_LOG_DEBUG_IF(!pa && port, "no actor published");
+  if (!pa && port) {
+    log::io::debug("no actor published");
+  }
   auto writer = make_callback([&](binary_serializer& sink) {
     using string_list = std::vector<std::string>;
     string_list app_ids;
@@ -257,10 +266,10 @@ void instance::write_server_handshake(execution_unit* ctx, byte_buffer& out_buf,
              version,
              invalid_actor_id,
              invalid_actor_id};
-  write(ctx, out_buf, hdr, &writer);
+  write(*sys_, ctx, out_buf, hdr, &writer);
 }
 
-void instance::write_client_handshake(execution_unit* ctx, byte_buffer& buf) {
+void instance::write_client_handshake(scheduler* ctx, byte_buffer& buf) {
   auto writer = make_callback([&](binary_serializer& sink) { //
     return sink.apply(this_node_);
   });
@@ -270,48 +279,49 @@ void instance::write_client_handshake(execution_unit* ctx, byte_buffer& buf) {
              0,
              invalid_actor_id,
              invalid_actor_id};
-  write(ctx, buf, hdr, &writer);
+  write(*sys_, ctx, buf, hdr, &writer);
 }
 
-void instance::write_monitor_message(execution_unit* ctx, byte_buffer& buf,
+void instance::write_monitor_message(scheduler* ctx, byte_buffer& buf,
                                      const node_id& dest_node, actor_id aid) {
-  CAF_LOG_TRACE(CAF_ARG(dest_node) << CAF_ARG(aid));
+  auto lg = log::io::trace("dest_node = {}, aid = {}", dest_node, aid);
   auto writer = make_callback([&](binary_serializer& sink) { //
     return sink.apply(this_node_) && sink.apply(dest_node);
   });
   header hdr{message_type::monitor_message, 0, 0, 0, invalid_actor_id, aid};
-  write(ctx, buf, hdr, &writer);
+  write(*sys_, ctx, buf, hdr, &writer);
 }
 
-void instance::write_down_message(execution_unit* ctx, byte_buffer& buf,
+void instance::write_down_message(scheduler* ctx, byte_buffer& buf,
                                   const node_id& dest_node, actor_id aid,
                                   const error& rsn) {
-  CAF_LOG_TRACE(CAF_ARG(dest_node) << CAF_ARG(aid) << CAF_ARG(rsn));
+  auto lg = log::io::trace("dest_node = {}, aid = {}, rsn = {}", dest_node, aid,
+                           rsn);
   auto writer = make_callback([&](binary_serializer& sink) {
     return sink.apply(this_node_) && sink.apply(dest_node) && sink.apply(rsn);
   });
   header hdr{message_type::down_message, 0, 0, 0, aid, invalid_actor_id};
-  write(ctx, buf, hdr, &writer);
+  write(*sys_, ctx, buf, hdr, &writer);
 }
 
-void instance::write_heartbeat(execution_unit* ctx, byte_buffer& buf) {
-  CAF_LOG_TRACE("");
+void instance::write_heartbeat(scheduler* ctx, byte_buffer& buf) {
+  auto lg = log::io::trace("");
   header hdr{message_type::heartbeat, 0, 0, 0, invalid_actor_id,
              invalid_actor_id};
-  write(ctx, buf, hdr);
+  write(*sys_, ctx, buf, hdr);
 }
 
-connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
+connection_state instance::handle(scheduler* ctx, connection_handle hdl,
                                   header& hdr, byte_buffer* payload) {
-  CAF_LOG_TRACE(CAF_ARG(hdl) << CAF_ARG(hdr));
+  auto lg = log::io::trace("hdl = {}, hdr = {}", hdl, hdr);
   // Check payload validity.
   if (payload == nullptr) {
     if (hdr.payload_len != 0) {
-      CAF_LOG_WARNING("missing payload");
+      log::io::warning("missing payload");
       return malformed_message;
     }
   } else if (hdr.payload_len != payload->size()) {
-    CAF_LOG_WARNING("actual payload size differs from advertised size");
+    log::io::warning("actual payload size differs from advertised size");
     return malformed_message;
   }
   // Dispatch by message type.
@@ -319,7 +329,7 @@ connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
     case message_type::server_handshake: {
       using string_list = std::vector<std::string>;
       // Deserialize payload.
-      binary_deserializer source{ctx, *payload};
+      binary_deserializer source{*sys_, *payload};
       node_id source_node;
       string_list app_ids;
       actor_id aid = invalid_actor_id;
@@ -328,8 +338,9 @@ connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
           || !source.apply(app_ids)  //
           || !source.apply(aid)      //
           || !source.apply(sigs)) {
-        CAF_LOG_WARNING("unable to deserialize payload of server handshake:"
-                        << source.get_error());
+        log::io::warning(
+          "unable to deserialize payload of server handshake: {}",
+          source.get_error());
         return serializing_basp_payload_failed;
       }
       // Check the application ID.
@@ -343,31 +354,32 @@ connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
       auto i = std::find_first_of(app_ids.begin(), app_ids.end(),
                                   whitelist.begin(), whitelist.end());
       if (i == app_ids.end()) {
-        CAF_LOG_WARNING("refuse to connect to server due to app ID mismatch:"
-                        << CAF_ARG(app_ids) << CAF_ARG(whitelist));
+        log::io::warning("refuse to connect to server due to app ID mismatch: "
+                         "app_ids = {} whitelist = {}",
+                         app_ids, whitelist);
         return incompatible_application_ids;
       }
       // Close connection to ourselves immediately after sending client HS.
       if (source_node == this_node_) {
-        CAF_LOG_DEBUG("close connection to self immediately");
+        log::io::debug("close connection to self immediately");
         callee_.finalize_handshake(source_node, aid, sigs);
         return redundant_connection;
       }
       // Close this connection if we already have a direct connection.
       if (tbl_.lookup_direct(source_node)) {
-        CAF_LOG_DEBUG(
-          "close redundant direct connection:" << CAF_ARG(source_node));
+        log::io::debug("close redundant direct connection: source_node = {}",
+                       source_node);
         callee_.finalize_handshake(source_node, aid, sigs);
         return redundant_connection;
       }
       // Add direct route to this node and remove any indirect entry.
-      CAF_LOG_DEBUG("new direct connection:" << CAF_ARG(source_node));
+      log::io::debug("new direct connection: source_node = {}", source_node);
       tbl_.add_direct(hdl, source_node);
       auto was_indirect = tbl_.erase_indirect(source_node);
       // write handshake as client in response
       auto path = tbl_.lookup(source_node);
       if (!path) {
-        CAF_LOG_ERROR("no route to host after server handshake");
+        log::io::error("no route to host after server handshake");
         return no_route_to_receiving_node;
       }
       callee_.learned_new_node_directly(source_node, was_indirect);
@@ -376,21 +388,22 @@ connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
     }
     case message_type::client_handshake: {
       // Deserialize payload.
-      binary_deserializer source{ctx, *payload};
+      binary_deserializer source{*sys_, *payload};
       node_id source_node;
       if (!source.apply(source_node)) {
-        CAF_LOG_WARNING("unable to deserialize payload of client handshake:"
-                        << source.get_error());
+        log::io::warning(
+          "unable to deserialize payload of client handshake: {}",
+          source.get_error());
         return serializing_basp_payload_failed;
       }
       // Drop repeated handshakes.
       if (tbl_.lookup_direct(source_node)) {
-        CAF_LOG_DEBUG(
-          "received repeated client handshake:" << CAF_ARG(source_node));
+        log::io::debug("received repeated client handshake: source_node = {}",
+                       source_node);
         break;
       }
       // Add direct route to this node and remove any indirect entry.
-      CAF_LOG_DEBUG("new direct connection:" << CAF_ARG(source_node));
+      log::io::debug("new direct connection: source_node = {}", source_node);
       tbl_.add_direct(hdl, source_node);
       auto was_indirect = tbl_.erase_indirect(source_node);
       callee_.learned_new_node_directly(source_node, was_indirect);
@@ -398,13 +411,13 @@ connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
     }
     case message_type::routed_message: {
       // Deserialize payload.
-      binary_deserializer source{ctx, *payload};
+      binary_deserializer source{*sys_, *payload};
       node_id source_node;
       node_id dest_node;
       if (!source.apply(source_node) || !source.apply(dest_node)) {
-        CAF_LOG_WARNING(
-          "unable to deserialize source and destination for routed message:"
-          << source.get_error());
+        log::io::warning("unable to deserialize source and destination for "
+                         "routed message: {}",
+                         source.get_error());
         return serializing_basp_payload_failed;
       }
       if (dest_node != this_node_) {
@@ -422,12 +435,12 @@ connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
       auto worker = hub_.pop();
       auto last_hop = tbl_.lookup_direct(hdl);
       if (worker != nullptr) {
-        CAF_LOG_DEBUG("launch BASP worker for deserializing a"
-                      << hdr.operation);
+        log::io::debug("launch BASP worker for deserializing a {}",
+                       hdr.operation);
         worker->launch(last_hop, hdr, *payload);
       } else {
-        CAF_LOG_DEBUG("out of BASP workers, continue deserializing a"
-                      << hdr.operation);
+        log::io::debug("out of BASP workers, continue deserializing a {}",
+                       hdr.operation);
         // If no worker is available then we have no other choice than to take
         // the performance hit and deserialize in this thread.
         struct handler : remote_message_handler<handler> {
@@ -451,18 +464,18 @@ connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
           uint64_t msg_id_;
         };
         handler f{&queue_, &proxies(), &system(), last_hop, hdr, *payload};
-        f.handle_remote_message(callee_.current_execution_unit());
+        f.handle_remote_message(*sys_, callee_.current_scheduler());
       }
       break;
     }
     case message_type::monitor_message: {
       // Deserialize payload.
-      binary_deserializer source{ctx, *payload};
+      binary_deserializer source{*sys_, *payload};
       node_id source_node;
       node_id dest_node;
       if (!source.apply(source_node) || !source.apply(dest_node)) {
-        CAF_LOG_WARNING("unable to deserialize payload of monitor message:"
-                        << source.get_error());
+        log::io::warning("unable to deserialize payload of monitor message: {}",
+                         source.get_error());
         return serializing_basp_payload_failed;
       }
       if (dest_node == this_node_)
@@ -473,15 +486,15 @@ connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
     }
     case message_type::down_message: {
       // Deserialize payload.
-      binary_deserializer source{ctx, *payload};
+      binary_deserializer source{*sys_, *payload};
       node_id source_node;
       node_id dest_node;
       error fail_state;
       if (!source.apply(source_node)  //
           || !source.apply(dest_node) //
           || !source.apply(fail_state)) {
-        CAF_LOG_WARNING("unable to deserialize payload of down message:"
-                        << source.get_error());
+        log::io::warning("unable to deserialize payload of down message: {}",
+                         source.get_error());
         return serializing_basp_payload_failed;
       }
       if (dest_node == this_node_) {
@@ -491,40 +504,41 @@ connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
                                         delete_atom_v, source_node,
                                         hdr.source_actor,
                                         std::move(fail_state));
-        queue_.push(callee_.current_execution_unit(), msg_id,
-                    callee_.this_actor(), std::move(ptr));
+        queue_.push(callee_.current_scheduler(), msg_id, callee_.this_actor(),
+                    std::move(ptr));
       } else {
         forward(ctx, dest_node, hdr, *payload);
       }
       break;
     }
     case message_type::heartbeat: {
-      CAF_LOG_TRACE("received heartbeat");
+      auto lg = log::io::trace("received heartbeat");
       callee_.handle_heartbeat();
       break;
     }
     default: {
-      CAF_LOG_ERROR("invalid operation");
+      log::io::error("invalid operation");
       return malformed_message;
     }
   }
   return await_header;
 }
 
-void instance::forward(execution_unit* ctx, const node_id& dest_node,
-                       const header& hdr, byte_buffer& payload) {
-  CAF_LOG_TRACE(CAF_ARG(dest_node) << CAF_ARG(hdr) << CAF_ARG(payload));
+void instance::forward(scheduler*, const node_id& dest_node, const header& hdr,
+                       byte_buffer& payload) {
+  auto lg = log::io::trace("dest_node = {}, hdr = {}, payload = {}", dest_node,
+                           hdr, payload);
   auto path = lookup(dest_node);
   if (path) {
-    binary_serializer sink{ctx, callee_.get_buffer(path->hdl)};
+    binary_serializer sink{*sys_, callee_.get_buffer(path->hdl)};
     if (!sink.apply(hdr)) {
-      CAF_LOG_ERROR("unable to serialize BASP header:" << sink.get_error());
+      log::io::error("unable to serialize BASP header: {}", sink.get_error());
       return;
     }
     sink.value(span<const std::byte>{payload.data(), payload.size()});
     flush(*path);
   } else {
-    CAF_LOG_WARNING("cannot forward message, no route to destination");
+    log::io::warning("cannot forward message, no route to destination");
   }
 }
 

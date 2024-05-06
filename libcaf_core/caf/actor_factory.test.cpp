@@ -7,6 +7,7 @@
 #include "caf/actor_registry.hpp"
 #include "caf/actor_system_config.hpp"
 #include "caf/all.hpp"
+#include "caf/config.hpp"
 #include "caf/log/test.hpp"
 #include "caf/type_id.hpp"
 
@@ -25,8 +26,7 @@ struct fixture {
     log::test::debug("set aut");
     strong_actor_ptr res;
     std::set<std::string> ifs;
-    scoped_execution_unit context{&system};
-    actor_config actor_cfg{&context};
+    actor_config actor_cfg{&system.scheduler()};
     auto aut = system.spawn<actor>("test_actor", std::move(args));
     if (expect_fail) {
       test::runnable::current().require(!aut);
@@ -78,6 +78,8 @@ TEST("fun_one_arg_selfptr") {
   test_spawn(make_message(42));
 }
 
+CAF_PUSH_DEPRECATED_WARNING
+
 TEST("class_no_arg_invalid") {
   cfg.add_actor_type<test_actor_no_args>("test_actor");
   test_spawn(make_message(42), true);
@@ -97,6 +99,8 @@ TEST("class_one_arg_valid") {
   cfg.add_actor_type<test_actor_one_arg, const int&>("test_actor");
   test_spawn(make_message(42));
 }
+
+CAF_POP_WARNINGS
 
 } // WITH_FIXTURE(fixture)
 

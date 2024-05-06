@@ -12,7 +12,7 @@
 #include "caf/detail/socket_sys_includes.hpp"
 #include "caf/expected.hpp"
 #include "caf/ipv4_address.hpp"
-#include "caf/logger.hpp"
+#include "caf/log/net.hpp"
 #include "caf/sec.hpp"
 
 #include <algorithm>
@@ -35,7 +35,7 @@ namespace {
 bool connect_with_timeout(stream_socket fd, const sockaddr* addr,
                           socklen_t addrlen, timespan timeout) {
   namespace sc = std::chrono;
-  CAF_LOG_TRACE(CAF_ARG(fd.id) << CAF_ARG(timeout));
+  auto lg = log::net::trace("fd.id = {}, timeout = {}", fd.id, timeout);
   // Set to non-blocking or fail.
   if (auto err = nonblocking(fd, true))
     return false;
@@ -90,9 +90,9 @@ bool connect_with_timeout(stream_socket fd, const sockaddr* addr,
 template <int Family>
 bool ip_connect(stream_socket fd, std::string host, uint16_t port,
                 timespan timeout) {
-  CAF_LOG_TRACE("Family =" << (Family == AF_INET ? "AF_INET" : "AF_INET6")
-                           << CAF_ARG(fd.id) << CAF_ARG(host) << CAF_ARG(port)
-                           << CAF_ARG(timeout));
+  auto lg = log::net::trace(
+    "Family = {}, fd.id = {}, host = {}, port = {}, timeout = {}",
+    (Family == AF_INET ? "AF_INET" : "AF_INET6"), fd.id, host, port, timeout);
   static_assert(Family == AF_INET || Family == AF_INET6, "invalid family");
   using sockaddr_type
     = std::conditional_t<Family == AF_INET, sockaddr_in, sockaddr_in6>;
@@ -109,9 +109,8 @@ bool ip_connect(stream_socket fd, std::string host, uint16_t port,
                                   timeout);
     }
   } else {
-    CAF_LOG_DEBUG("inet_pton failed to parse"
-                  << host << "for family"
-                  << (Family == AF_INET ? "AF_INET" : "AF_INET6"));
+    log::net::debug("inet_pton failed to parse {} for family", host,
+                    (Family == AF_INET ? "AF_INET" : "AF_INET6"));
     return false;
   }
 }
@@ -120,10 +119,12 @@ bool ip_connect(stream_socket fd, std::string host, uint16_t port,
 
 expected<tcp_stream_socket> make_connected_tcp_stream_socket(ip_endpoint node,
                                                              timespan timeout) {
-  CAF_LOG_TRACE(CAF_ARG(node) << CAF_ARG(timeout));
-  CAF_LOG_DEBUG_IF(timeout == infinite, "try to connect to TCP node" << node);
-  CAF_LOG_DEBUG_IF(timeout != infinite, "try to connect to TCP node"
-                                          << node << "with timeout" << timeout);
+  auto lg = log::net::trace("node = {}, timeout = {}", node, timeout);
+  if (timeout == infinite)
+    log::net::debug("try to connect to TCP node {}", node);
+  else
+    log::net::debug("try to connect to TCP node {} with timeout {}", node,
+                    timeout);
   auto proto = node.address().embeds_v4() ? AF_INET : AF_INET6;
   int socktype = SOCK_STREAM;
 #ifdef SOCK_CLOEXEC
@@ -137,23 +138,24 @@ expected<tcp_stream_socket> make_connected_tcp_stream_socket(ip_endpoint node,
   if (proto == AF_INET6) {
     if (ip_connect<AF_INET6>(sock, to_string(node.address()), node.port(),
                              timeout)) {
-      CAF_LOG_INFO("established TCP connection to IPv6 node"
-                   << to_string(node));
+      log::net::info("established TCP connection to IPv6 node {}",
+                     to_string(node));
       return sguard.release();
     }
   } else if (ip_connect<AF_INET>(sock, to_string(node.address().embedded_v4()),
                                  node.port(), timeout)) {
-    CAF_LOG_INFO("established TCP connection to IPv4 node" << to_string(node));
+    log::net::info("established TCP connection to IPv4 node {}",
+                   to_string(node));
     return sguard.release();
   }
-  CAF_LOG_INFO("failed to connect to" << node);
+  log::net::info("failed to connect to {}", node);
   return make_error(sec::cannot_connect_to_node);
 }
 
 expected<tcp_stream_socket>
 make_connected_tcp_stream_socket(const uri::authority_type& node,
                                  timespan timeout) {
-  CAF_LOG_TRACE(CAF_ARG(node) << CAF_ARG(timeout));
+  auto lg = log::net::trace("node = {}, timeout = {}", node, timeout);
   auto port = node.port;
   if (port == 0)
     return make_error(sec::cannot_connect_to_node, "port is zero");
@@ -175,7 +177,8 @@ make_connected_tcp_stream_socket(const uri::authority_type& node,
 expected<tcp_stream_socket> make_connected_tcp_stream_socket(std::string host,
                                                              uint16_t port,
                                                              timespan timeout) {
-  CAF_LOG_TRACE(CAF_ARG(host) << CAF_ARG(port) << CAF_ARG(timeout));
+  auto lg = log::net::trace("host = {}, port = {}, timeout = {}", host, port,
+                            timeout);
   uri::authority_type auth;
   auth.host = std::move(host);
   auth.port = port;

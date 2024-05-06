@@ -18,6 +18,10 @@
 #include "caf/resumable.hpp"
 #include "caf/scheduler.hpp"
 #include "caf/sec.hpp"
+#include "caf/telemetry/histogram.hpp"
+#include "caf/telemetry/metric.hpp"
+#include "caf/telemetry/metric_family.hpp"
+#include "caf/telemetry/metric_family_impl.hpp"
 
 #include <condition_variable>
 #include <string>
@@ -56,7 +60,7 @@ local_actor::metrics_t make_instance_metrics(local_actor* self) {
 
 local_actor::local_actor(actor_config& cfg)
   : abstract_actor(cfg),
-    context_(cfg.host),
+    context_(cfg.sched),
     current_element_(nullptr),
     initial_behavior_fac_(std::move(cfg.init_fun)) {
   // nop
@@ -64,17 +68,6 @@ local_actor::local_actor(actor_config& cfg)
 
 local_actor::~local_actor() {
   // nop
-}
-
-void local_actor::on_destroy() {
-  CAF_PUSH_AID_FROM_PTR(this);
-#ifdef CAF_ENABLE_ACTOR_PROFILER
-  system().profiler_remove_actor(*this);
-#endif
-  if (!getf(is_cleaned_up_flag)) {
-    on_exit();
-    cleanup(exit_reason::unreachable, nullptr);
-  }
 }
 
 void local_actor::setup_metrics() {
@@ -87,7 +80,7 @@ auto local_actor::now() const noexcept -> clock_type::time_point {
 
 disposable local_actor::request_response_timeout(timespan timeout,
                                                  message_id mid) {
-  CAF_LOG_TRACE(CAF_ARG(timeout) << CAF_ARG(mid));
+  auto lg = log::core::trace("timeout = {}, mid = {}", timeout, mid);
   if (timeout == infinite)
     return {};
   auto t = clock().now() + timeout;
@@ -108,12 +101,12 @@ void local_actor::monitor(const node_id& node) {
 }
 
 void local_actor::demonitor(const actor_addr& whom) {
-  CAF_LOG_TRACE(CAF_ARG(whom));
+  auto lg = log::core::trace("whom = {}", whom);
   demonitor(actor_cast<strong_actor_ptr>(whom));
 }
 
 void local_actor::demonitor(const strong_actor_ptr& whom) {
-  CAF_LOG_TRACE(CAF_ARG(whom));
+  auto lg = log::core::trace("whom = {}", whom);
   if (whom) {
     default_attachable::observe_token tk{address(),
                                          default_attachable::monitor};
@@ -163,17 +156,25 @@ error local_actor::load_state(deserializer&, const unsigned int) {
   CAF_RAISE_ERROR("local_actor::deserialize called");
 }
 
-void local_actor::initialize() {
-  CAF_LOG_TRACE(CAF_ARG2("id", id()) << CAF_ARG2("name", name()));
+void local_actor::do_delegate_error() {
+  auto& sender = current_element_->sender;
+  auto& mid = current_element_->mid;
+  if (!sender || mid.is_response() || mid.is_answered())
+    return;
+  sender->enqueue(make_mailbox_element(ctrl(), mid.response_id(),
+                                       make_error(sec::invalid_delegate)),
+                  context());
+  mid.mark_as_answered();
 }
 
-bool local_actor::cleanup(error&& fail_state, execution_unit* host) {
-  CAF_LOG_TRACE(CAF_ARG(fail_state));
-  // tell registry we're done
-  unregister_from_system();
-  CAF_LOG_TERMINATE_EVENT(this, fail_state);
-  abstract_actor::cleanup(std::move(fail_state), host);
-  return true;
+void local_actor::initialize() {
+  auto lg = log::core::trace("id = {}, name = {}", id(), name());
+}
+
+void local_actor::on_cleanup([[maybe_unused]] const error& reason) {
+  auto lg = log::core::trace("reason = {}", reason);
+  on_exit();
+  CAF_LOG_TERMINATE_EVENT(this, reason);
 }
 
 // -- send functions -----------------------------------------------------------
@@ -183,7 +184,6 @@ void local_actor::do_send(abstract_actor* receiver, message_priority priority,
   if (receiver != nullptr) {
     auto item = make_mailbox_element(ctrl(), make_message_id(priority),
                                      std::move(msg));
-    CAF_BEFORE_SENDING(this, *item);
     receiver->enqueue(std::move(item), context());
     return;
   }
@@ -197,7 +197,6 @@ disposable local_actor::do_scheduled_send(strong_actor_ptr receiver,
   if (receiver != nullptr) {
     auto item = make_mailbox_element(ctrl(), make_message_id(priority),
                                      std::move(msg));
-    CAF_BEFORE_SENDING_SCHEDULED(this, timeout, *item);
     return clock().schedule_message(timeout, receiver, std::move(item));
   }
   system().base_metrics().rejected_messages->inc();
@@ -207,10 +206,9 @@ disposable local_actor::do_scheduled_send(strong_actor_ptr receiver,
 void local_actor::do_anon_send(abstract_actor* receiver,
                                message_priority priority, message&& msg) {
   if (receiver != nullptr) {
-    auto item = make_mailbox_element(nullptr, make_message_id(priority),
-                                     std::move(msg));
-    CAF_BEFORE_SENDING(this, *item);
-    receiver->enqueue(std::move(item), context());
+    receiver->enqueue(make_mailbox_element(nullptr, make_message_id(priority),
+                                           std::move(msg)),
+                      context());
     return;
   }
   system().base_metrics().rejected_messages->inc();
@@ -221,10 +219,9 @@ disposable local_actor::do_scheduled_anon_send(strong_actor_ptr receiver,
                                                actor_clock::time_point timeout,
                                                message&& msg) {
   if (receiver != nullptr) {
-    auto item = make_mailbox_element(nullptr, make_message_id(priority),
-                                     std::move(msg));
-    CAF_BEFORE_SENDING_SCHEDULED(this, timeout, *item);
-    return clock().schedule_message(timeout, receiver, std::move(item));
+    return clock().schedule_message(
+      timeout, receiver,
+      make_mailbox_element(nullptr, make_message_id(priority), std::move(msg)));
   }
   system().base_metrics().rejected_messages->inc();
   return {};

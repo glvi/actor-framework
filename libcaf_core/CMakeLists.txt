@@ -56,6 +56,7 @@ caf_add_component(
     async.read_result
     async.write_result
     exit_reason
+    flow.backpressure_overflow_strategy
     flow.op.state
     intrusive.inbox_result
     invoke_message_result
@@ -68,7 +69,9 @@ caf_add_component(
     ${CAF_CORE_HEADERS}
   SOURCES
     caf/abstract_actor.cpp
+    caf/abstract_blocking_actor.cpp
     caf/abstract_mailbox.cpp
+    caf/abstract_scheduled_actor.cpp
     caf/action.cpp
     caf/action.test.cpp
     caf/actor.cpp
@@ -80,10 +83,10 @@ caf_add_component(
     caf/actor_control_block.cpp
     caf/actor_factory.test.cpp
     caf/actor_from_state.test.cpp
+    caf/actor_lifetime.test.cpp
     caf/actor_ostream.cpp
     caf/actor_pool.cpp
     caf/actor_pool.test.cpp
-    caf/actor_profiler.cpp
     caf/actor_proxy.cpp
     caf/actor_registry.cpp
     caf/actor_registry.test.cpp
@@ -91,6 +94,9 @@ caf_add_component(
     caf/actor_system.test.cpp
     caf/actor_system_config.cpp
     caf/actor_system_config.test.cpp
+    caf/actor_system_module.cpp
+    caf/actor_termination.test.cpp
+    caf/anon_mail.test.cpp
     caf/async/batch.cpp
     caf/async/batch.test.cpp
     caf/async/blocking_consumer.test.cpp
@@ -104,6 +110,7 @@ caf_add_component(
     caf/async/promise.test.cpp
     caf/async/publisher.test.cpp
     caf/async/spsc_buffer.test.cpp
+    caf/async_mail.test.cpp
     caf/attachable.cpp
     caf/behavior.cpp
     caf/behavior.test.cpp
@@ -111,6 +118,7 @@ caf_add_component(
     caf/binary_serializer.cpp
     caf/blocking_actor.cpp
     caf/blocking_actor.test.cpp
+    caf/blocking_mail.test.cpp
     caf/byte_span.cpp
     caf/chrono.cpp
     caf/chrono.test.cpp
@@ -121,10 +129,13 @@ caf_add_component(
     caf/config_option.test.cpp
     caf/config_option_adder.cpp
     caf/config_option_set.cpp
+    caf/config_option_set.test.cpp
     caf/config_value.cpp
+    caf/config_value.test.cpp
     caf/config_value_reader.cpp
     caf/config_value_writer.cpp
     caf/const_typed_message_view.test.cpp
+    caf/constructor_attach.test.cpp
     caf/cow_string.test.cpp
     caf/cow_tuple.test.cpp
     caf/deep_to_string.test.cpp
@@ -135,17 +146,24 @@ caf_add_component(
     caf/detail/abstract_worker.cpp
     caf/detail/abstract_worker_hub.cpp
     caf/detail/actor_local_printer.cpp
+    caf/detail/actor_system_access.cpp
+    caf/detail/actor_system_config_access.cpp
+    caf/detail/assert.cpp
     caf/detail/atomic_ref_counted.cpp
     caf/detail/base64.cpp
     caf/detail/base64.test.cpp
+    caf/detail/beacon.cpp
     caf/detail/behavior_impl.cpp
     caf/detail/behavior_stack.cpp
     caf/detail/blocking_behavior.cpp
     caf/detail/bounds_checker.test.cpp
+    caf/detail/cleanup_and_release.cpp
     caf/detail/config_consumer.cpp
     caf/detail/config_consumer.test.cpp
+    caf/detail/critical.cpp
     caf/detail/default_mailbox.cpp
     caf/detail/default_mailbox.test.cpp
+    caf/detail/default_thread_count.cpp
     caf/detail/format.test.cpp
     caf/detail/get_process_id.cpp
     caf/detail/glob_match.cpp
@@ -196,12 +214,15 @@ caf_add_component(
     caf/detail/unique_function.test.cpp
     caf/dictionary.test.cpp
     caf/disposable.cpp
+    caf/dynamic_spawn.test.cpp
     caf/error.cpp
     caf/error.test.cpp
     caf/event_based_actor.cpp
     caf/event_based_actor.test.cpp
-    caf/execution_unit.cpp
+    caf/event_based_mail.test.cpp
+    caf/exit_reason.test.cpp
     caf/expected.test.cpp
+    caf/flow/byte.test.cpp
     caf/flow/concat_map.test.cpp
     caf/flow/coordinated.cpp
     caf/flow/coordinator.cpp
@@ -224,6 +245,7 @@ caf_add_component(
     caf/flow/op/mcast.test.cpp
     caf/flow/op/merge.test.cpp
     caf/flow/op/never.test.cpp
+    caf/flow/op/on_backpressure_buffer.test.cpp
     caf/flow/op/prefix_and_tail.test.cpp
     caf/flow/op/publish.test.cpp
     caf/flow/op/pullable.cpp
@@ -244,6 +266,7 @@ caf_add_component(
     caf/hash/sha1.cpp
     caf/hash/sha1.test.cpp
     caf/init_global_meta_objects.cpp
+    caf/inspector_access_type.test.cpp
     caf/intrusive/lifo_inbox.test.cpp
     caf/intrusive/linked_list.test.cpp
     caf/intrusive/stack.test.cpp
@@ -261,41 +284,56 @@ caf_add_component(
     caf/ipv6_subnet.cpp
     caf/ipv6_subnet.test.cpp
     caf/json_array.cpp
+    caf/json_array.test.cpp
     caf/json_builder.cpp
+    caf/json_builder.test.cpp
     caf/json_object.cpp
+    caf/json_object.test.cpp
     caf/json_reader.cpp
+    caf/json_reader.test.cpp
     caf/json_value.cpp
+    caf/json_value.test.cpp
     caf/json_writer.cpp
+    caf/json_writer.test.cpp
     caf/load_inspector.cpp
     caf/local_actor.cpp
     caf/log/event.cpp
     caf/log/event.test.cpp
     caf/logger.cpp
+    caf/mail_cache.cpp
+    caf/mail_cache.test.cpp
     caf/mailbox_element.cpp
     caf/mailbox_element.test.cpp
     caf/make_config_option.cpp
     caf/message.cpp
+    caf/message.test.cpp
     caf/message_builder.cpp
     caf/message_builder.test.cpp
     caf/message_handler.cpp
+    caf/message_handler.test.cpp
     caf/message_id.test.cpp
     caf/message_lifetime.test.cpp
     caf/messaging.test.cpp
     caf/metaprogramming.test.cpp
+    caf/mixin/requester.test.cpp
+    caf/mixin/sender.test.cpp
+    caf/monitor.test.cpp
     caf/mtl.test.cpp
     caf/node_id.cpp
     caf/node_id.test.cpp
+    caf/none.test.cpp
     caf/or_else.test.cpp
+    caf/parser_state.cpp
+    caf/pec.test.cpp
     caf/policy/select_all.test.cpp
     caf/policy/select_any.test.cpp
-    caf/policy/unprofiled.cpp
-    caf/policy/work_sharing.cpp
-    caf/policy/work_stealing.cpp
     caf/proxy_registry.cpp
     caf/raise_error.cpp
     caf/ref_counted.cpp
+    caf/request_timeout.test.cpp
     caf/response_handle.test.cpp
     caf/response_promise.cpp
+    caf/response_promise.test.cpp
     caf/result.test.cpp
     caf/resumable.cpp
     caf/run_delayed.test.cpp
@@ -303,17 +341,19 @@ caf_add_component(
     caf/save_inspector.cpp
     caf/scheduled_actor.cpp
     caf/scheduled_actor.test.cpp
-    caf/scheduler/abstract_coordinator.cpp
+    caf/scheduler.cpp
+    caf/scheduler.test.cpp
     caf/scoped_actor.cpp
-    caf/scoped_execution_unit.cpp
     caf/sec.test.cpp
     caf/serial_reply.test.cpp
+    caf/serialization.test.cpp
     caf/serializer.cpp
+    caf/serializer.test.cpp
     caf/settings.cpp
     caf/settings.test.cpp
-    caf/simple_timeout.test.cpp
     caf/skip.cpp
     caf/span.test.cpp
+    caf/stateful_actor.test.cpp
     caf/stream.cpp
     caf/stream.test.cpp
     caf/string_algorithms.cpp
@@ -335,14 +375,19 @@ caf_add_component(
     caf/telemetry/timer.test.cpp
     caf/term.cpp
     caf/thread_hook.cpp
+    caf/thread_hook.test.cpp
     caf/timestamp.cpp
-    caf/tracing_data.cpp
-    caf/tracing_data_factory.cpp
     caf/type_id.cpp
     caf/type_id_list.cpp
     caf/type_id_list.test.cpp
+    caf/typed_actor.test.cpp
+    caf/typed_actor_view.test.cpp
     caf/typed_behavior.test.cpp
+    caf/typed_event_based_actor.test.cpp
     caf/typed_message_view.test.cpp
+    caf/typed_response_promise.test.cpp
+    caf/typed_spawn.test.cpp
+    caf/typed_stream.test.cpp
     caf/unit.test.cpp
     caf/unordered_flat_map.test.cpp
     caf/uri.cpp
@@ -350,51 +395,12 @@ caf_add_component(
     caf/uri_builder.cpp
     caf/uuid.cpp
     caf/uuid.test.cpp
-  LEGACY_TEST_SOURCES
-    tests/legacy/core-test.cpp
-    tests/legacy/nasty.cpp
-  LEGACY_TEST_SUITES
-    actor_lifetime
-    actor_profiler
-    actor_termination
-    binary_deserializer
-    binary_serializer
-    config_option_set
-    config_value
-    config_value_reader
-    config_value_writer
-    constructor_attach
-    dsl
-    dynamic_spawn
-    json_array
-    json_builder
-    json_object
-    json_reader
-    json_value
-    json_writer
-    load_inspector
-    message
-    mixin.requester
-    mixin.sender
-    request_timeout
-    response_promise
-    save_inspector
-    serialization
-    stateful_actor
-    thread_hook
-    tracing_data
-    typed_actor_view
-    typed_response_promise
-    typed_spawn
-    typed_stream)
+    caf/version.cpp
+    caf/version.test.cpp)
 
 # Additional log component for (potentially critical) system-wide events.
 caf_add_log_component(system)
 
 if(NOT CAF_USE_STD_FORMAT)
   target_sources(libcaf_core PRIVATE caf/detail/format.cpp)
-endif()
-
-if(TARGET caf-core-legacy-test AND CAF_ENABLE_EXCEPTIONS)
-  caf_add_legacy_test_suites(caf-core-legacy-test custom_exception_handler)
 endif()

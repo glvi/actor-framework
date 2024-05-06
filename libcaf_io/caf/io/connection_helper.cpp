@@ -12,6 +12,7 @@
 #include "caf/after.hpp"
 #include "caf/defaults.hpp"
 #include "caf/event_based_actor.hpp"
+#include "caf/log/io.hpp"
 #include "caf/stateful_actor.hpp"
 
 #include <chrono>
@@ -27,17 +28,17 @@ auto autoconnect_timeout = std::chrono::minutes(10);
 
 behavior connection_helper(stateful_actor<connection_helper_state>* self,
                            actor b) {
-  CAF_LOG_TRACE(CAF_ARG(b));
+  auto lg = log::io::trace("b = {}", b);
   self->monitor(b);
   self->set_down_handler([=](down_msg& dm) {
-    CAF_LOG_TRACE(CAF_ARG(dm));
+    auto lg = log::io::trace("dm = {}", dm);
     self->quit(std::move(dm.reason));
   });
   return {
     // this config is send from the remote `ConfigServ`
     [=](const std::string& item, message& msg) {
-      CAF_LOG_TRACE(CAF_ARG(item) << CAF_ARG(msg));
-      CAF_LOG_DEBUG("received requested config:" << CAF_ARG(msg));
+      auto lg = log::io::trace("item = {}, msg = {}", item, msg);
+      log::io::debug("received requested config: msg = {}", msg);
       // whatever happens, we are done afterwards
       self->quit();
       message_handler f{
@@ -50,16 +51,17 @@ behavior connection_helper(stateful_actor<connection_helper_state>* self,
                 if (hdl) {
                   // gotcha! send scribe to our BASP broker
                   // to initiate handshake etc.
-                  CAF_LOG_INFO("connected directly:" << CAF_ARG(addr));
-                  self->send(b, connect_atom_v, *hdl, port);
+                  log::io::info("connected directly: addr = {}", addr);
+                  self->mail(connect_atom_v, *hdl, port).send(b);
                   return;
                 }
               }
             }
-            CAF_LOG_INFO("could not connect to node directly");
+            log::io::info("could not connect to node directly");
           } else {
-            CAF_LOG_INFO("aborted direct connection attempt, unknown item: "
-                         << CAF_ARG(item));
+            log::io::info(
+              "aborted direct connection attempt, unknown item: item = {}",
+              item);
           }
         },
       };
@@ -67,9 +69,9 @@ behavior connection_helper(stateful_actor<connection_helper_state>* self,
     },
     after(autoconnect_timeout) >>
       [=] {
-        CAF_LOG_TRACE(CAF_ARG(""));
+        auto lg = log::io::trace("");
         // nothing heard in about 10 minutes... just a call it a day, then
-        CAF_LOG_INFO("aborted direct connection attempt after 10min");
+        log::io::info("aborted direct connection attempt after 10min");
         self->quit(exit_reason::user_shutdown);
       },
   };

@@ -13,7 +13,8 @@
 #include "caf/actor.hpp"
 #include "caf/actor_proxy.hpp"
 #include "caf/actor_system_config.hpp"
-#include "caf/logger.hpp"
+#include "caf/anon_mail.hpp"
+#include "caf/log/io.hpp"
 #include "caf/node_id.hpp"
 #include "caf/sec.hpp"
 #include "caf/send.hpp"
@@ -45,7 +46,7 @@ middleman_actor_impl::middleman_actor_impl(actor_config& cfg,
 }
 
 void middleman_actor_impl::on_exit() {
-  CAF_LOG_TRACE("");
+  auto lg = log::io::trace("");
   broker_ = nullptr;
   cached_tcp_.clear();
   for (auto& kvp : pending_)
@@ -59,39 +60,39 @@ const char* middleman_actor_impl::name() const {
 }
 
 auto middleman_actor_impl::make_behavior() -> behavior_type {
-  CAF_LOG_TRACE("");
+  auto lg = log::io::trace("");
   auto res = behavior{
     [this](publish_atom, uint16_t port, strong_actor_ptr& whom, mpi_set& sigs,
            std::string& addr, bool reuse) -> put_res {
-      CAF_LOG_TRACE("");
+      auto lg = log::io::trace("");
       return put(port, whom, sigs, addr.c_str(), reuse);
     },
     [this](open_atom, uint16_t port, std::string& addr, bool reuse) -> put_res {
-      CAF_LOG_TRACE("");
+      auto lg = log::io::trace("");
       strong_actor_ptr whom;
       mpi_set sigs;
       return put(port, whom, sigs, addr.c_str(), reuse);
     },
     [this](delete_atom, std::string& hostname, uint16_t port) {
       // Undocumented (on purpose): manually removes an entry from the cache.
-      CAF_LOG_TRACE(CAF_ARG(hostname) << CAF_ARG(port));
+      auto lg = log::io::trace("hostname = {}, port = {}", hostname, port);
       cached_tcp_.erase(endpoint{std::move(hostname), port});
     },
     [this](connect_atom, std::string& hostname, uint16_t port) -> get_res {
-      CAF_LOG_TRACE(CAF_ARG(hostname) << CAF_ARG(port));
+      auto lg = log::io::trace("hostname = {}, port = {}", hostname, port);
       auto rp = make_response_promise();
       endpoint key{std::move(hostname), port};
       // respond immediately if endpoint is cached
       auto x = cached_tcp(key);
       if (x) {
-        CAF_LOG_DEBUG("found cached entry" << CAF_ARG(*x));
+        log::io::debug("found cached entry x = {}", *x);
         rp.deliver(get<0>(*x), get<1>(*x), get<2>(*x));
         return get_delegated{};
       }
       // attach this promise to a pending request if possible
       auto rps = pending(key);
       if (rps) {
-        CAF_LOG_DEBUG("attach to pending request");
+        log::io::debug("attach to pending request");
         rps->emplace_back(std::move(rp));
         return get_delegated{};
       }
@@ -104,7 +105,8 @@ auto middleman_actor_impl::make_behavior() -> behavior_type {
       auto& ptr = *r;
       std::vector<response_promise> tmp{std::move(rp)};
       pending_.emplace(key, std::move(tmp));
-      request(broker_, infinite, connect_atom_v, std::move(ptr), port)
+      mail(connect_atom_v, std::move(ptr), port)
+        .request(broker_, infinite)
         .then(
           [this, key](node_id& nid, strong_actor_ptr& addr, mpi_set& sigs) {
             auto i = pending_.find(key);
@@ -131,18 +133,18 @@ auto middleman_actor_impl::make_behavior() -> behavior_type {
       return get_delegated{};
     },
     [this](unpublish_atom atm, actor_addr addr, uint16_t p) -> del_res {
-      CAF_LOG_TRACE("");
+      auto lg = log::io::trace("");
       delegate(broker_, atm, std::move(addr), p);
       return {};
     },
     [this](close_atom atm, uint16_t p) -> del_res {
-      CAF_LOG_TRACE("");
+      auto lg = log::io::trace("");
       delegate(broker_, atm, p);
       return {};
     },
     [this](spawn_atom, node_id& nid, std::string& name, message& args,
            std::set<std::string>& ifs) -> result<strong_actor_ptr> {
-      CAF_LOG_TRACE("");
+      auto lg = log::io::trace("");
       if (!nid)
         return make_error(sec::invalid_argument,
                           "cannot spawn actors on invalid nodes");
@@ -166,7 +168,7 @@ auto middleman_actor_impl::make_behavior() -> behavior_type {
     },
     [this](get_atom,
            node_id& nid) -> delegated<node_id, std::string, uint16_t> {
-      CAF_LOG_TRACE("");
+      auto lg = log::io::trace("");
       delegate(broker_, get_atom_v, std::move(nid));
       return {};
     },
@@ -178,8 +180,9 @@ auto middleman_actor_impl::make_behavior() -> behavior_type {
 middleman_actor_impl::put_res
 middleman_actor_impl::put(uint16_t port, strong_actor_ptr& whom, mpi_set& sigs,
                           const char* in, bool reuse_addr) {
-  CAF_LOG_TRACE(CAF_ARG(port) << CAF_ARG(whom) << CAF_ARG(sigs) << CAF_ARG(in)
-                              << CAF_ARG(reuse_addr));
+  auto lg = log::io::trace(
+    "port = {}, whom = {}, sigs = {}, in = {}, reuse_addr = {}", port, whom,
+    sigs, in, reuse_addr);
   uint16_t actual_port;
   // treat empty strings like nullptr
   if (in != nullptr && in[0] == '\0')
@@ -189,16 +192,18 @@ middleman_actor_impl::put(uint16_t port, strong_actor_ptr& whom, mpi_set& sigs,
     return std::move(res.error());
   auto& ptr = *res;
   actual_port = ptr->port();
-  anon_send(broker_, publish_atom_v, std::move(ptr), actual_port,
-            std::move(whom), std::move(sigs));
+  anon_mail(publish_atom_v, std::move(ptr), actual_port, std::move(whom),
+            std::move(sigs))
+    .send(broker_);
   return actual_port;
 }
 
 middleman_actor_impl::put_res
 middleman_actor_impl::put_udp(uint16_t port, strong_actor_ptr& whom,
                               mpi_set& sigs, const char* in, bool reuse_addr) {
-  CAF_LOG_TRACE(CAF_ARG(port) << CAF_ARG(whom) << CAF_ARG(sigs) << CAF_ARG(in)
-                              << CAF_ARG(reuse_addr));
+  auto lg = log::io::trace(
+    "port = {}, whom = {}, sigs = {}, in = {}, reuse_addr = {}", port, whom,
+    sigs, in, reuse_addr);
   uint16_t actual_port;
   // treat empty strings like nullptr
   if (in != nullptr && in[0] == '\0')
@@ -208,8 +213,9 @@ middleman_actor_impl::put_udp(uint16_t port, strong_actor_ptr& whom,
     return std::move(res.error());
   auto& ptr = *res;
   actual_port = ptr->local_port();
-  anon_send(broker_, publish_udp_atom_v, std::move(ptr), actual_port,
-            std::move(whom), std::move(sigs));
+  anon_mail(publish_udp_atom_v, std::move(ptr), actual_port, std::move(whom),
+            std::move(sigs))
+    .send(broker_);
   return actual_port;
 }
 

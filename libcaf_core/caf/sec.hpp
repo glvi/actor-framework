@@ -165,6 +165,16 @@ enum class sec : uint8_t {
   protocol_error,
   /// Encountered faulty logic in the program.
   logic_error,
+  /// An actor tried to delegate a message to an invalid actor handle.
+  invalid_delegate = 75,
+  /// An actor tried to delegate a message to an invalid actor handle.
+  invalid_request,
+  /// Signals that `future::get` timed out.
+  future_timeout,
+  /// Received invalid UTF-8 encoding.
+  invalid_utf8,
+  /// A downstream operator failed to process inputs on time.
+  backpressure_overflow,
 };
 // --(rst-sec-end)--
 

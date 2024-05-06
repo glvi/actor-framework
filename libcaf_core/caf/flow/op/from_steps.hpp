@@ -5,9 +5,11 @@
 #pragma once
 
 #include "caf/defaults.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/plain_ref_counted.hpp"
 #include "caf/detail/scope_guard.hpp"
 #include "caf/detail/type_list.hpp"
+#include "caf/flow/observer.hpp"
 
 #include <deque>
 #include <tuple>
@@ -17,7 +19,7 @@ namespace caf::flow::op {
 
 template <class... Steps>
 using from_steps_output_t =
-  typename detail::tl_back_t<detail::type_list<Steps...>>::output_type;
+  typename detail::tl_back_t<type_list<Steps...>>::output_type;
 
 template <class Input, class... Steps>
 class from_steps_sub : public subscription::impl_base,
@@ -152,7 +154,7 @@ public:
   }
 
   void request(size_t n) override {
-    CAF_LOG_TRACE(CAF_ARG(n));
+    auto lg = log::core::trace("n = {}", n);
     if (demand_ != 0) {
       demand_ += n;
       return;
@@ -163,7 +165,7 @@ public:
 
 private:
   void do_dispose(bool from_external) override {
-    CAF_LOG_TRACE("");
+    auto lg = log::core::trace("");
     if (!out_)
       return;
     in_.cancel();

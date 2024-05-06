@@ -8,9 +8,11 @@
 #include "caf/test/scenario.hpp"
 
 #include "caf/detail/private_thread.hpp"
+#include "caf/log/test.hpp"
 #include "caf/resumable.hpp"
 
 using namespace caf;
+using namespace std::literals;
 
 namespace {
 
@@ -21,16 +23,17 @@ SCENARIO("private threads count towards detached actors") {
     detail::private_thread* t1 = nullptr;
     detail::private_thread* t2 = nullptr;
     WHEN("acquiring and then releasing new private threads") {
+      auto baseline = sys.detached_actors();
+      log::test::debug("baseline: {}", baseline);
       THEN("the detached_actors counter increases") {
-        check_eq(sys.detached_actors(), 0u);
+        check_eq(sys.detached_actors(), baseline);
         t1 = sys.acquire_private_thread();
-        check_eq(sys.detached_actors(), 1u);
+        check_eq(sys.detached_actors(), baseline + 1);
         t2 = sys.acquire_private_thread();
-        check_eq(sys.detached_actors(), 2u);
+        check_eq(sys.detached_actors(), baseline + 2);
       }
       AND_THEN("the detached_actors counter eventually decreases again") {
-        auto next_value = [this, old_value{2u}]() mutable {
-          using namespace std::literals::chrono_literals;
+        auto next_value = [this, old_value = baseline + 2]() mutable {
           size_t result = 0;
           while ((result = sys.detached_actors()) == old_value)
             std::this_thread::sleep_for(1ms);
@@ -38,9 +41,9 @@ SCENARIO("private threads count towards detached actors") {
           return result;
         };
         sys.release_private_thread(t2);
-        check_eq(next_value(), 1u);
+        check_eq(next_value(), baseline + 1);
         sys.release_private_thread(t1);
-        check_eq(next_value(), 0u);
+        check_eq(next_value(), baseline);
       }
     }
   }
@@ -49,32 +52,32 @@ SCENARIO("private threads count towards detached actors") {
 SCENARIO("private threads rerun their resumable when it returns resume_later") {
   struct testee : resumable {
     std::atomic<size_t> runs = 0;
-    std::atomic<size_t> refs_added = 0;
-    std::atomic<size_t> refs_released = 0;
-    subtype_t subtype() const override {
+    mutable std::atomic<size_t> refs_added = 0;
+    mutable std::atomic<size_t> refs_released = 0;
+    subtype_t subtype() const noexcept override {
       return resumable::function_object;
     }
-    resume_result resume(execution_unit*, size_t) override {
+    resume_result resume(scheduler*, size_t) override {
       return ++runs < 2 ? resumable::resume_later : resumable::done;
     }
-    void intrusive_ptr_add_ref_impl() override {
+    void ref_resumable() const noexcept final {
       ++refs_added;
     }
-    void intrusive_ptr_release_impl() override {
+    void deref_resumable() const noexcept final {
       ++refs_released;
     }
   };
   GIVEN("a resumable f and a private thread t") {
+    auto baseline = sys.detached_actors();
     testee f;
     auto t = sys.acquire_private_thread();
     WHEN("when resuming f with t") {
       t->resume(&f);
       THEN("t calls resume until f returns something other than resume_later") {
-        using namespace std::literals::chrono_literals;
         sys.release_private_thread(t);
         while (f.runs != 2u)
           std::this_thread::sleep_for(1ms);
-        while (sys.detached_actors() != 0)
+        while (sys.detached_actors() != baseline)
           std::this_thread::sleep_for(1ms);
         check_eq(f.refs_added, 0u);
         check_eq(f.refs_released, 1u);

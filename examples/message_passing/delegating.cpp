@@ -12,7 +12,10 @@ using namespace caf;
 using namespace std::literals;
 
 // --(rst-delegate-begin)--
-using adder_actor = typed_actor<result<int32_t>(add_atom, int32_t, int32_t)>;
+struct adder_trait {
+  using signatures = type_list<result<int32_t>(add_atom, int32_t, int32_t)>;
+};
+using adder_actor = typed_actor<adder_trait>;
 
 adder_actor::behavior_type worker_impl() {
   return {
@@ -30,8 +33,8 @@ adder_actor::behavior_type server_impl(adder_actor::pointer self,
 
 void client_impl(event_based_actor* self, adder_actor adder, int32_t x,
                  int32_t y) {
-  self->request(adder, 10s, add_atom_v, x, y).then([=](int32_t result) {
-    aout(self).println("{} + {} = {}", x, y, result);
+  self->mail(add_atom_v, x, y).request(adder, 10s).then([=](int32_t result) {
+    self->println("{} + {} = {}", x, y, result);
   });
 }
 

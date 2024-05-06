@@ -1,5 +1,36 @@
 cmake_minimum_required(VERSION 3.13..3.27 FATAL_ERROR)
-project(CAF CXX)
+project(CAF VERSION 1.0.0 LANGUAGES CXX)
+
+# -- version boilerplate -------------------------------------------------------
+
+# Individual components of the version number.
+set(CAF_VERSION_MAJOR ${PROJECT_VERSION_MAJOR}
+    CACHE INTERNAL "The major version of CAF" FORCE)
+set(CAF_VERSION_MINOR ${PROJECT_VERSION_MINOR}
+    CACHE INTERNAL "The minor version of CAF" FORCE)
+set(CAF_VERSION_PATCH ${PROJECT_VERSION_PATCH}
+    CACHE INTERNAL "The patch version of CAF" FORCE)
+
+# The full version number as human-readable string.
+set(CAF_VERSION "${CAF_VERSION_MAJOR}.${CAF_VERSION_MINOR}.${CAF_VERSION_PATCH}"
+    CACHE INTERNAL "The full CAF version string" FORCE)
+
+# The full version number as integer.
+if(CAF_VERSION_MAJOR LESS 1)
+  set(CAF_VERSION_INT ${CAF_VERSION_MAJOR})
+else()
+  set(CAF_VERSION_INT "")
+endif()
+if(CAF_VERSION_MINOR LESS 10)
+  set(CAF_VERSION_INT ${CAF_VERSION_INT}0${CAF_VERSION_MINOR})
+else()
+  set(CAF_VERSION_INT ${CAF_VERSION_INT}${CAF_VERSION_MINOR})
+endif()
+if(CAF_VERSION_PATCH LESS 10)
+  set(CAF_VERSION_INT ${CAF_VERSION_INT}0${CAF_VERSION_PATCH})
+else()
+  set(CAF_VERSION_INT ${CAF_VERSION_INT}${CAF_VERSION_PATCH})
+endif()
 
 # -- includes ------------------------------------------------------------------
 
@@ -22,7 +53,6 @@ option(THREADS_PREFER_PTHREAD_FLAG "Prefer -pthread flag if available " ON)
 
 # -- CAF options that are off by default ---------------------------------------
 
-option(CAF_ENABLE_ACTOR_PROFILER "Enable experimental profiler API" OFF)
 option(CAF_ENABLE_CPACK "Enable packaging via CPack" OFF)
 option(CAF_ENABLE_CURL_EXAMPLES "Build examples with libcurl" OFF)
 option(CAF_ENABLE_PROTOBUF_EXAMPLES "Build examples with Google Protobuf" OFF)
@@ -37,7 +67,6 @@ option(CAF_ENABLE_EXCEPTIONS "Build CAF with support for exceptions" ON)
 option(CAF_ENABLE_IO_MODULE "Build legacy networking I/O module" ON)
 option(CAF_ENABLE_NET_MODULE "Build networking I/O module" ON)
 option(CAF_ENABLE_TESTING "Build unit test suites" ON)
-option(CAF_ENABLE_TOOLS "Build utility programs such as caf-run" ON)
 
 # -- CAF options that depend on others -----------------------------------------
 
@@ -156,28 +185,6 @@ add_library(CAF::internal ALIAS caf_internal)
 
 install(TARGETS caf_internal EXPORT CAFTargets)
 
-# -- get CAF version -----------------------------------------------------------
-
-# Get line containing the version from config.hpp and extract version number.
-file(READ "libcaf_core/caf/config.hpp" CAF_CONFIG_HPP)
-string(REGEX MATCH "#define CAF_VERSION [0-9]+" CAF_VERSION_LINE "${CAF_CONFIG_HPP}")
-string(REGEX MATCH "[0-9]+" CAF_VERSION_INT "${CAF_VERSION_LINE}")
-# Calculate major, minor, and patch version.
-math(EXPR CAF_VERSION_MAJOR "${CAF_VERSION_INT} / 10000")
-math(EXPR CAF_VERSION_MINOR "( ${CAF_VERSION_INT} / 100) % 100")
-math(EXPR CAF_VERSION_PATCH "${CAF_VERSION_INT} % 100")
-# Create full version string.
-set(CAF_VERSION "${CAF_VERSION_MAJOR}.${CAF_VERSION_MINOR}.${CAF_VERSION_PATCH}"
-  CACHE INTERNAL "The full CAF version string")
-# Set the library version for our shared library targets.
-if(CMAKE_HOST_SYSTEM_NAME MATCHES "OpenBSD")
-  set(CAF_LIB_VERSION "${CAF_VERSION_MAJOR}.${CAF_VERSION_MINOR}"
-      CACHE INTERNAL "The version string used for shared library objects")
-else()
-  set(CAF_LIB_VERSION "${CAF_VERSION}"
-      CACHE INTERNAL "The version string used for shared library objects")
-endif()
-
 # -- create the libcaf_test target ahead of time for caf_core ------------------
 
 add_library(libcaf_test)
@@ -221,7 +228,7 @@ function(caf_export_and_install_lib component)
   set_target_properties(libcaf_${component} PROPERTIES
                         EXPORT_NAME ${component}
                         SOVERSION ${CAF_VERSION}
-                        VERSION ${CAF_LIB_VERSION}
+                        VERSION ${CAF_VERSION_MAJOR}
                         OUTPUT_NAME caf_${component})
   install(TARGETS libcaf_${component}
           EXPORT CAFTargets
@@ -401,10 +408,6 @@ if(CAF_ENABLE_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
-if(CAF_ENABLE_TOOLS)
-  add_subdirectory(tools)
-endif()
-
 # -- optionally add the Robot tests to CTest -----------------------------------
 
 if(CAF_ENABLE_TESTING AND CAF_ENABLE_ROBOT_TESTS)
@@ -448,7 +451,7 @@ install(EXPORT CAFTargets
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/CAFConfigVersion.cmake"
   VERSION ${CAF_VERSION}
-  COMPATIBILITY ExactVersion)
+  COMPATIBILITY SameMajorVersion)
 
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAFConfig.cmake.in"

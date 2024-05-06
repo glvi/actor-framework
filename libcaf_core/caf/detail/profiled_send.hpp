@@ -7,7 +7,6 @@
 #include "caf/actor_cast.hpp"
 #include "caf/actor_clock.hpp"
 #include "caf/actor_control_block.hpp"
-#include "caf/actor_profiler.hpp"
 #include "caf/disposable.hpp"
 #include "caf/fwd.hpp"
 #include "caf/mailbox_element.hpp"
@@ -19,12 +18,11 @@ namespace caf::detail {
 
 template <class Self, class SelfHandle, class Handle, class... Ts>
 void profiled_send(Self* self, SelfHandle&& src, const Handle& dst,
-                   message_id msg_id, execution_unit* context, Ts&&... xs) {
+                   message_id msg_id, scheduler* sched, Ts&&... xs) {
   if (dst) {
     auto element = make_mailbox_element(std::forward<SelfHandle>(src), msg_id,
                                         std::forward<Ts>(xs)...);
-    CAF_BEFORE_SENDING(self, *element);
-    dst->enqueue(std::move(element), context);
+    dst->enqueue(std::move(element), sched);
   } else {
     self->home_system().base_metrics().rejected_messages->inc();
   }
@@ -37,7 +35,6 @@ disposable profiled_send(Self* self, SelfHandle&& src, const Handle& dst,
   if (dst) {
     auto element = make_mailbox_element(std::forward<SelfHandle>(src), msg_id,
                                         std::forward<Ts>(xs)...);
-    CAF_BEFORE_SENDING_SCHEDULED(self, timeout, *element);
     return clock.schedule_message(timeout, actor_cast<strong_actor_ptr>(dst),
                                   std::move(element));
   } else {

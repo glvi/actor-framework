@@ -4,9 +4,11 @@
 
 #include "caf/forwarding_actor_proxy.hpp"
 
-#include "caf/logger.hpp"
+#include "caf/anon_mail.hpp"
+#include "caf/detail/assert.hpp"
+#include "caf/log/core.hpp"
 #include "caf/mailbox_element.hpp"
-#include "caf/send.hpp"
+#include "caf/system_messages.hpp"
 
 #include <utility>
 
@@ -14,11 +16,11 @@ namespace caf {
 
 forwarding_actor_proxy::forwarding_actor_proxy(actor_config& cfg, actor dest)
   : actor_proxy(cfg), broker_(std::move(dest)) {
-  anon_send(broker_, monitor_atom_v, ctrl());
+  anon_mail(monitor_atom_v, ctrl()).send(broker_);
 }
 
 forwarding_actor_proxy::~forwarding_actor_proxy() {
-  anon_send(broker_, make_message(delete_atom_v, node(), id()));
+  anon_mail(make_message(delete_atom_v, node(), id())).send(broker_);
 }
 
 const char* forwarding_actor_proxy::name() const {
@@ -27,8 +29,8 @@ const char* forwarding_actor_proxy::name() const {
 
 bool forwarding_actor_proxy::forward_msg(strong_actor_ptr sender,
                                          message_id mid, message msg) {
-  CAF_LOG_TRACE(CAF_ARG(id())
-                << CAF_ARG(sender) << CAF_ARG(mid) << CAF_ARG(msg));
+  auto lg = log::core::trace("id = {}, sender = {}, mid = {}, msg = {}", id(),
+                             sender, mid, msg);
   if (msg.match_elements<exit_msg>())
     unlink_from(msg.get_as<exit_msg>(0).source);
   auto ptr = make_mailbox_element(nullptr, make_message_id(), forward_atom_v,
@@ -40,8 +42,7 @@ bool forwarding_actor_proxy::forward_msg(strong_actor_ptr sender,
   return false;
 }
 
-bool forwarding_actor_proxy::enqueue(mailbox_element_ptr what,
-                                     execution_unit*) {
+bool forwarding_actor_proxy::enqueue(mailbox_element_ptr what, scheduler*) {
   CAF_PUSH_AID(0);
   CAF_ASSERT(what);
   return forward_msg(std::move(what->sender), what->mid,
@@ -66,13 +67,17 @@ bool forwarding_actor_proxy::remove_backlink(abstract_actor* x) {
   return false;
 }
 
-void forwarding_actor_proxy::kill_proxy(execution_unit* ctx, error rsn) {
+void forwarding_actor_proxy::kill_proxy(scheduler* sched, error rsn) {
   actor tmp;
   { // lifetime scope of guard
     std::unique_lock guard{broker_mtx_};
     broker_.swap(tmp); // manually break cycle
   }
-  cleanup(std::move(rsn), ctx);
+  cleanup(std::move(rsn), sched);
+}
+
+void forwarding_actor_proxy::force_close_mailbox() {
+  // nop
 }
 
 } // namespace caf

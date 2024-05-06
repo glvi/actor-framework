@@ -94,9 +94,7 @@ constexpr auto buffer_size = int32_t{4096}; // // 32 KB for elements of size 8.
 namespace caf::defaults::scheduler {
 
 constexpr auto policy = std::string_view{"stealing"};
-constexpr auto profiling_output_file = std::string_view{""};
 constexpr auto max_throughput = std::numeric_limits<size_t>::max();
-constexpr auto profiling_resolution = timespan(100'000'000);
 
 } // namespace caf::defaults::scheduler
 
@@ -172,5 +170,8 @@ constexpr auto http_default_port = uint16_t{80};
 
 /// The default port for HTTPS servers.
 constexpr auto https_default_port = uint16_t{443};
+
+/// The default buffer size for reading and writing octet streams.
+constexpr auto octet_stream_buffer_size = uint32_t{1024};
 
 } // namespace caf::defaults::net

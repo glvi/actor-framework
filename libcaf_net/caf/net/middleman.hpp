@@ -10,26 +10,23 @@
 
 #include "caf/actor_system.hpp"
 #include "caf/detail/net_export.hpp"
-#include "caf/detail/type_list.hpp"
 #include "caf/fwd.hpp"
+#include "caf/type_list.hpp"
+#include "caf/version.hpp"
 
 #include <thread>
 
 namespace caf::net {
 
 /// Provides a network backend for running protocol stacks.
-class CAF_NET_EXPORT middleman : public actor_system::module {
+class CAF_NET_EXPORT middleman : public actor_system_module {
 public:
   // -- constants --------------------------------------------------------------
 
   /// Identifies the network manager module.
-  actor_system::module::id_t id_v = actor_system::module::network_manager;
+  actor_system_module::id_t id_v = actor_system_module::network_manager;
 
   // -- member types -----------------------------------------------------------
-
-  using module = actor_system::module;
-
-  using module_ptr = actor_system::module_ptr;
 
   using void_fun_t = void (*)();
 
@@ -62,10 +59,15 @@ public:
 
   // -- factory functions ------------------------------------------------------
 
-  static module* make(actor_system& sys, detail::type_list<>);
-
   /// Adds module-specific options to the config before loading the module.
   static void add_module_options(actor_system_config& cfg);
+
+  /// Creates a new middleman instance.
+  static actor_system_module* make(actor_system& sys);
+
+  /// Checks whether the ABI of the middleman is compatible with the CAF core.
+  /// Otherwise, calls `abort`.
+  static void check_abi_compatibility(version::abi_token token);
 
   // -- properties -------------------------------------------------------------
 

@@ -7,12 +7,23 @@
 #include "caf/net/multiplexer.hpp"
 #include "caf/net/socket_event_layer.hpp"
 #include "caf/net/socket_manager.hpp"
+#include "caf/net/tcp_accept_socket.hpp"
+#include "caf/net/tcp_stream_socket.hpp"
 
 #include "caf/async/execution_context.hpp"
+#include "caf/detail/assert.hpp"
+#include "caf/detail/connection_acceptor.hpp"
 #include "caf/detail/connection_factory.hpp"
+#include "caf/log/net.hpp"
 #include "caf/settings.hpp"
 
 namespace caf::detail {
+
+/// Creates an accept handler for a connection acceptor.
+CAF_NET_EXPORT
+std::unique_ptr<net::socket_event_layer>
+make_accept_handler(connection_acceptor_ptr ptr, size_t max_connections,
+                    std::vector<strong_actor_ptr> monitored_actors = {});
 
 /// Accepts incoming clients with an Acceptor and handles them via a connection
 /// factory.
@@ -42,7 +53,7 @@ public:
     CAF_ASSERT(max_connections_ > 0);
   }
 
-  ~accept_handler() {
+  ~accept_handler() override {
     on_conn_close_.dispose();
     if (valid(acc_))
       close(acc_);
@@ -63,10 +74,11 @@ public:
   // -- implementation of socket_event_layer -----------------------------------
 
   error start(net::socket_manager* owner) override {
-    CAF_LOG_TRACE("");
+    // self_ref_ = owner->as_disposable(); ???
+    auto lg = log::net::trace("");
     owner_ = owner;
     if (auto err = factory_->start(owner)) {
-      CAF_LOG_DEBUG("factory_->start failed:" << err);
+      log::net::debug("factory_->start failed: {}", err);
       return err;
     }
     if (!monitored_actors_.empty()) {
@@ -90,14 +102,14 @@ public:
   }
 
   void handle_read_event() override {
-    CAF_LOG_TRACE("");
+    auto lg = log::net::trace("");
     CAF_ASSERT(owner_ != nullptr);
     if (open_connections_.size() == max_connections_) {
       owner_->deregister_reading();
     } else if (auto conn = accept(acc_)) {
       auto child = factory_->make(owner_->mpx_ptr(), std::move(*conn));
       if (!child) {
-        CAF_LOG_ERROR("factory failed to create a new child");
+        log::net::error("factory failed to create a new child");
         on_conn_close_.dispose();
         owner_->shutdown();
         return;
@@ -109,7 +121,7 @@ public:
       std::ignore = child->start();
     } else if (conn.error() == sec::unavailable_or_would_block) {
       // Encountered a "soft" error: simply try again later.
-      CAF_LOG_DEBUG("accept failed:" << conn.error());
+      log::net::debug("accept failed: {}", conn.error());
     } else {
       // Encountered a "hard" error: stop.
       abort(conn.error());
@@ -118,12 +130,12 @@ public:
   }
 
   void handle_write_event() override {
-    CAF_LOG_ERROR("connection_acceptor received write event");
+    log::net::error("connection_acceptor received write event");
     owner_->deregister_writing();
   }
 
   void abort(const error& reason) override {
-    CAF_LOG_ERROR("connection_acceptor aborts due to an error:" << reason);
+    log::net::error("connection_acceptor aborts due to an error: {}", reason);
     factory_->abort(reason);
     on_conn_close_.dispose();
     self_ref_ = nullptr;

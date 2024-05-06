@@ -7,6 +7,7 @@
 #include "caf/test/fixture/deterministic.hpp"
 #include "caf/test/test.hpp"
 
+#include "caf/event_based_actor.hpp"
 #include "caf/typed_actor.hpp"
 
 using namespace caf;
@@ -103,6 +104,26 @@ TEST("passing a value to the cell constructor overrides the default value") {
   }
 }
 
+TEST("actors can spawn stateful actors as children") {
+  auto dummy = sys.spawn(dummy_impl);
+  auto [parent, run_parent] = sys.spawn_inactive();
+  SECTION("no flags") {
+    auto uut = parent->spawn(actor_from_state<cell_state>, 42);
+    static_assert(std::is_same_v<decltype(uut), actor>);
+    inject().with(get_atom_v).from(dummy).to(uut);
+    expect<int>().with(42).from(uut).to(dummy);
+    inject().with(put_atom_v, 23).from(dummy).to(uut);
+    inject().with(get_atom_v).from(dummy).to(uut);
+    expect<int>().with(23).from(uut).to(dummy);
+  }
+  SECTION("linked") {
+    auto uut = parent->spawn<linked>(actor_from_state<cell_state>, 42);
+    static_assert(std::is_same_v<decltype(uut), actor>);
+    run_parent();
+    expect<exit_msg>().to(uut);
+  }
+}
+
 struct id_cell_state {
   explicit id_cell_state(event_based_actor* selfptr, uint64_t offset_init = 0)
     : self(selfptr), offset(offset_init) {
@@ -168,6 +189,43 @@ TEST("the state may take the self pointer as constructor argument") {
       expect<uint64_t>().with(uut->id() + 2).from(uut).to(dummy);
     }
   }
+}
+
+TEST("the state destructor may send messages") {
+  struct state {
+    state(event_based_actor* selfptr, actor buddy_hdl,
+          std::shared_ptr<bool> is_destroyed_flag)
+      : self(selfptr),
+        buddy(std::move(buddy_hdl)),
+        is_destroyed(std::move(is_destroyed_flag)) {
+      // nop
+    }
+
+    ~state() {
+      // CAF must guarantee that we have a strong reference to `self` here, even
+      // if the actor terminates because it became unreachable.
+      runnable::current().check_eq(self->ctrl()->strong_refs.load(), 1u);
+      self->mail(42).send(buddy);
+      *is_destroyed = true;
+    }
+
+    behavior make_behavior() {
+      return {
+        [](get_atom) { return 42; },
+      };
+    }
+
+    event_based_actor* self;
+    actor buddy;
+    std::shared_ptr<bool> is_destroyed;
+  };
+  auto dummy = sys.spawn(dummy_impl);
+  auto is_destroyed = std::make_shared<bool>(false);
+  auto uut = sys.spawn(actor_from_state<state>, dummy, is_destroyed);
+  check(!*is_destroyed);
+  uut = nullptr;
+  check(*is_destroyed);
+  expect<int>().with(42).to(dummy);
 }
 
 } // WITH_FIXTURE(test::fixture::deterministic)

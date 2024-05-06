@@ -11,17 +11,14 @@
 #include "caf/actor_system.hpp"
 #include "caf/config.hpp"
 #include "caf/default_attachable.hpp"
-#include "caf/execution_unit.hpp"
-#include "caf/logger.hpp"
+#include "caf/detail/assert.hpp"
+#include "caf/log/core.hpp"
+#include "caf/log/system.hpp"
 #include "caf/mailbox_element.hpp"
-#include "caf/message.hpp"
-#include "caf/scheduler/abstract_coordinator.hpp"
 #include "caf/system_messages.hpp"
 
 #include <atomic>
-#include <map>
 #include <mutex>
-#include <stdexcept>
 
 namespace caf {
 
@@ -38,7 +35,7 @@ abstract_actor::~abstract_actor() {
 // -- attachables ------------------------------------------------------------
 
 void abstract_actor::attach(attachable_ptr ptr) {
-  CAF_LOG_TRACE("");
+  auto lg = log::core::trace("");
   CAF_ASSERT(ptr != nullptr);
   error fail_state;
   auto attached = exclusive_critical_section([&] {
@@ -50,14 +47,14 @@ void abstract_actor::attach(attachable_ptr ptr) {
     return true;
   });
   if (!attached) {
-    CAF_LOG_DEBUG(
+    log::core::debug(
       "cannot attach functor to terminated actor: call immediately");
     ptr->actor_exited(fail_state, nullptr);
   }
 }
 
 size_t abstract_actor::detach(const attachable::token& what) {
-  CAF_LOG_TRACE("");
+  auto lg = log::core::trace("");
   std::unique_lock<std::mutex> guard{mtx_};
   return detach_impl(what);
 }
@@ -69,14 +66,15 @@ void abstract_actor::attach_impl(attachable_ptr& ptr) {
 
 size_t abstract_actor::detach_impl(const attachable::token& what,
                                    bool stop_on_hit, bool dry_run) {
-  CAF_LOG_TRACE(CAF_ARG(stop_on_hit) << CAF_ARG(dry_run));
+  auto lg = log::core::trace("stop_on_hit = {}, dry_run = {}", stop_on_hit,
+                             dry_run);
   size_t count = 0;
   auto i = &attachables_head_;
   while (*i != nullptr) {
     if ((*i)->matches(what)) {
       ++count;
       if (!dry_run) {
-        CAF_LOG_DEBUG("removed element");
+        log::core::debug("removed element");
         attachable_ptr next;
         next.swap((*i)->next);
         (*i).swap(next);
@@ -95,12 +93,12 @@ size_t abstract_actor::detach_impl(const attachable::token& what,
 // -- linking ------------------------------------------------------------------
 
 void abstract_actor::link_to(const actor_addr& other) {
-  CAF_LOG_TRACE(CAF_ARG(other));
+  auto lg = log::core::trace("other = {}", other);
   link_to(actor_cast<strong_actor_ptr>(other));
 }
 
 void abstract_actor::unlink_from(const actor_addr& other) {
-  CAF_LOG_TRACE(CAF_ARG(other));
+  auto lg = log::core::trace("other = {}", other);
   if (!other)
     return;
   if (auto hdl = actor_cast<strong_actor_ptr>(other)) {
@@ -140,43 +138,47 @@ actor_addr abstract_actor::address() const noexcept {
 
 // -- callbacks ----------------------------------------------------------------
 
-void abstract_actor::on_destroy() {
-  // nop
+void abstract_actor::on_unreachable() {
+  CAF_PUSH_AID_FROM_PTR(this);
+  cleanup(make_error(exit_reason::unreachable), nullptr);
 }
 
 void abstract_actor::on_cleanup(const error&) {
   // nop
 }
 
-bool abstract_actor::cleanup(error&& reason, execution_unit* host) {
-  CAF_LOG_TRACE(CAF_ARG(reason));
+bool abstract_actor::cleanup(error&& reason, scheduler* sched) {
+  auto lg = log::core::trace("reason = {}", reason);
   attachable_ptr head;
-  bool set_fail_state = exclusive_critical_section([&]() -> bool {
-    if (!getf(is_cleaned_up_flag)) {
+  auto fs = 0;
+  bool do_cleanup = exclusive_critical_section([&, this]() -> bool {
+    fs = flags();
+    if ((fs & is_terminated_flag) == 0) {
       // local actors pass fail_state_ as first argument
       if (&fail_state_ != &reason)
         fail_state_ = std::move(reason);
       attachables_head_.swap(head);
-      flags(flags() | is_terminated_flag | is_cleaned_up_flag);
-      on_cleanup(fail_state_);
+      flags(fs | is_terminated_flag);
       return true;
     }
     return false;
   });
-  if (!set_fail_state)
+  if (!do_cleanup)
     return false;
-  CAF_LOG_DEBUG("cleanup" << CAF_ARG(id()) << CAF_ARG(node())
-                          << CAF_ARG(fail_state_));
+  log::core::debug("cleanup: id = {}, node = {}, fail-state = {}", id(), node(),
+                   fail_state_);
   // send exit messages
   for (attachable* i = head.get(); i != nullptr; i = i->next.get())
-    i->actor_exited(fail_state_, host);
+    i->actor_exited(fail_state_, sched);
   // tell printer to purge its state for us if we ever used aout()
-  if (getf(abstract_actor::has_used_aout_flag)) {
-    auto pr = home_system().scheduler().printer();
-    pr->enqueue(make_mailbox_element(nullptr, make_message_id(), delete_atom_v,
+  if ((fs & has_used_aout_flag) != 0) {
+    auto pr = home_system().legacy_printer_actor();
+    pr->enqueue(make_mailbox_element(ctrl(), make_message_id(), delete_atom_v,
                                      id()),
-                nullptr);
+                sched);
   }
+  unregister_from_system();
+  on_cleanup(fail_state_);
   return true;
 }
 
@@ -189,7 +191,7 @@ void abstract_actor::register_at_system() {
     return;
   setf(is_registered_flag);
   [[maybe_unused]] auto count = home_system().registry().inc_running();
-  CAF_LOG_DEBUG("actor" << id() << "increased running count to" << count);
+  log::system::debug("actor {} increased running count to {}", id(), count);
 }
 
 void abstract_actor::unregister_from_system() {
@@ -197,12 +199,12 @@ void abstract_actor::unregister_from_system() {
     return;
   unsetf(is_registered_flag);
   [[maybe_unused]] auto count = home_system().registry().dec_running();
-  CAF_LOG_DEBUG("actor" << id() << "decreased running count to" << count);
+  log::system::debug("actor {} decreased running count to {}", id(), count);
 }
 
 void abstract_actor::add_link(abstract_actor* x) {
   // Add backlink on `x` first and add the local attachable only on success.
-  CAF_LOG_TRACE(CAF_ARG(x));
+  auto lg = log::core::trace("x = {}", x);
   CAF_ASSERT(x != nullptr);
   error fail_state;
   bool send_exit_immediately = false;
@@ -223,7 +225,7 @@ void abstract_actor::add_link(abstract_actor* x) {
 }
 
 void abstract_actor::remove_link(abstract_actor* x) {
-  CAF_LOG_TRACE(CAF_ARG(x));
+  auto lg = log::core::trace("x = {}", x);
   default_attachable::observe_token tk{x->address(), default_attachable::link};
   joined_exclusive_critical_section(this, x, [&] {
     x->remove_backlink(this);
@@ -233,7 +235,7 @@ void abstract_actor::remove_link(abstract_actor* x) {
 
 bool abstract_actor::add_backlink(abstract_actor* x) {
   // Called in an exclusive critical section.
-  CAF_LOG_TRACE(CAF_ARG(x));
+  auto lg = log::core::trace("x = {}", x);
   CAF_ASSERT(x);
   error fail_state;
   bool send_exit_immediately = false;
@@ -257,7 +259,7 @@ bool abstract_actor::add_backlink(abstract_actor* x) {
 
 bool abstract_actor::remove_backlink(abstract_actor* x) {
   // Called in an exclusive critical section.
-  CAF_LOG_TRACE(CAF_ARG(x));
+  auto lg = log::core::trace("x = {}", x);
   default_attachable::observe_token tk{x->address(), default_attachable::link};
   return detach_impl(tk, true) > 0;
 }

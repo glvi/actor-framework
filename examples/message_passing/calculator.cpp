@@ -18,9 +18,12 @@ using std::endl;
 using namespace caf;
 
 // --(rst-calculator-actor-begin)--
-using calculator_actor
-  = typed_actor<result<int32_t>(add_atom, int32_t, int32_t),
-                result<int32_t>(sub_atom, int32_t, int32_t)>;
+struct calculator_trait {
+  using signatures = type_list<result<int32_t>(add_atom, int32_t, int32_t),
+                               result<int32_t>(sub_atom, int32_t, int32_t)>;
+};
+
+using calculator_actor = typed_actor<calculator_trait>;
 // --(rst-calculator-actor-end)--
 
 // --(rst-prototypes-begin)--
@@ -79,13 +82,14 @@ template <class Handle, class... Ts>
 void tester(scoped_actor& self, const Handle& hdl, int32_t x, int32_t y,
             Ts&&... xs) {
   // test: x + y = z
-  self->request(hdl, infinite, add_atom_v, x, y)
+  self->mail(add_atom_v, x, y)
+    .request(hdl, infinite)
     .receive(
       [&self, x, y](int32_t z) { //
-        aout(self).println("{} + {} = {}", x, y, z);
+        self->println("{} + {} = {}", x, y, z);
       },
       [&self](const error& err) {
-        aout(self).println("AUT (actor under test) failed: {}", err);
+        self->println("AUT (actor under test) failed: {}", err);
       });
   tester(self, std::forward<Ts>(xs)...);
 }

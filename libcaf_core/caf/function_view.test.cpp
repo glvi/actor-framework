@@ -6,6 +6,7 @@
 
 #include "caf/test/test.hpp"
 
+#include "caf/actor_registry.hpp"
 #include "caf/actor_system.hpp"
 #include "caf/actor_system_config.hpp"
 #include "caf/typed_event_based_actor.hpp"
@@ -14,6 +15,7 @@
 #include <vector>
 
 using namespace caf;
+using namespace std::literals;
 
 namespace {
 
@@ -45,9 +47,7 @@ using doubler = typed_actor<result<int, int>(int)>;
 
 doubler::behavior_type simple_doubler() {
   return {
-    [](int x) -> result<int, int> {
-      return {x, x};
-    },
+    [](int x) -> result<int, int> { return {x, x}; },
   };
 }
 
@@ -59,8 +59,8 @@ struct cell_state {
 
 cell::behavior_type simple_cell(cell::stateful_pointer<cell_state> self) {
   return {
-    [=](put_atom, int val) { self->state.value = val; },
-    [=](get_atom) { return self->state.value; },
+    [=](put_atom, int val) { self->state().value = val; },
+    [=](get_atom) { return self->state().value; },
   };
 }
 
@@ -110,6 +110,14 @@ TEST("cell_function_view") {
   check_eq(f(get_atom_v), 0);
   f(put_atom_v, 1024);
   check_eq(f(get_atom_v), 1024);
+}
+
+TEST("calling function_view on an actor that quit") {
+  auto simple = system.spawn(simple_cell);
+  auto f = make_function_view(simple);
+  anon_send_exit(simple, exit_reason::user_shutdown);
+  system.registry().await_running_count_equal(1);
+  check_ne(f(get_atom_v), error{});
 }
 
 } // WITH_FIXTURE(fixture)

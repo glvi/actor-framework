@@ -10,7 +10,8 @@
 #include "caf/detail/socket_sys_aliases.hpp"
 #include "caf/detail/socket_sys_includes.hpp"
 #include "caf/expected.hpp"
-#include "caf/logger.hpp"
+#include "caf/format_to_error.hpp"
+#include "caf/log/net.hpp"
 #include "caf/message.hpp"
 #include "caf/sec.hpp"
 #include "caf/span.hpp"
@@ -48,8 +49,8 @@ ptrdiff_t read(pipe_socket x, byte_span buf) {
 expected<std::pair<pipe_socket, pipe_socket>> make_pipe() {
   socket_id pipefds[2];
   if (pipe(pipefds) != 0)
-    return make_error(sec::network_syscall_failed, "pipe",
-                      last_socket_error_as_string());
+    return format_to_error(sec::network_syscall_failed, "make_pipe failed: {}",
+                           last_socket_error_as_string());
   auto guard = detail::scope_guard{[&]() noexcept {
     close(socket{pipefds[0]});
     close(socket{pipefds[1]});
@@ -65,13 +66,13 @@ expected<std::pair<pipe_socket, pipe_socket>> make_pipe() {
 }
 
 ptrdiff_t write(pipe_socket x, const_byte_span buf) {
-  CAF_LOG_TRACE(CAF_ARG2("socket", x.id) << CAF_ARG2("bytes", buf.size()));
+  auto lg = log::net::trace("socket = {}, bytes = {}", x.id, buf.size());
   return ::write(x.id, reinterpret_cast<socket_send_ptr>(buf.data()),
                  buf.size());
 }
 
 ptrdiff_t read(pipe_socket x, byte_span buf) {
-  CAF_LOG_TRACE(CAF_ARG2("socket", x.id) << CAF_ARG2("bytes", buf.size()));
+  auto lg = log::net::trace("socket = {}, bytes = {}", x.id, buf.size());
   return ::read(x.id, reinterpret_cast<socket_recv_ptr>(buf.data()),
                 buf.size());
 }

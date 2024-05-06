@@ -4,7 +4,8 @@
 
 #pragma once
 
-#include "caf/async/fwd.hpp"
+#include "caf/detail/net_export.hpp"
+#include "caf/flow/fwd.hpp"
 #include "caf/fwd.hpp"
 #include "caf/intrusive_ptr.hpp"
 #include "caf/type_id.hpp"
@@ -48,6 +49,10 @@ struct udp_datagram_socket;
 
 // -- smart pointer aliases ----------------------------------------------------
 
+CAF_NET_EXPORT void intrusive_ptr_add_ref(socket_manager* ptr) noexcept;
+
+CAF_NET_EXPORT void intrusive_ptr_release(socket_manager* ptr) noexcept;
+
 using multiplexer_ptr = intrusive_ptr<multiplexer>;
 using socket_manager_ptr = intrusive_ptr<socket_manager>;
 
@@ -74,8 +79,7 @@ template <class Handle>
 using actor_shell_ptr_t = typename actor_shell_ptr_oracle<Handle>::type;
 
 template <class Handle = caf::actor>
-actor_shell_ptr_t<Handle>
-make_actor_shell(actor_system&, async::execution_context_ptr);
+actor_shell_ptr_t<Handle> make_actor_shell(socket_manager*);
 
 } // namespace caf::net
 
@@ -107,12 +111,10 @@ namespace caf::net::web_socket {
 class client;
 class frame;
 class framing;
+class has_on_request;
 class lower_layer;
 class server;
 class upper_layer;
-
-template <class Trait, class... Ts>
-class server_factory;
 
 enum class status : uint16_t;
 
@@ -125,6 +127,7 @@ class lower_layer;
 class request;
 class request_header;
 class responder;
+class response;
 class response_header;
 class route;
 class router;

@@ -12,19 +12,23 @@
 #include "caf/actor_registry.hpp"
 #include "caf/actor_system_config.hpp"
 #include "caf/after.hpp"
+#include "caf/anon_mail.hpp"
 #include "caf/config.hpp"
 #include "caf/defaults.hpp"
+#include "caf/detail/actor_system_access.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/latch.hpp"
 #include "caf/detail/prometheus_broker.hpp"
+#include "caf/format_to_error.hpp"
 #include "caf/function_view.hpp"
 #include "caf/init_global_meta_objects.hpp"
 #include "caf/log/system.hpp"
 #include "caf/logger.hpp"
 #include "caf/node_id.hpp"
-#include "caf/others.hpp"
 #include "caf/scoped_actor.hpp"
 #include "caf/sec.hpp"
 #include "caf/send.hpp"
+#include "caf/telemetry/metric_registry.hpp"
 #include "caf/thread_owner.hpp"
 
 #include <cstring>
@@ -81,7 +85,7 @@ auto make_metrics(telemetry::metric_registry& reg) {
 template <class T>
 class mm_impl : public middleman {
 public:
-  mm_impl(actor_system& ref) : middleman(ref), backend_(&ref) {
+  mm_impl(actor_system& ref) : middleman(ref), backend_(ref) {
     // nop
   }
 
@@ -95,7 +99,7 @@ private:
 
 class prometheus_scraping : public middleman::background_task {
 public:
-  prometheus_scraping(actor_system& sys) : mpx_(&sys) {
+  prometheus_scraping(actor_system& sys) : mpx_(sys) {
     // nop
   }
 
@@ -130,7 +134,7 @@ public:
     broker_ = mpx_.system().spawn_impl<impl, hidden>(cfg, std::move(dptr));
     detail::latch sync{1};
     auto run_mpx = [this, sync_ptr{&sync}] {
-      CAF_LOG_TRACE("");
+      auto lg = log::io::trace("");
       mpx_.thread_id(std::this_thread::get_id());
       sync_ptr->count_down();
       mpx_.run();
@@ -138,7 +142,7 @@ public:
     thread_ = mpx_.system().launch_thread("caf.io.prom", thread_owner::system,
                                           run_mpx);
     sync.wait();
-    CAF_LOG_INFO("expose Prometheus metrics at port" << actual_port);
+    log::io::info("expose Prometheus metrics at port {}", actual_port);
     return actual_port;
   }
 
@@ -207,8 +211,14 @@ void middleman::add_module_options(actor_system_config& cfg) {
               defaults::middleman::connection_timeout);
 }
 
-actor_system::module* middleman::make(actor_system& sys, detail::type_list<>) {
+actor_system_module* middleman::make(actor_system& sys) {
   return new mm_impl<network::default_multiplexer>(sys);
+}
+
+void middleman::check_abi_compatibility(version::abi_token token) {
+  if (static_cast<int>(token) != CAF_VERSION_MAJOR) {
+    CAF_CRITICAL("CAF ABI token mismatch");
+  }
 }
 
 middleman::middleman(actor_system& sys) : system_(sys) {
@@ -247,7 +257,7 @@ expected<node_id> middleman::connect(std::string host, uint16_t port) {
 expected<uint16_t> middleman::publish(const strong_actor_ptr& whom,
                                       std::set<std::string> sigs, uint16_t port,
                                       const char* cstr, bool ru) {
-  CAF_LOG_TRACE(CAF_ARG(whom) << CAF_ARG(sigs) << CAF_ARG(port));
+  auto lg = log::io::trace("whom = {}, sigs = {}, port = {}", whom, sigs, port);
   if (!whom)
     return sec::cannot_publish_invalid_actor;
   std::string in;
@@ -258,7 +268,7 @@ expected<uint16_t> middleman::publish(const strong_actor_ptr& whom,
 }
 
 expected<void> middleman::unpublish(const actor_addr& whom, uint16_t port) {
-  CAF_LOG_TRACE(CAF_ARG(whom) << CAF_ARG(port));
+  auto lg = log::io::trace("whom = {}, port = {}", whom, port);
   auto f = make_function_view(actor_handle());
   return f(unpublish_atom_v, whom, port);
 }
@@ -266,44 +276,48 @@ expected<void> middleman::unpublish(const actor_addr& whom, uint16_t port) {
 expected<strong_actor_ptr> middleman::remote_actor(std::set<std::string> ifs,
                                                    std::string host,
                                                    uint16_t port) {
-  CAF_LOG_TRACE(CAF_ARG(ifs) << CAF_ARG(host) << CAF_ARG(port));
+  auto lg = log::io::trace("ifs = {}, host = {}, port = {}", ifs, host, port);
   auto f = make_function_view(actor_handle());
   auto res = f(connect_atom_v, std::move(host), port);
   if (!res)
     return std::move(res.error());
   strong_actor_ptr ptr = std::move(std::get<1>(*res));
   if (!ptr)
-    return make_error(sec::no_actor_published_at_port, port);
+    return format_to_error(sec::no_actor_published_at_port,
+                           "no actor published at port {} on host {}", port);
   if (!system().assignable(std::get<2>(*res), ifs))
-    return make_error(sec::unexpected_actor_messaging_interface, std::move(ifs),
-                      std::move(std::get<2>(*res)));
+    return format_to_error(sec::unexpected_actor_messaging_interface,
+                           "expected interface {}, got {}", std::move(ifs),
+                           std::get<2>(*res));
   return ptr;
 }
 
 strong_actor_ptr middleman::remote_lookup(std::string name,
                                           const node_id& nid) {
-  CAF_LOG_TRACE(CAF_ARG(name) << CAF_ARG(nid));
+  auto lg = log::io::trace("name = {}, nid = {}", name, nid);
   if (system().node() == nid)
     return system().registry().get(name);
   auto basp = named_broker<basp_broker>("BASP");
   strong_actor_ptr result;
   scoped_actor self{system(), true};
   auto id = basp::header::config_server_id;
-  self->send(basp, forward_atom_v, nid, id,
-             make_message(registry_lookup_atom_v, std::move(name)));
-  self->receive(
-    [&](strong_actor_ptr& addr) { result = std::move(addr); },
-    others >> []([[maybe_unused]] message& msg) -> skippable_result {
-      log::system::error("received unexpected remote_lookup result: {}", msg);
-      return message{};
-    },
-    after(std::chrono::minutes(5)) >>
-      [&] { CAF_LOG_WARNING("remote_lookup timed out"); });
+  self
+    ->mail(forward_atom_v, nid, id,
+           make_message(registry_lookup_atom_v, std::move(name)))
+    .send(basp);
+  self->receive([&](strong_actor_ptr& addr) { result = std::move(addr); },
+                [](message& msg) {
+                  log::system::error(
+                    "received unexpected remote_lookup result: {}", msg);
+                },
+                after(std::chrono::minutes(5)) >> [] { //
+                  log::io::warning("remote_lookup timed out");
+                });
   return result;
 }
 
 void middleman::start() {
-  CAF_LOG_TRACE("");
+  auto lg = log::io::trace("");
   // Consider using net::middleman for prometheus if caf-net is available.
   if (auto prom = get_if<config_value::dictionary>(
         &system().config(), "caf.middleman.prometheus-http")) {
@@ -319,7 +333,7 @@ void middleman::start() {
   CAF_ASSERT(backend_supervisor_ != nullptr);
   detail::latch sync{1};
   auto run_backend = [this, sync_ptr{&sync}] {
-    CAF_LOG_TRACE("");
+    auto lg = log::io::trace("");
     backend().thread_id(std::this_thread::get_id());
     sync_ptr->count_down();
     backend().run();
@@ -333,9 +347,9 @@ void middleman::start() {
 }
 
 void middleman::stop() {
-  CAF_LOG_TRACE("");
+  auto lg = log::io::trace("");
   backend().dispatch([this] {
-    CAF_LOG_TRACE("");
+    auto lg = log::io::trace("");
     // managers_ will be modified while we are stopping each manager,
     // because each manager will call remove(...)
     for (auto& kvp : named_brokers_) {
@@ -362,14 +376,12 @@ void middleman::stop() {
 
 void middleman::init(actor_system_config& cfg) {
   // Compute and set ID for this network node.
-  auto this_node = node_id::default_data::local(cfg);
-  system().node_.swap(this_node);
-  // Give config access to slave mode implementation.
-  cfg.slave_mode_fun = &middleman::exec_slave_mode;
+  detail::actor_system_access access{system()};
+  access.node(node_id::default_data::local(cfg));
 }
 
-actor_system::module::id_t middleman::id() const {
-  return module::middleman;
+actor_system_module::id_t middleman::id() const {
+  return actor_system_module::middleman;
 }
 
 void* middleman::subtype_ptr() {
@@ -378,12 +390,12 @@ void* middleman::subtype_ptr() {
 
 void middleman::monitor(const node_id& node, const actor_addr& observer) {
   auto basp = named_broker<basp_broker>("BASP");
-  anon_send(basp, monitor_atom_v, node, observer);
+  anon_mail(monitor_atom_v, node, observer).send(basp);
 }
 
 void middleman::demonitor(const node_id& node, const actor_addr& observer) {
   auto basp = named_broker<basp_broker>("BASP");
-  anon_send(basp, demonitor_atom_v, node, observer);
+  anon_mail(demonitor_atom_v, node, observer).send(basp);
 }
 
 middleman::~middleman() {
@@ -392,11 +404,6 @@ middleman::~middleman() {
 
 middleman_actor middleman::actor_handle() {
   return manager_;
-}
-
-int middleman::exec_slave_mode(actor_system&, const actor_system_config&) {
-  // TODO
-  return 0;
 }
 
 } // namespace caf::io

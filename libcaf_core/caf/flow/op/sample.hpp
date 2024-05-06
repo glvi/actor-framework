@@ -5,6 +5,7 @@
 #pragma once
 
 #include "caf/cow_vector.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/flow/observable_decl.hpp"
 #include "caf/flow/observer.hpp"
 #include "caf/flow/op/cold.hpp"
@@ -21,7 +22,7 @@ struct sample_input_t {};
 
 struct sample_emit_t {};
 
-/// The subsciption for the `sample` operator.
+/// The subscription for the `sample` operator.
 template <class T>
 class sample_sub : public subscription::impl_base {
 public:

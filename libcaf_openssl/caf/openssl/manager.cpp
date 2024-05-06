@@ -19,6 +19,7 @@ CAF_POP_WARNINGS
 #include "caf/actor_system.hpp"
 #include "caf/actor_system_config.hpp"
 #include "caf/expected.hpp"
+#include "caf/log/openssl.hpp"
 #include "caf/raise_error.hpp"
 #include "caf/scoped_actor.hpp"
 
@@ -66,6 +67,16 @@ void dynlock_destroy(CRYPTO_dynlock_value* dynlock, const char*, int) {
 
 namespace caf::openssl {
 
+namespace {
+
+bool is_nonempty_string(const actor_system_config& cfg, std::string_view key) {
+  if (auto str = get_if<std::string>(&cfg, key))
+    return !str->empty();
+  return false;
+}
+
+} // namespace
+
 manager::~manager() {
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
   std::lock_guard<std::mutex> lock{init_mutex};
@@ -81,13 +92,13 @@ manager::~manager() {
 }
 
 void manager::start() {
-  CAF_LOG_TRACE("");
+  auto lg = log::openssl::trace("");
   manager_ = make_middleman_actor(
     system(), system().middleman().named_broker<io::basp_broker>("BASP"));
 }
 
 void manager::stop() {
-  CAF_LOG_TRACE("");
+  auto lg = log::openssl::trace("");
   scoped_actor self{system(), true};
   self->send_exit(manager_, exit_reason::kill);
   if (!get_or(config(), "caf.middleman.attach-utility-actors", false))
@@ -101,9 +112,10 @@ void manager::init(actor_system_config&) {
   SSL_library_init();
   SSL_load_error_strings();
   if (authentication_enabled()) {
-    if (system().config().openssl_certificate.empty())
+    auto& cfg = system().config();
+    if (!is_nonempty_string(cfg, "caf.openssl.certificate"))
       CAF_RAISE_ERROR("No certificate configured for SSL endpoint");
-    if (system().config().openssl_key.empty())
+    if (!is_nonempty_string(cfg, "caf.openssl.key"))
       CAF_RAISE_ERROR("No private key configured for SSL endpoint");
   }
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
@@ -120,7 +132,7 @@ void manager::init(actor_system_config&) {
 #endif
 }
 
-actor_system::module::id_t manager::id() const {
+actor_system_module::id_t manager::id() const {
   return openssl_manager;
 }
 
@@ -130,44 +142,41 @@ void* manager::subtype_ptr() {
 
 bool manager::authentication_enabled() {
   auto& cfg = system().config();
-  return !cfg.openssl_certificate.empty() || !cfg.openssl_key.empty()
-         || !cfg.openssl_passphrase.empty() || !cfg.openssl_capath.empty()
-         || !cfg.openssl_cafile.empty();
+  return is_nonempty_string(cfg, "caf.openssl.certificate")
+         || is_nonempty_string(cfg, "caf.openssl.key")
+         || is_nonempty_string(cfg, "caf.openssl.passphrase")
+         || is_nonempty_string(cfg, "caf.openssl.capath")
+         || is_nonempty_string(cfg, "caf.openssl.cafile");
 }
 
 void manager::add_module_options(actor_system_config& cfg) {
   // Add options to the CLI parser.
   config_option_adder(cfg.custom_options(), "caf.openssl")
-    .add<std::string>(cfg.openssl_certificate, "certificate",
+    .add<std::string>("certificate",
                       "path to the PEM-formatted certificate file")
-    .add<std::string>(cfg.openssl_key, "key",
-                      "path to the private key file for this node")
-    .add<std::string>(cfg.openssl_passphrase, "passphrase",
-                      "passphrase to decrypt the private key")
+    .add<std::string>("key", "path to the private key file for this node")
+    .add<std::string>("passphrase", "passphrase to decrypt the private key")
     .add<std::string>(
-      cfg.openssl_capath, "capath",
-      "path to an OpenSSL-style directory of trusted certificates")
+      "capath", "path to an OpenSSL-style directory of trusted certificates")
     .add<std::string>(
-      cfg.openssl_cafile, "cafile",
-      "path to a file of concatenated PEM-formatted certificates")
+      "cafile", "path to a file of concatenated PEM-formatted certificates")
     .add<std::string>("cipher-list",
                       "colon-separated list of OpenSSL cipher strings to use");
-  // Add the defaults to the config so they show up in --dump-config.
-  auto& grp = put_dictionary(cfg.content, "caf.openssl");
-  put_missing(grp, "certificate", cfg.openssl_certificate);
-  put_missing(grp, "key", cfg.openssl_key);
-  put_missing(grp, "passphrase", cfg.openssl_passphrase);
-  put_missing(grp, "capath", cfg.openssl_capath);
-  put_missing(grp, "cafile", cfg.openssl_cafile);
 }
 
-actor_system::module* manager::make(actor_system& sys, detail::type_list<>) {
+actor_system_module* manager::make(actor_system& sys) {
   if (!sys.has_middleman())
     CAF_RAISE_ERROR("Cannot start OpenSSL module without middleman.");
   auto ptr = &sys.middleman().backend();
   if (dynamic_cast<io::network::default_multiplexer*>(ptr) == nullptr)
     CAF_RAISE_ERROR("Cannot start OpenSSL module without default backend.");
   return new manager(sys);
+}
+
+void manager::check_abi_compatibility(version::abi_token token) {
+  if (static_cast<int>(token) != CAF_VERSION_MAJOR) {
+    CAF_CRITICAL("CAF ABI token mismatch");
+  }
 }
 
 void manager::init_global_meta_objects() {

@@ -5,6 +5,7 @@
 #include "caf/binary_serializer.hpp"
 
 #include "caf/actor_system.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/ieee_754.hpp"
 #include "caf/detail/network_order.hpp"
 #include "caf/detail/squashed_int.hpp"
@@ -23,12 +24,6 @@ auto int_value(binary_serializer& sink, T x) {
 }
 
 } // namespace
-
-binary_serializer::binary_serializer(actor_system& sys,
-                                     byte_buffer& buf) noexcept
-  : binary_serializer(sys.dummy_execution_unit(), buf) {
-  // nop
-}
 
 void binary_serializer::skip(size_t num_bytes) {
   auto remaining = buf_.size() - write_pos_;

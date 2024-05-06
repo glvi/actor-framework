@@ -6,6 +6,7 @@
 
 #include "caf/config.hpp"
 #include "caf/detail/core_export.hpp"
+#include "caf/detail/critical.hpp"
 #include "caf/fwd.hpp"
 #include "caf/intrusive_ptr.hpp"
 #include "caf/node_id.hpp"
@@ -114,7 +115,7 @@ public:
     return nid;
   }
 
-  bool enqueue(mailbox_element_ptr what, execution_unit* host);
+  bool enqueue(mailbox_element_ptr what, scheduler* sched);
 
   /// @endcond
 };
@@ -167,19 +168,18 @@ inline bool operator!=(const abstract_actor* x, const strong_actor_ptr& y) {
 using weak_actor_ptr = weak_intrusive_ptr<actor_control_block>;
 
 CAF_CORE_EXPORT error_code<sec> load_actor(strong_actor_ptr& storage,
-                                           execution_unit*, actor_id aid,
+                                           actor_system*, actor_id aid,
                                            const node_id& nid);
 
 CAF_CORE_EXPORT error_code<sec> save_actor(strong_actor_ptr& storage,
-                                           execution_unit*, actor_id aid,
-                                           const node_id& nid);
+                                           actor_id aid, const node_id& nid);
 
 template <class Inspector>
 auto context_of(Inspector* f) -> decltype(f->context()) {
   return f->context();
 }
 
-inline execution_unit* context_of(void*) {
+inline auto context_of(void*) {
   return nullptr;
 }
 
@@ -203,7 +203,7 @@ bool inspect(Inspector& f, strong_actor_ptr& x) {
     }
   }
   auto load_cb = [&] { return load_actor(x, context_of(&f), aid, nid); };
-  auto save_cb = [&] { return save_actor(x, context_of(&f), aid, nid); };
+  auto save_cb = [&] { return save_actor(x, aid, nid); };
   return f.object(x)
     .pretty_name("actor")
     .on_load(load_cb)

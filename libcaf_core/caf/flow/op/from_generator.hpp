@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "caf/detail/assert.hpp"
 #include "caf/detail/type_list.hpp"
 #include "caf/flow/observer.hpp"
 #include "caf/flow/op/hot.hpp"
@@ -131,9 +132,9 @@ private:
 };
 
 template <class Generator, class... Steps>
-using from_generator_output_t =            //
-  typename detail::tl_back_t<              //
-    detail::type_list<Generator, Steps...> //
+using from_generator_output_t =    //
+  typename detail::tl_back_t<      //
+    type_list<Generator, Steps...> //
     >::output_type;
 
 /// Converts a `Generator` to an @ref observable.

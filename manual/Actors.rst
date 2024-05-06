@@ -87,8 +87,6 @@ details that we only mention here for the sake of completeness).
 +-------------------------------------+--------------------------------------------------------+
 | ``actor_system& home_system()``     | Returns the system that spawned this actor.            |
 +-------------------------------------+--------------------------------------------------------+
-| ``execution_unit* context()``       | Returns underlying thread or current scheduler worker. |
-+-------------------------------------+--------------------------------------------------------+
 |                                     |                                                        |
 +-------------------------------------+--------------------------------------------------------+
 | **Actor Management**                |                                                        |
@@ -103,7 +101,7 @@ details that we only mention here for the sake of completeness).
 +-------------------------------------+--------------------------------------------------------+
 | ``spawn(F fun, xs...)``             | Spawns a new actor from ``fun``.                       |
 +-------------------------------------+--------------------------------------------------------+
-| ``spawn<T>(xs...)``                 | Spawns a new actor of type ``T``.                      |
+| ``spawn(actor_from_state<T>, ...)`` | Spawns a new actor from the state class ``T``.         |
 +-------------------------------------+--------------------------------------------------------+
 |                                     |                                                        |
 +-------------------------------------+--------------------------------------------------------+
@@ -520,7 +518,7 @@ loops.
      [&](int value1) {
        self->receive (
          [&](float value2) {
-           aout(self).println("{} => {}", value1, value2);
+           self->println("{} => {}", value1, value2);
          }
        );
      },

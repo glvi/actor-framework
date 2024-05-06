@@ -11,7 +11,7 @@
 #include "caf/flow/observer.hpp"
 #include "caf/flow/op/hot.hpp"
 #include "caf/flow/subscription.hpp"
-#include "caf/logger.hpp"
+#include "caf/log/core.hpp"
 #include "caf/sec.hpp"
 
 #include <utility>
@@ -54,7 +54,7 @@ public:
   }
 
   void dispose() override {
-    CAF_LOG_TRACE("");
+    auto lg = log::core::trace("");
     if (disposed_)
       return;
     disposed_ = true;
@@ -62,7 +62,7 @@ public:
   }
 
   void cancel() override {
-    CAF_LOG_TRACE("");
+    auto lg = log::core::trace("");
     if (disposed_)
       return;
     disposed_ = true;
@@ -77,7 +77,7 @@ public:
   }
 
   void request(size_t n) override {
-    CAF_LOG_TRACE(CAF_ARG(n));
+    auto lg = log::core::trace("n = {}", n);
     if (demand_ != 0) {
       demand_ += n;
     } else {
@@ -93,9 +93,9 @@ public:
   }
 
   void on_producer_wakeup() override {
-    CAF_LOG_TRACE("");
+    auto lg = log::core::trace("");
     parent_->schedule_fn([ptr = strong_this()] {
-      CAF_LOG_TRACE("");
+      auto lg = log::core::trace("");
       if (!ptr->disposed_) {
         ptr->running_ = true;
         ptr->do_run();
@@ -152,7 +152,7 @@ private:
   }
 
   void do_run() {
-    CAF_LOG_TRACE("");
+    auto lg = log::core::trace("");
     auto guard = detail::scope_guard([this]() noexcept { running_ = false; });
     CAF_ASSERT(out_);
     CAF_ASSERT(buf_);
@@ -232,13 +232,13 @@ public:
   // -- implementation of observable_impl<T> -----------------------------------
 
   disposable subscribe(observer<T> out) override {
-    CAF_LOG_TRACE("");
+    auto lg = log::core::trace("");
     CAF_ASSERT(out);
     if (resource_) {
       if (auto buf = resource_.try_open()) {
         resource_ = nullptr;
         using buffer_type = typename resource_type::buffer_type;
-        CAF_LOG_DEBUG("add subscriber");
+        log::core::debug("add subscriber");
         using impl_t = from_resource_sub<buffer_type>;
         auto ptr = super::parent_->add_child(std::in_place_type<impl_t>, buf,
                                              out);
@@ -248,12 +248,12 @@ public:
         return ptr->as_disposable();
       }
       resource_ = nullptr;
-      CAF_LOG_WARNING("failed to open an async resource");
+      log::core::warning("failed to open an async resource");
       return super::fail_subscription(
         out, make_error(sec::cannot_open_resource,
                         "failed to open an async resource"));
     }
-    CAF_LOG_WARNING("may only subscribe once to an async resource");
+    log::core::warning("may only subscribe once to an async resource");
     return super::fail_subscription(
       out, make_error(sec::too_many_observers,
                       "may only subscribe once to an async resource"));

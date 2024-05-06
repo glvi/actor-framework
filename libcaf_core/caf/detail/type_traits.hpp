@@ -263,9 +263,12 @@ struct callable_trait<R(Ts...)> {
   /// Tells whether the function takes mutable references as argument.
   static constexpr bool mutates_args = (is_mutable_ref<Ts>::value || ...);
 
+  /// A view type for passing a ::message to this function with mutable access.
+  using mutable_message_view_type = typed_message_view<std::decay_t<Ts>...>;
+
   /// Selects a suitable view type for passing a ::message to this function.
   using message_view_type
-    = std::conditional_t<mutates_args, typed_message_view<std::decay_t<Ts>...>,
+    = std::conditional_t<mutates_args, mutable_message_view_type,
                          const_typed_message_view<std::decay_t<Ts>...>>;
 
   /// Tells the number of arguments of the function.
@@ -316,6 +319,7 @@ template <class T,
                        || std::is_member_function_pointer_v<T>,
           bool HasApplyOp = has_apply_operator<T>::value>
 struct get_callable_trait_helper {
+  static constexpr bool valid = true;
   using type = callable_trait<T>;
   using result_type = typename type::result_type;
   using arg_types = typename type::arg_types;
@@ -327,6 +331,7 @@ struct get_callable_trait_helper {
 // assume functor providing operator()
 template <class T>
 struct get_callable_trait_helper<T, false, true> {
+  static constexpr bool valid = true;
   using type = callable_trait<decltype(&T::operator())>;
   using result_type = typename type::result_type;
   using arg_types = typename type::arg_types;
@@ -336,7 +341,9 @@ struct get_callable_trait_helper<T, false, true> {
 };
 
 template <class T>
-struct get_callable_trait_helper<T, false, false> {};
+struct get_callable_trait_helper<T, false, false> {
+  static constexpr bool valid = false;
+};
 
 /// Gets a callable trait for `T,` where `T` is a function object type,
 /// i.e., a function, member function, or a class providing
@@ -486,6 +493,8 @@ CAF_HAS_ALIAS_TRAIT(key_type);
 
 CAF_HAS_ALIAS_TRAIT(mapped_type);
 
+CAF_HAS_ALIAS_TRAIT(handle_type);
+
 // -- constexpr functions for use in enable_if & friends -----------------------
 
 /// Checks whether T behaves like `std::map`.
@@ -521,8 +530,8 @@ template <class T>
 struct has_size {
 private:
   template <class List>
-  static auto sfinae(List* l)
-    -> decltype(static_cast<void>(l->size()), std::true_type());
+  static auto
+  sfinae(List* l) -> decltype(static_cast<void>(l->size()), std::true_type());
 
   template <class U>
   static auto sfinae(...) -> std::false_type;
@@ -573,71 +582,6 @@ public:
 
 template <class T>
 inline constexpr bool has_emplace_back_v = has_emplace_back<T>::value;
-
-template <class T>
-class has_call_error_handler {
-private:
-  template <class Actor>
-  static auto sfinae(Actor* self)
-    -> decltype(self->call_error_handler(std::declval<error&>()),
-                std::true_type());
-
-  template <class U>
-  static auto sfinae(...) -> std::false_type;
-
-  using sfinae_type = decltype(sfinae<T>(nullptr));
-
-public:
-  static constexpr bool value = sfinae_type::value;
-};
-
-template <class T>
-inline constexpr bool has_call_error_handler_v
-  = has_call_error_handler<T>::value;
-
-template <class T>
-class has_add_awaited_response_handler {
-private:
-  template <class Actor>
-  static auto sfinae(Actor* self)
-    -> decltype(self->add_awaited_response_handler(std::declval<message_id>(),
-                                                   std::declval<behavior&>()),
-                std::true_type());
-
-  template <class U>
-  static auto sfinae(...) -> std::false_type;
-
-  using sfinae_type = decltype(sfinae<T>(nullptr));
-
-public:
-  static constexpr bool value = sfinae_type::value;
-};
-
-template <class T>
-inline constexpr bool has_add_awaited_response_handler_v
-  = has_add_awaited_response_handler<T>::value;
-
-template <class T>
-class has_add_multiplexed_response_handler {
-private:
-  template <class Actor>
-  static auto sfinae(Actor* self)
-    -> decltype(self->add_multiplexed_response_handler(
-                  std::declval<message_id>(), std::declval<behavior&>()),
-                std::true_type());
-
-  template <class U>
-  static auto sfinae(...) -> std::false_type;
-
-  using sfinae_type = decltype(sfinae<T>(nullptr));
-
-public:
-  static constexpr bool value = sfinae_type::value;
-};
-
-template <class T>
-inline constexpr bool has_add_multiplexed_response_handler_v
-  = has_add_multiplexed_response_handler<T>::value;
 
 /// Checks whether T behaves like `std::vector`, `std::list`, or `std::set`.
 template <class T>
@@ -703,7 +647,7 @@ private:
   using result_type = decltype(sfinae(std::declval<Inspector&>()));
 
 public:
-  static constexpr bool value = std::is_same_v<result_type, execution_unit*>;
+  static constexpr bool value = std::is_same_v<result_type, scheduler*>;
 };
 
 /// Checks whether `T` provides an `inspect` overload for `Inspector`.
@@ -711,8 +655,8 @@ template <class Inspector, class T>
 class has_inspect_overload {
 private:
   template <class U>
-  static auto sfinae(Inspector& x, U& y)
-    -> decltype(inspect(x, y), std::true_type{});
+  static auto
+  sfinae(Inspector& x, U& y) -> decltype(inspect(x, y), std::true_type{});
 
   static std::false_type sfinae(Inspector&, ...);
 
@@ -733,8 +677,8 @@ template <class Inspector, class T>
 class has_builtin_inspect {
 private:
   template <class I, class U>
-  static auto sfinae(I& f, U& x)
-    -> decltype(f.builtin_inspect(x), std::true_type{});
+  static auto
+  sfinae(I& f, U& x) -> decltype(f.builtin_inspect(x), std::true_type{});
 
   template <class I>
   static std::false_type sfinae(I&, ...);
@@ -756,8 +700,8 @@ template <class Inspector, class T>
 class accepts_opaque_value {
 private:
   template <class F, class U>
-  static auto sfinae(F* f, U* x)
-    -> decltype(f->opaque_value(*x), std::true_type{});
+  static auto
+  sfinae(F* f, U* x) -> decltype(f->opaque_value(*x), std::true_type{});
 
   static std::false_type sfinae(...);
 
@@ -859,12 +803,13 @@ struct has_init_host_system {
 // GNU g++ 8.5.0 (almalinux-8) has a known bug where [[nodiscard] values are
 // reported as warnings, even in unevaluated context.
 // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=89070
-#if !defined(__clang__) && defined(__GNUC__)
-  CAF_PUSH_UNUSED_RESULT_WARNING
+#ifdef CAF_GCC
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wunused-result"
 #endif
   template <class U>
   static auto sfinae(U*) -> decltype(U::init_host_system(), std::true_type());
-#if !defined(__clang__) && defined(__GNUC__)
+#ifdef CAF_GCC
   CAF_POP_WARNINGS
 #endif
 

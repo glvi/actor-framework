@@ -38,6 +38,8 @@ public:
 
   friend class actor_system;
 
+  friend class detail::actor_system_access;
+
   friend class trace_exit_guard;
 
   friend class log::event_sender;
@@ -182,7 +184,11 @@ public:
         Ts&&... args) {
     auto* instance = current_logger();
     if (instance && instance->accepts(log::level::trace, component)) {
-      auto msg = "ENTRY " + std::string{fmt_str.value};
+      auto msg = std::string{"ENTRY"};
+      if (!fmt_str.value.empty()) {
+        msg += ' ';
+        msg += fmt_str.value;
+      }
       auto event = log::event::make(log::level::trace, component,
                                     fmt_str.location, thread_local_aid(), msg,
                                     std::forward<Ts>(args)...);

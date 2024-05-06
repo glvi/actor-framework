@@ -6,10 +6,12 @@
 
 #include "caf/config_value.hpp"
 #include "caf/detail/append_hex.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/overload.hpp"
 #include "caf/detail/parse.hpp"
 #include "caf/detail/parser/add_ascii.hpp"
 #include "caf/detail/print.hpp"
+#include "caf/format_to_error.hpp"
 #include "caf/settings.hpp"
 
 namespace {
@@ -89,23 +91,16 @@ config_value_reader::associative_array::current() {
 
 // -- constructors, destructors, and assignment operators ----------------------
 
+config_value_reader::config_value_reader(const config_value* input) {
+  st_.push(input);
+  has_human_readable_format_ = true;
+}
+
 config_value_reader::config_value_reader(const config_value* input,
                                          actor_system& sys)
   : super(sys) {
   st_.push(input);
   has_human_readable_format_ = true;
-}
-
-config_value_reader::config_value_reader(const config_value* input,
-                                         execution_unit* ctx)
-  : super(ctx) {
-  st_.push(input);
-  has_human_readable_format_ = true;
-}
-
-config_value_reader::config_value_reader(const config_value* input)
-  : config_value_reader(input, nullptr) {
-  // nop
 }
 
 config_value_reader::~config_value_reader() {
@@ -241,9 +236,9 @@ bool config_value_reader::begin_object(type_id_t type, std::string_view) {
       if (auto i = obj->find("@type"); i != obj->end()) {
         if (auto got = get_if<std::string>(std::addressof(i->second))) {
           if (want != *got) {
-            emplace_error(sec::type_clash,
-                          "expected type: " + std::string{want},
-                          "found type: " + *got);
+            err_ = format_to_error(sec::type_clash,
+                                   "expected type: {}, found type: {}", want,
+                                   *got);
             return false;
           }
         }

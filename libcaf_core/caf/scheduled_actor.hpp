@@ -4,16 +4,12 @@
 
 #pragma once
 
-#include "caf/config.hpp"
-
-#ifdef CAF_ENABLE_EXCEPTIONS
-#  include <exception>
-#endif // CAF_ENABLE_EXCEPTIONS
-
 #include "caf/abstract_mailbox.hpp"
+#include "caf/abstract_scheduled_actor.hpp"
 #include "caf/action.hpp"
 #include "caf/actor_traits.hpp"
 #include "caf/async/fwd.hpp"
+#include "caf/config.hpp"
 #include "caf/cow_string.hpp"
 #include "caf/detail/behavior_stack.hpp"
 #include "caf/detail/core_export.hpp"
@@ -21,27 +17,29 @@
 #include "caf/detail/stream_bridge.hpp"
 #include "caf/disposable.hpp"
 #include "caf/error.hpp"
-#include "caf/extend.hpp"
 #include "caf/flow/coordinator.hpp"
 #include "caf/flow/fwd.hpp"
 #include "caf/flow/multicaster.hpp"
-#include "caf/flow/observer.hpp"
 #include "caf/fwd.hpp"
 #include "caf/intrusive/stack.hpp"
 #include "caf/invoke_message_result.hpp"
 #include "caf/local_actor.hpp"
-#include "caf/logger.hpp"
-#include "caf/mixin/requester.hpp"
-#include "caf/policy/arg.hpp"
-#include "caf/response_handle.hpp"
-#include "caf/sec.hpp"
+#include "caf/once.hpp"
+#include "caf/ref.hpp"
+#include "caf/repeat.hpp"
+#include "caf/resumable.hpp"
 #include "caf/telemetry/timer.hpp"
+#include "caf/timespan.hpp"
 #include "caf/unordered_flat_map.hpp"
 
 #include <forward_list>
-#include <map>
 #include <type_traits>
 #include <unordered_map>
+
+#ifdef CAF_ENABLE_EXCEPTIONS
+#  include <exception>
+#  include <stdexcept>
+#endif // CAF_ENABLE_EXCEPTIONS
 
 namespace caf::detail {
 
@@ -72,9 +70,8 @@ CAF_CORE_EXPORT skippable_result print_and_drop(scheduled_actor*, message&);
 CAF_CORE_EXPORT skippable_result drop(scheduled_actor*, message&);
 
 /// A cooperatively scheduled, event-based actor implementation.
-class CAF_CORE_EXPORT scheduled_actor : public local_actor,
+class CAF_CORE_EXPORT scheduled_actor : public abstract_scheduled_actor,
                                         public resumable,
-                                        public non_blocking_actor_base,
                                         public flow::coordinator {
 public:
   // -- friends ----------------------------------------------------------------
@@ -115,7 +112,7 @@ public:
   // -- nested and member types ------------------------------------------------
 
   /// Base type.
-  using super = local_actor;
+  using super = abstract_scheduled_actor;
 
   using batch_op_ptr = intrusive_ptr<flow::op::base<async::batch>>;
 
@@ -124,8 +121,8 @@ public:
     size_t max_items_per_batch;
   };
 
-  /// The message ID of an outstanding response with its callback.
-  using pending_response = std::pair<const message_id, behavior>;
+  /// The message ID of an outstanding response with its callback and timeout.
+  using pending_response = std::tuple<const message_id, behavior, disposable>;
 
   /// A pointer to a scheduled actor.
   using pointer = scheduled_actor*;
@@ -144,6 +141,9 @@ public:
 
   /// Function object for handling exit messages.
   using exit_handler = std::function<void(pointer, exit_msg&)>;
+
+  /// Function object for handling timeouts.
+  using idle_handler = std::function<void()>;
 
 #ifdef CAF_ENABLE_EXCEPTIONS
   /// Function object for handling exit messages.
@@ -196,7 +196,7 @@ public:
 
   using abstract_actor::enqueue;
 
-  bool enqueue(mailbox_element_ptr ptr, execution_unit* eu) override;
+  bool enqueue(mailbox_element_ptr ptr, scheduler* sched) override;
 
   mailbox_element* peek_at_next_mailbox_element() override;
 
@@ -204,19 +204,19 @@ public:
 
   const char* name() const override;
 
-  void launch(execution_unit* eu, bool lazy, bool hide) override;
+  void launch(scheduler* sched, bool lazy, bool hide) override;
 
-  bool cleanup(error&& fail_state, execution_unit* host) override;
+  void on_cleanup(const error& reason) override;
 
   // -- overridden functions of resumable --------------------------------------
 
-  subtype_t subtype() const override;
+  subtype_t subtype() const noexcept override;
 
-  void intrusive_ptr_add_ref_impl() override;
+  void ref_resumable() const noexcept final;
 
-  void intrusive_ptr_release_impl() override;
+  void deref_resumable() const noexcept final;
 
-  resume_result resume(execution_unit*, size_t) override;
+  resume_result resume(scheduler*, size_t) override;
 
   // -- scheduler callbacks ----------------------------------------------------
 
@@ -248,6 +248,11 @@ public:
   /// Checks whether this actor is fully initialized.
   bool initialized() const noexcept {
     return getf(is_initialized_flag);
+  }
+
+  /// Checks whether this actor is currently inactive, i.e., not ready to run.
+  bool inactive() const noexcept {
+    return getf(is_inactive_flag);
   }
 
   // -- event handlers ---------------------------------------------------------
@@ -356,6 +361,39 @@ public:
   }
 #endif // CAF_ENABLE_EXCEPTIONS
 
+  /// Sets a custom handler for timeouts that trigger after *not* receiving
+  /// a message for a certain amount of time.
+  template <class RefType, class RepeatType>
+  void set_idle_handler(timespan delay, RefType, RepeatType, idle_handler fun) {
+    if (delay == infinite) {
+#ifdef CAF_ENABLE_EXCEPTIONS
+      throw std::invalid_argument(
+        "cannot set an idle handler with infinite delay");
+#else
+      quit(make_error(sec::invalid_argument,
+                      "cannot set an idle handler with infinite delay"));
+      return;
+#endif
+    }
+    timeout_state_.delay = delay;
+    if constexpr (std::is_same_v<RefType, strong_ref_t>
+                  && std::is_same_v<RepeatType, once_t>) {
+      timeout_state_.mode = timeout_mode::once_strong;
+    } else if constexpr (std::is_same_v<RefType, weak_ref_t>
+                         && std::is_same_v<RepeatType, once_t>) {
+      timeout_state_.mode = timeout_mode::once_weak;
+    } else if constexpr (std::is_same_v<RefType, strong_ref_t>
+                         && std::is_same_v<RepeatType, repeat_t>) {
+      timeout_state_.mode = timeout_mode::repeat_strong;
+    } else {
+      static_assert(std::is_same_v<RefType, weak_ref_t>, "invalid RefType");
+      static_assert(std::is_same_v<RepeatType, repeat_t>, "invalid RepeatType");
+      timeout_state_.mode = timeout_mode::repeat_weak;
+    }
+    timeout_state_.handler = std::move(fun);
+    set_receive_timeout();
+  }
+
   /// @cond PRIVATE
 
   // -- timeout management -----------------------------------------------------
@@ -366,10 +404,13 @@ public:
   // -- message processing -----------------------------------------------------
 
   /// Adds a callback for an awaited response.
-  void add_awaited_response_handler(message_id response_id, behavior bhvr);
+  void add_awaited_response_handler(message_id response_id, behavior bhvr,
+                                    disposable pending_timeout = {}) override;
 
   /// Adds a callback for a multiplexed response.
-  void add_multiplexed_response_handler(message_id response_id, behavior bhvr);
+  void
+  add_multiplexed_response_handler(message_id response_id, behavior bhvr,
+                                   disposable pending_timeout = {}) override;
 
   /// Returns the category of `x`.
   message_category categorize(mailbox_element& x);
@@ -383,10 +424,10 @@ public:
   /// Activates an actor and runs initialization code if necessary.
   /// @returns `true` if the actor is alive and ready for `reactivate`,
   ///          `false` otherwise.
-  bool activate(execution_unit* ctx);
+  bool activate(scheduler* ctx);
 
   /// One-shot interface for activating an actor for a single message.
-  activation_result activate(execution_unit* ctx, mailbox_element& x);
+  activation_result activate(scheduler* ctx, mailbox_element& x);
 
   /// Interface for activating an actor any
   /// number of additional times after `activate`.
@@ -397,11 +438,6 @@ public:
   /// Returns `true` if the behavior stack is not empty.
   bool has_behavior() const noexcept {
     return !bhvr_stack_.empty();
-  }
-
-  behavior& current_behavior() {
-    return !awaited_responses_.empty() ? awaited_responses_.front().second
-                                       : bhvr_stack_.back();
   }
 
   /// Installs a new behavior without performing any type checks.
@@ -474,9 +510,10 @@ public:
   /// Utility function that swaps `f` into a temporary before calling it
   /// and restoring `f` only if it has not been replaced by the user.
   template <class F, class... Ts>
-  auto call_handler(F& f, Ts&&... xs) -> std::enable_if_t<
-    !std::is_same_v<decltype(f(std::forward<Ts>(xs)...)), void>,
-    decltype(f(std::forward<Ts>(xs)...))> {
+  auto call_handler(F& f, Ts&&... xs)
+    -> std::enable_if_t<
+      !std::is_same_v<decltype(f(std::forward<Ts>(xs)...)), void>,
+      decltype(f(std::forward<Ts>(xs)...))> {
     using std::swap;
     F g;
     swap(f, g);
@@ -487,8 +524,9 @@ public:
   }
 
   template <class F, class... Ts>
-  auto call_handler(F& f, Ts&&... xs) -> std::enable_if_t<
-    std::is_same_v<decltype(f(std::forward<Ts>(xs)...)), void>> {
+  auto call_handler(F& f, Ts&&... xs)
+    -> std::enable_if_t<
+      std::is_same_v<decltype(f(std::forward<Ts>(xs)...)), void>> {
     using std::swap;
     F g;
     swap(f, g);
@@ -497,9 +535,7 @@ public:
       swap(g, f);
   }
 
-  void call_error_handler(error& err) {
-    call_handler(error_handler_, this, err);
-  }
+  void call_error_handler(error& err) override;
 
   // -- scheduling actions -----------------------------------------------------
 
@@ -593,7 +629,7 @@ public:
   }
 
   /// Runs all pending actions.
-  void run_actions();
+  void run_actions() override;
 
   std::vector<disposable> watched_disposables() const {
     return watched_disposables_;
@@ -610,14 +646,12 @@ protected:
   /// Stores user-defined callbacks for message handling.
   detail::behavior_stack bhvr_stack_;
 
-  /// Allows us to cancel our current in-flight timeout.
-  disposable pending_timeout_;
-
   /// Stores callbacks for awaited responses.
   std::forward_list<pending_response> awaited_responses_;
 
   /// Stores callbacks for multiplexed responses.
-  unordered_flat_map<message_id, behavior> multiplexed_responses_;
+  unordered_flat_map<message_id, std::pair<behavior, disposable>>
+    multiplexed_responses_;
 
   /// Customization point for setting a default `message` callback.
   default_handler default_handler_;
@@ -643,6 +677,52 @@ protected:
 #endif // CAF_ENABLE_EXCEPTIONS
 
 private:
+  /// Encodes how an actor is currently handling timeouts.
+  enum class timeout_mode {
+    none,          /// No timeout is set.
+    once_weak,     /// The actor used the tags `once` and `weak`.
+    once_strong,   /// The actor used the tags `once` and `strong`.
+    repeat_weak,   /// The actor used the tags `repeat` and `weak`.
+    repeat_strong, /// The actor used the tags `repeat` and `strong`.
+    legacy,        /// The actor used a behavior with a timeout.
+  };
+
+  struct timeout_state {
+    timeout_mode mode = timeout_mode::none;
+    disposable pending;
+    uint64_t id = 0;
+    timespan delay = infinite;
+    idle_handler handler;
+
+    void reset() {
+      mode = timeout_mode::none;
+      pending = disposable{};
+      id = 0;
+      delay = infinite;
+      handler = idle_handler{};
+    }
+
+    void swap(timeout_state& other) {
+      using std::swap;
+      swap(mode, other.mode);
+      swap(pending, other.pending);
+      swap(id, other.id);
+      swap(delay, other.delay);
+      swap(handler, other.handler);
+    }
+  };
+
+  void handle_timeout();
+
+  /// Stores the current timeout state.
+  timeout_state timeout_state_;
+
+  template <class T>
+  flow::assert_scheduled_actor_hdr_t<flow::single<T>>
+  single_from_response(message_id mid, disposable pending_timeout);
+
+  void do_unstash(mailbox_element_ptr ptr) override;
+
   // -- utilities for instrumenting actors -------------------------------------
 
   /// Places all messages from the `stash_` back into the mailbox.
@@ -665,6 +745,12 @@ private:
     }
   }
 
+  // -- cleanup ----------------------------------------------------------------
+
+  void close_mailbox(const error& reason);
+
+  void force_close_mailbox() final;
+
   // -- timeout management -----------------------------------------------------
 
   disposable run_scheduled(timestamp when, action what);
@@ -675,6 +761,8 @@ private:
   disposable run_delayed_weak(timespan delay, action what);
 
   // -- caf::flow bindings -----------------------------------------------------
+
+  flow::coordinator* flow_context() override;
 
   template <class T, class Policy>
   flow::single<T> single_from_response(Policy& policy) {

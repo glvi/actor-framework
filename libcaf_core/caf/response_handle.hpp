@@ -6,13 +6,13 @@
 
 #include "caf/actor_traits.hpp"
 #include "caf/catch_all.hpp"
-#include "caf/detail/type_list.hpp"
 #include "caf/detail/typed_actor_util.hpp"
 #include "caf/flow/fwd.hpp"
 #include "caf/message_id.hpp"
 #include "caf/none.hpp"
 #include "caf/sec.hpp"
 #include "caf/system_messages.hpp"
+#include "caf/type_list.hpp"
 #include "caf/typed_behavior.hpp"
 
 #include <type_traits>
@@ -56,9 +56,6 @@ public:
 
   template <class T = traits, class F, class OnError>
   std::enable_if_t<T::is_non_blocking> await(F f, OnError g) {
-    static_assert(detail::has_add_awaited_response_handler_v<ActorType>,
-                  "this actor type does not support awaiting responses, "
-                  "try using .then instead");
     static_assert(detail::is_callable_v<F>,
                   "F must provide a single, non-template operator()");
     static_assert(std::is_invocable_v<OnError, error&>,
@@ -72,18 +69,13 @@ public:
   }
 
   template <class T = traits, class F>
-  std::enable_if_t<detail::has_call_error_handler_v<ActorType> //
-                   && T::is_non_blocking>
-  await(F f) {
-    auto self = self_;
-    await(std::move(f), [self](error& err) { self->call_error_handler(err); });
+  std::enable_if_t<T::is_non_blocking> await(F f) {
+    await(std::move(f),
+          [self = self_](error& err) { self->call_error_handler(err); });
   }
 
   template <class T = traits, class F, class OnError>
   std::enable_if_t<T::is_non_blocking> then(F f, OnError g) {
-    static_assert(detail::has_add_multiplexed_response_handler_v<ActorType>,
-                  "this actor type does not support multiplexed responses, "
-                  "try using .await instead");
     static_assert(detail::is_callable_v<F>,
                   "F must provide a single, non-template operator()");
     static_assert(std::is_invocable_v<OnError, error&>,
@@ -97,23 +89,21 @@ public:
   }
 
   template <class T = traits, class F>
-  std::enable_if_t<detail::has_call_error_handler_v<ActorType> //
-                   && T::is_non_blocking>
-  then(F f) {
+  std::enable_if_t<T::is_non_blocking> then(F f) {
     auto self = self_;
     then(std::move(f), [self](error& err) { self->call_error_handler(err); });
   }
 
   template <class T>
   flow::assert_scheduled_actor_hdr_t<flow::single<T>> as_single() && {
-    static_assert(std::is_same_v<response_type, detail::type_list<T>>
+    static_assert(std::is_same_v<response_type, type_list<T>>
                   || std::is_same_v<response_type, message>);
     return self_->template single_from_response<T>(policy_);
   }
 
   template <class T>
   flow::assert_scheduled_actor_hdr_t<flow::observable<T>> as_observable() && {
-    static_assert(std::is_same_v<response_type, detail::type_list<T>>
+    static_assert(std::is_same_v<response_type, type_list<T>>
                   || std::is_same_v<response_type, message>);
     return self_->template single_from_response<T>(policy_).as_observable();
   }

@@ -12,6 +12,7 @@
 #include "caf/cow_tuple.hpp"
 #include "caf/cow_vector.hpp"
 #include "caf/defaults.hpp"
+#include "caf/detail/assert.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/disposable.hpp"
 #include "caf/flow/coordinated.hpp"
@@ -27,6 +28,7 @@
 #include "caf/flow/op/interval.hpp"
 #include "caf/flow/op/merge.hpp"
 #include "caf/flow/op/never.hpp"
+#include "caf/flow/op/on_backpressure_buffer.hpp"
 #include "caf/flow/op/prefix_and_tail.hpp"
 #include "caf/flow/op/publish.hpp"
 #include "caf/flow/op/sample.hpp"
@@ -34,7 +36,7 @@
 #include "caf/flow/step/all.hpp"
 #include "caf/flow/subscription.hpp"
 #include "caf/intrusive_ptr.hpp"
-#include "caf/logger.hpp"
+#include "caf/log/core.hpp"
 #include "caf/make_counted.hpp"
 #include "caf/ref_counted.hpp"
 #include "caf/sec.hpp"
@@ -339,6 +341,13 @@ public:
     return add_step(step::do_finally<output_type, F>{std::move(f)});
   }
 
+  /// @copydoc observable::on_backpressure_buffer
+  auto on_backpressure_buffer(size_t buffer_size,
+                              backpressure_overflow_strategy strategy
+                              = backpressure_overflow_strategy::fail) {
+    return materialize().on_backpressure_buffer(buffer_size, strategy);
+  }
+
   auto on_error_complete() {
     return add_step(step::on_error_complete<output_type>{});
   }
@@ -586,7 +595,7 @@ disposable observable<T>::subscribe(async::producer_resource<T> resource) {
   using buffer_type = typename async::consumer_resource<T>::buffer_type;
   using adapter_type = buffer_writer_impl<buffer_type>;
   if (auto buf = resource.try_open()) {
-    CAF_LOG_DEBUG("subscribe producer resource to flow");
+    log::core::debug("subscribe producer resource to flow");
     auto adapter = make_counted<adapter_type>(pimpl_->parent());
     adapter->init(buf);
     auto obs = adapter->as_observer();
@@ -594,7 +603,7 @@ disposable observable<T>::subscribe(async::producer_resource<T> resource) {
     pimpl_->parent()->watch(sub);
     return sub;
   } else {
-    CAF_LOG_DEBUG("failed to open producer resource");
+    log::core::debug("failed to open producer resource");
     return {};
   }
 }
@@ -684,6 +693,15 @@ transformation<step::map<F>> observable<T>::map(F f) {
 template <class T>
 transformation<step::on_error_complete<T>> observable<T>::on_error_complete() {
   return transform(step::on_error_complete<T>{});
+}
+
+template <class T>
+observable<T>
+observable<T>::on_backpressure_buffer(size_t buffer_size,
+                                      backpressure_overflow_strategy strategy) {
+  using impl_t = op::on_backpressure_buffer<T>;
+  return parent()->add_child_hdl(std::in_place_type<impl_t>, *this, buffer_size,
+                                 strategy);
 }
 
 template <class T>
