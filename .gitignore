@@ -1,3 +1,4 @@
+.cache/
 .make-release-steps.bash
 Doxyfile
 Makefile
