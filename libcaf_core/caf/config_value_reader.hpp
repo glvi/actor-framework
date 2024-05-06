@@ -54,17 +54,10 @@ public:
 
   // -- constructors, destructors, and assignment operators --------------------
 
-  config_value_reader(const config_value* input, actor_system& sys)
-    : super(sys) {
-    st_.push(input);
-    has_human_readable_format_ = true;
-  }
+  config_value_reader(const config_value* input, actor_system& sys);
 
-  config_value_reader(const config_value* input, execution_unit* ctx)
-    : super(ctx) {
-    st_.push(input);
-    has_human_readable_format_ = true;
-  }
+  config_value_reader(const config_value* input, execution_unit* ctx);
+
   explicit config_value_reader(const config_value* input)
     : config_value_reader(input, nullptr) {
     // nop
@@ -164,7 +157,8 @@ private:
   stack_type st_;
 
   // Stores on-the-fly converted values.
-  std::vector<std::unique_ptr<config_value>> scratch_space_;
+  class scratch_space;
+  scratch_space * scratch_space_ = nullptr;
 };
 
 } // namespace caf

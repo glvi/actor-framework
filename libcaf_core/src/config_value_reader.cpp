@@ -70,6 +70,10 @@ namespace caf {
 
 // -- member types--------------------------------------------------------------
 
+class config_value_reader::scratch_space:
+    public std::vector<std::unique_ptr<config_value>> {
+};
+
 bool config_value_reader::sequence::at_end() const noexcept {
   return index >= ls->size();
 }
@@ -89,8 +93,20 @@ config_value_reader::associative_array::current() {
 
 // -- constructors, destructors, and assignment operators ----------------------
 
+config_value_reader::config_value_reader(const config_value* input, actor_system& sys)
+  : super(sys), scratch_space_(new scratch_space) {
+  st_.push(input);
+  has_human_readable_format_ = true;
+}
+
+config_value_reader::config_value_reader(const config_value* input, execution_unit* ctx)
+  : super(ctx), scratch_space_(new scratch_space) {
+  st_.push(input);
+  has_human_readable_format_ = true;
+}
+
 config_value_reader::~config_value_reader() {
-  // nop
+  delete scratch_space_;
 }
 
 // -- interface functions ------------------------------------------------------
@@ -174,7 +190,7 @@ bool config_value_reader::begin_object(type_id_t type, string_view) {
         auto ptr = std::make_unique<config_value>(std::move(*dict));
         const settings* unboxed = std::addressof(get<settings>(*ptr));
         st_.top() = unboxed;
-        scratch_space_.emplace_back(std::move(ptr));
+        scratch_space_->emplace_back(std::move(ptr));
         return true;
       } else {
         emplace_error(sec::conversion_failed, "cannot read input as object");
